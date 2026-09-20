@@ -1,0 +1,5 @@
+Maailma TCG v0.1 — Codex Implementation Plan.md
+apps/godot-client/**/*.gd
+apps/godot-client/**/*.tscn
+apps/godot-client/project.godot
+package-lock.json
