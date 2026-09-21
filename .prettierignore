@@ -3,3 +3,4 @@ apps/godot-client/**/*.gd
 apps/godot-client/**/*.tscn
 apps/godot-client/project.godot
 package-lock.json
+prisma/schema.prisma

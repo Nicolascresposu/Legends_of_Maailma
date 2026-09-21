@@ -6,14 +6,71 @@ import { isClientMessage } from '@maailma/protocol';
 import { createApp } from './app.js';
 import { createLoggerFromEnv, errorFields, type Logger } from './logger.js';
 import { MatchManager } from './match-manager.js';
+import { LobbyHub } from './lobby.js';
+import { databaseReachable, prisma } from './db/prisma.js';
+import { AccountService } from './services/account-service.js';
+import { DeckService } from './services/deck-service.js';
+import { SocialService } from './services/social-service.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const logger = createLoggerFromEnv();
 const manager = new MatchManager();
-const server = createServer(createApp(manager, logger));
+const lobby = new LobbyHub(logger);
+const accounts = new AccountService(prisma);
+const decks = new DeckService(prisma);
+const social = new SocialService(prisma);
+const server = createServer(
+  createApp(manager, logger, {
+    accounts,
+    decks,
+    social,
+    lobby,
+    databaseReachable: () => databaseReachable(),
+  }),
+);
 const sockets = new Map<string, Set<WebSocket>>();
 const sessions = new Map<WebSocket, { matchId: string; playerId: string; log: Logger }>();
 const websocketServer = new WebSocketServer({ server, path: '/matches' });
+const lobbyServer = new WebSocketServer({ server, path: '/lobby' });
+
+/**
+ * The lobby socket carries challenge and friend notifications.
+ *
+ * The token arrives as a query parameter because browsers cannot set headers
+ * on a WebSocket handshake. It is never logged.
+ */
+lobbyServer.on('connection', (socket, request) => {
+  const connectionId = randomUUID();
+  const log = logger.child({ connectionId, channel: 'lobby' });
+  const url = new URL(request.url ?? '/lobby', 'http://localhost');
+  const token = url.searchParams.get('token') ?? undefined;
+
+  accounts
+    .authenticate(token)
+    .then((user) => {
+      if (!user) {
+        log.warn('Lobby connection rejected');
+        socket.send(
+          JSON.stringify({ type: 'ERROR', code: 'UNAUTHENTICATED', message: 'Sign in first' }),
+        );
+        socket.close();
+        return;
+      }
+      lobby.register(user.id, socket);
+      log.info('Lobby connected', { userId: user.id, displayName: user.displayName });
+      socket.send(JSON.stringify({ type: 'LOBBY_READY', userId: user.id }));
+      socket.on('close', () => {
+        lobby.unregister(socket);
+        log.info('Lobby disconnected', { userId: user.id });
+      });
+    })
+    .catch((error: unknown) => {
+      log.error('Lobby authentication failed', errorFields(error));
+      socket.close();
+    });
+
+  socket.on('error', (error) => log.error('Lobby socket error', errorFields(error)));
+});
 
 websocketServer.on('connection', (socket) => {
   const connectionId = randomUUID();

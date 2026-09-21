@@ -70,6 +70,56 @@ godot --path apps/godot-client --script src/drag_test.gd
 - `apps/godot-client` — dynamic-width Godot presentation client.
 - `tests` — rules, determinism, PvE, controller, and server integration coverage.
 
+## Database
+
+Accounts, decks, friendships and challenges live in PostgreSQL behind Prisma. Active matches
+deliberately do not: they stay in memory behind `MatchRepository`, so a match in progress never
+waits on a database round trip.
+
+Set `DATABASE_URL` in `.env` (git-ignored), then apply the schema:
+
+```bash
+npx prisma migrate dev     # create/apply migrations
+npx prisma generate        # regenerate the client after schema edits
+npx prisma studio          # browse the data
+```
+
+Endpoints:
+
+```text
+POST /api/auth/register        create an account, returns a session token
+POST /api/auth/login           exchange credentials for a session token
+POST /api/auth/logout          revoke the current token
+GET  /api/auth/me              the signed-in player
+
+GET    /api/decks              list your decks
+POST   /api/decks              save a deck (validated by the engine)
+GET    /api/decks/:id          one deck
+PUT    /api/decks/:id          replace a deck
+DELETE /api/decks/:id          remove a deck
+POST   /api/decks/:id/active   choose the deck matches use
+
+GET  /api/social/friends                            accepted friends
+GET  /api/social/friends/requests                   requests awaiting you
+POST /api/social/friends/requests                   ask by display name
+POST /api/social/friends/requests/:id/respond       accept or decline
+GET  /api/social/challenges                         incoming and outgoing
+POST /api/social/challenges                         challenge a friend
+POST /api/social/challenges/:id/accept              creates the match
+POST /api/social/challenges/:id/decline
+POST /api/social/challenges/:id/cancel
+```
+
+Authenticated requests carry `Authorization: Bearer <token>`. Tokens are opaque: only a SHA-256
+digest is stored, so a database leak yields no usable sessions, and logging out revokes instantly.
+Passwords use scrypt with per-password salts and the cost parameters recorded in the stored string.
+
+Clients may also open `ws://localhost:3000/lobby?token=<token>` to receive friend and challenge
+events live — `CHALLENGE_RECEIVED`, `CHALLENGE_ACCEPTED` (which carries the `matchId` both players
+should join), `CHALLENGE_DECLINED`, `CHALLENGE_CANCELLED`, `FRIEND_REQUEST` and `FRIEND_RESPONSE`.
+The lobby is best-effort: every event it pushes is also readable over REST, so nothing depends on
+a socket having been open.
+
 ## Logging
 
 The server writes structured logs to stdout. Two environment variables control them:
@@ -122,10 +172,11 @@ model. The CLI prints the reconstructed final state and fails at the first illeg
 
 ## v0.1 boundaries
 
-PostgreSQL-backed accounts, collections and decks are intentionally deferred. Active matches use
-`MatchRepository`, currently implemented in memory so a Redis-backed store can replace it later.
-The admin web app, progression, complex boss scripting, dynamic battlefield resizing, Locations,
-and production matchmaking are likewise outside this milestone.
+Accounts, decks, friendships and challenges are now PostgreSQL-backed; card collections and
+ownership are not, so every player may build from the full card registry. Active matches still use
+`MatchRepository`, implemented in memory so a Redis-backed store can replace it later. The admin
+web app, progression, complex boss scripting, dynamic battlefield resizing, Locations, and
+production matchmaking remain outside this milestone.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/protocol.md](docs/protocol.md) for the
 core invariants and API details.

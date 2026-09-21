@@ -6,14 +6,53 @@ import type { GameAction } from '@maailma/game-model';
 import type { CreateMatchRequest } from '@maailma/protocol';
 import { errorFields, silentLogger, type Logger } from './logger.js';
 import type { MatchManager } from './match-manager.js';
+import type { LobbyHub } from './lobby.js';
+import type { AccountService } from './services/account-service.js';
+import type { DeckService } from './services/deck-service.js';
+import type { SocialService } from './services/social-service.js';
+import { attachUser, createAuthRouter } from './routes/auth-routes.js';
+import { createDeckRouter } from './routes/deck-routes.js';
+import { createSocialRouter } from './routes/social-routes.js';
 
-export function createApp(manager: MatchManager, logger: Logger = silentLogger) {
+/**
+ * Database-backed features. Omitted, the server runs exactly as it did before
+ * accounts existed: matches are still created and played anonymously, which
+ * keeps the engine tests independent of Postgres.
+ */
+export interface AppServices {
+  accounts: AccountService;
+  decks: DeckService;
+  social: SocialService;
+  lobby: LobbyHub;
+  databaseReachable?: () => Promise<boolean>;
+}
+
+export function createApp(
+  manager: MatchManager,
+  logger: Logger = silentLogger,
+  services?: AppServices,
+) {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: '64kb' }));
   app.use(requestLogger(logger));
 
-  app.get('/health', (_request, response) => response.json({ ok: true, service: 'maailma-tcg' }));
+  app.get('/health', (_request, response) => {
+    if (!services?.databaseReachable) {
+      response.json({ ok: true, service: 'maailma-tcg' });
+      return;
+    }
+    services
+      .databaseReachable()
+      .then((database) =>
+        response.status(database ? 200 : 503).json({
+          ok: database,
+          service: 'maailma-tcg',
+          database: database ? 'up' : 'down',
+        }),
+      )
+      .catch(() => response.status(503).json({ ok: false, service: 'maailma-tcg' }));
+  });
   app.get('/api/cards', (_request, response) => response.json(Object.values(CARD_DEFINITIONS)));
   app.get('/api/scenarios', (_request, response) =>
     response.json(Object.values(SCENARIO_DEFINITIONS)),
@@ -78,6 +117,17 @@ export function createApp(manager: MatchManager, logger: Logger = silentLogger) 
     });
     return response.json({ ...result, state: engine!.state });
   });
+
+  if (services) {
+    // Identify the caller before any authenticated route runs.
+    app.use(attachUser(services.accounts));
+    app.use('/api/auth', createAuthRouter(services.accounts, logger));
+    app.use('/api/decks', createDeckRouter(services.decks, logger));
+    app.use(
+      '/api/social',
+      createSocialRouter(services.social, services.decks, manager, services.lobby, logger),
+    );
+  }
 
   app.use(errorHandler(logger));
 
