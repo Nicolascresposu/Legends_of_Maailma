@@ -110,6 +110,9 @@ func _ready() -> void:
 	_show_collection_view()
 
 	client.fetch_cards()
+	# Resume a session saved by a previous run, if there is one. The collection
+	# screen shows the sign-in form when there is not.
+	accounts.restore_session()
 
 # --- Interface construction -------------------------------------------------
 

@@ -10,6 +10,11 @@ class_name AccountClient
 signal signed_in(user: Dictionary)
 signal sign_in_failed(message: String)
 signal signed_out()
+## Emitted while a saved session is being checked, so the UI can say so.
+signal restore_started()
+## Emitted when a saved session turns out to be unusable; the UI falls back to
+## the sign-in form. `silent` is true when nothing was saved to begin with.
+signal restore_failed(message: String, silent: bool)
 signal collection_loaded(cards: Array)
 signal decks_loaded(decks: Array)
 signal deck_saved(deck: Dictionary)
@@ -28,6 +33,7 @@ var _collection_request: HTTPRequest
 var _deck_request: HTTPRequest
 var _deck_mutate_request: HTTPRequest
 var _assess_request: HTTPRequest
+var _me_request: HTTPRequest
 
 func _ready() -> void:
 	_ensure_requests()
@@ -53,9 +59,22 @@ func _ensure_requests() -> void:
 		_assess_request = HTTPRequest.new()
 		_assess_request.request_completed.connect(_on_assess_completed)
 		add_child(_assess_request)
+	if _me_request == null:
+		_me_request = HTTPRequest.new()
+		_me_request.request_completed.connect(_on_me_completed)
+		add_child(_me_request)
 
+## True only once the server has confirmed who the token belongs to.
+##
+## A token being present is not enough: during a restore it is set before
+## `/me` has replied, and treating that as signed in would show the collection
+## to a session that may yet be rejected.
 func is_signed_in() -> bool:
-	return token != ""
+	return token != "" and not user.is_empty()
+
+## True while a saved token is set but not yet confirmed.
+func is_restoring() -> bool:
+	return token != "" and user.is_empty()
 
 func _headers(with_body: bool = true) -> PackedStringArray:
 	var headers := PackedStringArray()
@@ -106,6 +125,8 @@ func sign_out() -> void:
 	)
 	token = ""
 	user = {}
+	# Signing out must not leave a token that would resume on the next run.
+	SessionStore.clear()
 	signed_out.emit()
 
 func _on_auth_completed(
@@ -128,6 +149,60 @@ func _on_auth_completed(
 	token = str(payload.get("token", ""))
 	var who: Variant = payload.get("user", {})
 	user = who if typeof(who) == TYPE_DICTIONARY else {}
+	# Remember the session so the next run starts signed in.
+	SessionStore.save(
+		token,
+		str(user.get("displayName", "")),
+		http_base,
+		str(payload.get("expiresAt", ""))
+	)
+	signed_in.emit(user)
+
+# --- Restoring a saved session ----------------------------------------------
+
+## Tries to resume the session saved by a previous run.
+##
+## The token is only trusted once `/me` accepts it, so a revoked or expired
+## session lands on the sign-in form rather than a half-working collection.
+func restore_session() -> void:
+	var saved := SessionStore.load_saved()
+	if saved == null:
+		restore_failed.emit("", true)
+		return
+	# The token belongs to the server that issued it.
+	if saved.server != "":
+		http_base = saved.server
+	token = saved.token
+	restore_started.emit()
+	await _await_tree()
+	var error := _me_request.request(http_base + "/api/auth/me", _headers(false))
+	if error != OK:
+		token = ""
+		restore_failed.emit("Could not reach the server; sign in again.", false)
+
+func _on_me_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		# The server may simply be down, so the saved session is kept on disk
+		# and only the in-memory token is dropped: the next launch tries again.
+		token = ""
+		restore_failed.emit("Could not reach the server; sign in again.", false)
+		return
+	if response_code != 200:
+		# The server rejected it, so it will never work again.
+		token = ""
+		SessionStore.clear()
+		restore_failed.emit("Your session has expired; sign in again.", false)
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var who: Variant = (parsed as Dictionary).get("user", {}) if typeof(parsed) == TYPE_DICTIONARY else {}
+	if typeof(who) != TYPE_DICTIONARY or str((who as Dictionary).get("id", "")) == "":
+		token = ""
+		SessionStore.clear()
+		restore_failed.emit("Your session has expired; sign in again.", false)
+		return
+	user = who
 	signed_in.emit(user)
 
 # --- Collection -------------------------------------------------------------

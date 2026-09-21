@@ -45,6 +45,22 @@ Card names, costs, keywords and rules text are fetched once from `/api/cards`, s
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
 
+### Staying signed in
+
+Signing in saves the session token to Godot's per-user data directory
+(`user://session.cfg`), and the next launch resumes it: the screen shows that it is signing you
+back in, checks the token against `GET /api/auth/me`, and lands on the collection when the server
+confirms it. Tokens last 14 days.
+
+Nothing is trusted until the server agrees. A token that is expired, revoked or simply rejected is
+discarded and the sign-in form appears with a short explanation, rather than a half-working
+collection. A token already past its expiry is dropped without a request at all. Signing out
+deletes the saved session, so it will not resume.
+
+The token is stored in plain text. Anything running as that user could read it, which is the same
+trust level as most desktop game launchers; encrypting it with a key shipped inside the client
+would be obfuscation rather than protection.
+
 ### Card art
 
 Art is a client asset, looked up by convention from the card id the server already sends:
@@ -74,10 +90,12 @@ Client scripts:
 - `src/targeting_arrow.gd` — the dotted targeting arrow.
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
+- `src/session_store.gd` — remembers a signed-in session between runs.
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
+- `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 
 With the server running, the client's own tests can be run from the command line:
 
@@ -85,6 +103,7 @@ With the server running, the client's own tests can be run from the command line
 godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
+godot --headless --path apps/godot-client --script src/session_test.gd
 ```
 
 `drag_test.gd` needs a real (non-headless) run, because hit-testing depends on laid-out rects.

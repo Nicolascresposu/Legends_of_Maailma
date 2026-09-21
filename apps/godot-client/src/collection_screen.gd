@@ -24,6 +24,8 @@ var selected_hero := "healer"
 
 var _root: VBoxContainer
 var _auth_box: VBoxContainer
+## The inputs and buttons, hidden while a saved session is being checked.
+var _auth_form: HBoxContainer
 var _main_box: HBoxContainer
 var _email_input: LineEdit
 var _name_input: LineEdit
@@ -43,6 +45,8 @@ func setup(account_client: AccountClient, card_library: CardLibrary) -> void:
 	library = card_library
 	accounts.signed_in.connect(_on_signed_in)
 	accounts.sign_in_failed.connect(_on_sign_in_failed)
+	accounts.restore_started.connect(_on_restore_started)
+	accounts.restore_failed.connect(_on_restore_failed)
 	accounts.signed_out.connect(_on_signed_out)
 	accounts.collection_loaded.connect(_on_collection_loaded)
 	accounts.decks_loaded.connect(_on_decks_loaded)
@@ -78,9 +82,10 @@ func _build_auth() -> Control:
 	title.add_theme_font_size_override("font_size", 20)
 	_auth_box.add_child(title)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	_auth_box.add_child(row)
+	_auth_form = HBoxContainer.new()
+	_auth_form.add_theme_constant_override("separation", 6)
+	_auth_box.add_child(_auth_form)
+	var row := _auth_form
 
 	_email_input = LineEdit.new()
 	_email_input.placeholder_text = "Email"
@@ -257,7 +262,25 @@ func _on_signed_in(who: Dictionary) -> void:
 	accounts.fetch_collection()
 	accounts.fetch_decks()
 
+## A saved session is being checked: hide the form so it does not flash away.
+func _on_restore_started() -> void:
+	_auth_box.visible = true
+	_main_box.visible = false
+	_auth_form.visible = false
+	_auth_status.text = "Signing you back in…"
+	_auth_status.remove_theme_color_override("font_color")
+
+## No usable saved session, so fall back to the form. Nothing is said when
+## there was simply nothing saved.
+func _on_restore_failed(message: String, silent: bool) -> void:
+	_auth_form.visible = true
+	if silent:
+		_auth_status.text = "New accounts start with the starter cards."
+		return
+	_auth_status.text = message
+
 func _on_sign_in_failed(message: String) -> void:
+	_auth_form.visible = true
 	_auth_status.text = message
 	_auth_status.add_theme_color_override("font_color", Color(0.88, 0.42, 0.45))
 
