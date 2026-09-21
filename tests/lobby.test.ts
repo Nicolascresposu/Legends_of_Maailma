@@ -10,6 +10,7 @@ import { silentLogger } from '../apps/server/src/logger.js';
 import { AccountService } from '../apps/server/src/services/account-service.js';
 import { DeckService } from '../apps/server/src/services/deck-service.js';
 import { SocialService } from '../apps/server/src/services/social-service.js';
+import { CollectionService } from '../apps/server/src/services/collection-service.js';
 
 /**
  * Covers the lobby socket: authentication, and that a challenge sent over REST
@@ -24,16 +25,29 @@ let base = '';
 let wsBase = '';
 
 const accounts = new AccountService(prisma);
-const decks = new DeckService(prisma);
+const collections = new CollectionService(prisma);
+const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 const lobby = new LobbyHub(silentLogger);
 
 beforeAll(async () => {
   const manager = new MatchManager();
-  server = createServer(createApp(manager, silentLogger, { accounts, decks, social, lobby }));
+  server = createServer(
+    createApp(manager, silentLogger, { accounts, decks, social, collections, lobby }),
+  );
 
   // Mirrors the lobby wiring in index.ts.
-  const lobbyServer = new WebSocketServer({ server, path: '/lobby' });
+  const lobbyServer = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (upgradeRequest, socket, head) => {
+    const pathname = new URL(upgradeRequest.url ?? '/', 'http://localhost').pathname;
+    if (pathname !== '/lobby') {
+      socket.destroy();
+      return;
+    }
+    lobbyServer.handleUpgrade(upgradeRequest, socket, head, (ws) =>
+      lobbyServer.emit('connection', ws, upgradeRequest),
+    );
+  });
   lobbyServer.on('connection', (socket, request) => {
     const url = new URL(request.url ?? '/lobby', 'http://localhost');
     const token = url.searchParams.get('token') ?? undefined;

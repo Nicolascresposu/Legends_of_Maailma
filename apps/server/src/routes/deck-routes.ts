@@ -9,7 +9,7 @@ export function createDeckRouter(decks: DeckService, logger: Logger): express.Ro
 
   router.get('/', (request, response, next) => {
     decks
-      .list(request.user!.id)
+      .listWithReadiness(request.user!.id)
       .then((list) => response.json({ decks: list }))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
@@ -30,7 +30,7 @@ export function createDeckRouter(decks: DeckService, logger: Logger): express.Ro
 
   router.get('/:deckId', (request, response, next) => {
     decks
-      .get(request.user!.id, request.params.deckId)
+      .getWithReadiness(request.user!.id, String(request.params.deckId))
       .then((deck) => response.json({ deck }))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });

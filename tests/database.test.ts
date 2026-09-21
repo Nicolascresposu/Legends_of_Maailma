@@ -9,6 +9,7 @@ import { silentLogger } from '../apps/server/src/logger.js';
 import { AccountService } from '../apps/server/src/services/account-service.js';
 import { DeckService } from '../apps/server/src/services/deck-service.js';
 import { SocialService } from '../apps/server/src/services/social-service.js';
+import { CollectionService } from '../apps/server/src/services/collection-service.js';
 
 /**
  * Exercises the account, deck and social stack against a real PostgreSQL
@@ -23,13 +24,16 @@ let server: Server | undefined;
 let base = '';
 
 const accounts = new AccountService(prisma);
-const decks = new DeckService(prisma);
+const collections = new CollectionService(prisma);
+const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 
 beforeAll(async () => {
   const manager = new MatchManager();
   const lobby = new LobbyHub(silentLogger);
-  server = createServer(createApp(manager, silentLogger, { accounts, decks, social, lobby }));
+  server = createServer(
+    createApp(manager, silentLogger, { accounts, decks, social, collections, lobby }),
+  );
   await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing test port');
@@ -184,13 +188,27 @@ describe('decks', () => {
     // The first deck a player saves becomes their active one.
     expect(saved.deck.isActive).toBe(true);
 
+    // An unfinished deck saves, but is reported as not playable.
     const tooSmall = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
       body: JSON.stringify({ name: 'Tiny', heroId: 'healer', cardIds: ['wolf'] }),
     });
-    expect(tooSmall.status).toBe(400);
-    expect(((await tooSmall.json()) as { code: string }).code).toBe('INVALID_DECK');
+    expect(tooSmall.status).toBe(201);
+    const tinyId = ((await tooSmall.json()) as { deck: { id: string } }).deck.id;
+    const tiny = (await (
+      await fetch(`${base}/api/decks/${tinyId}`, { headers: authed(token) })
+    ).json()) as { deck: { readiness: { playable: boolean; ruleErrors: string[] } } };
+    expect(tiny.deck.readiness.playable).toBe(false);
+    expect(tiny.deck.readiness.ruleErrors.join(' ')).toContain('30');
+
+    const unknownCard = await fetch(`${base}/api/decks`, {
+      method: 'POST',
+      headers: authed(token),
+      body: JSON.stringify({ name: 'Ghost', heroId: 'healer', cardIds: ['no_such_card'] }),
+    });
+    expect(unknownCard.status).toBe(400);
+    expect(((await unknownCard.json()) as { code: string }).code).toBe('UNKNOWN_CARD');
 
     const badHero = await fetch(`${base}/api/decks`, {
       method: 'POST',

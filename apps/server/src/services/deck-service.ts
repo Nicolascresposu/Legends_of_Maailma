@@ -1,7 +1,7 @@
 import type { Deck, PrismaClient } from '@prisma/client';
-import { getHeroDefinition } from '@maailma/card-definitions';
-import { validateDeck } from '@maailma/game-engine';
+import { getCardDefinition, getHeroDefinition } from '@maailma/card-definitions';
 import { AccountError } from './account-service.js';
+import type { CollectionService, DeckReadiness } from './collection-service.js';
 
 export interface DeckInput {
   name: string;
@@ -9,19 +9,51 @@ export interface DeckInput {
   cardIds: string[];
 }
 
+/** A stored deck with its current readiness attached. */
+export type DeckWithReadiness = Deck & { readiness: DeckReadiness };
+
+/** Generous upper bound, so a runaway client cannot store an unbounded deck. */
+const MAX_DECK_CARDS = 200;
+
 /**
- * Stored decks are validated with the engine's own `validateDeck`, so a deck
- * that saves is always one a match will accept. There is exactly one source of
- * deck legality, and it is the engine.
+ * Saved decks are deliberately permissive: a player may store an unfinished
+ * deck, or one built toward cards they have not unlocked yet. Only the name,
+ * the hero and the existence of each card are enforced on save.
+ *
+ * Whether a deck may actually be played is a separate question, answered by
+ * `CollectionService` and reported as `readiness` on every deck the API
+ * returns, so a client can show precisely why a deck is not ready.
  */
 export class DeckService {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly collections?: CollectionService,
+  ) {}
 
   async list(userId: string): Promise<Deck[]> {
     return await this.prisma.deck.findMany({
       where: { userId },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
     });
+  }
+
+  /** Decks with readiness attached, computed from one collection read. */
+  async listWithReadiness(userId: string): Promise<DeckWithReadiness[]> {
+    const decks = await this.list(userId);
+    if (!this.collections) {
+      return decks.map((deck) => ({ ...deck, readiness: emptyReadiness() }));
+    }
+    const owned = await this.collections.ownedCounts(userId);
+    return decks.map((deck) => ({
+      ...deck,
+      readiness: this.collections!.assess(deck.cardIds, owned),
+    }));
+  }
+
+  async getWithReadiness(userId: string, deckId: string): Promise<DeckWithReadiness> {
+    const deck = await this.get(userId, deckId);
+    if (!this.collections) return { ...deck, readiness: emptyReadiness() };
+    return { ...deck, readiness: await this.collections.assessForUser(userId, deck.cardIds) };
   }
 
   async get(userId: string, deckId: string): Promise<Deck> {
@@ -103,9 +135,19 @@ export class DeckService {
       throw new AccountError('INVALID_HERO', `Unknown hero: ${heroId || '(none)'}`);
     }
     const cardIds = Array.isArray(input?.cardIds) ? input.cardIds.map((id) => String(id)) : [];
-    const result = validateDeck(cardIds);
-    if (!result.valid) {
-      throw new AccountError('INVALID_DECK', result.errors.join('; '));
+    // Deck legality is deliberately not enforced here: a player may save a
+    // work-in-progress deck, or one built toward cards they have yet to
+    // unlock. Readiness travels with the deck instead, and playability is
+    // enforced when a match starts.
+    if (cardIds.length > MAX_DECK_CARDS) {
+      throw new AccountError('DECK_TOO_LARGE', `A deck may hold at most ${MAX_DECK_CARDS} cards`);
+    }
+    for (const cardId of cardIds) {
+      try {
+        getCardDefinition(cardId);
+      } catch {
+        throw new AccountError('UNKNOWN_CARD', `Unknown card: ${cardId}`);
+      }
     }
     return { name, heroId, cardIds };
   }
@@ -115,4 +157,9 @@ function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002'
   );
+}
+
+/** Readiness when collections are not configured: rules unknown, not blocked. */
+function emptyReadiness(): DeckReadiness {
+  return { playable: true, ruleErrors: [], missing: [] };
 }

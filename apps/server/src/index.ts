@@ -11,27 +11,50 @@ import { databaseReachable, prisma } from './db/prisma.js';
 import { AccountService } from './services/account-service.js';
 import { DeckService } from './services/deck-service.js';
 import { SocialService } from './services/social-service.js';
+import { CollectionService } from './services/collection-service.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const logger = createLoggerFromEnv();
 const manager = new MatchManager();
 const lobby = new LobbyHub(logger);
 const accounts = new AccountService(prisma);
-const decks = new DeckService(prisma);
+const collections = new CollectionService(prisma);
+const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 const server = createServer(
   createApp(manager, logger, {
     accounts,
     decks,
     social,
+    collections,
     lobby,
     databaseReachable: () => databaseReachable(),
   }),
 );
 const sockets = new Map<string, Set<WebSocket>>();
 const sessions = new Map<WebSocket, { matchId: string; playerId: string; log: Logger }>();
-const websocketServer = new WebSocketServer({ server, path: '/matches' });
-const lobbyServer = new WebSocketServer({ server, path: '/lobby' });
+// Two socket endpoints share one HTTP server, so neither may attach its own
+// `upgrade` listener: whichever ran first would destroy sockets meant for the
+// other. Both are created detached and fed by the single router below.
+const websocketServer = new WebSocketServer({ noServer: true });
+const lobbyServer = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+  if (pathname === '/matches') {
+    websocketServer.handleUpgrade(request, socket, head, (ws) =>
+      websocketServer.emit('connection', ws, request),
+    );
+    return;
+  }
+  if (pathname === '/lobby') {
+    lobbyServer.handleUpgrade(request, socket, head, (ws) =>
+      lobbyServer.emit('connection', ws, request),
+    );
+    return;
+  }
+  socket.destroy();
+});
 
 /**
  * The lobby socket carries challenge and friend notifications.

@@ -26,7 +26,15 @@ const COLOR_READY := Color(0.45, 0.85, 0.55)
 const COLOR_HOVER := Color(0.62, 0.82, 1.0)
 
 var client: MatchClient
+var accounts: AccountClient
 var library := CardLibrary.new()
+var collection_screen: CollectionScreen
+var game_root: Control
+## The active deck fetched for the signed-in player, empty when playing
+## anonymously. Falls back to the starter list so the client still works
+## without an account.
+var active_deck_cards: Array = []
+var active_deck_hero := ""
 
 var state: Dictionary = {}
 var legal_actions: Array = []
@@ -84,17 +92,39 @@ func _ready() -> void:
 	client.request_failed.connect(func(detail: String) -> void: _set_status(detail, true))
 	library.loaded.connect(_on_library_loaded)
 
+	accounts = AccountClient.new()
+	add_child(accounts)
+	accounts.signed_in.connect(_on_signed_in)
+	accounts.signed_out.connect(_on_account_signed_out)
+	accounts.decks_loaded.connect(_on_decks_loaded)
+
 	_build_interface()
+
+	# Accounts are optional: the collection screen opens first, but the match
+	# view is still reachable without signing in.
+	collection_screen = CollectionScreen.new()
+	add_child(collection_screen)
+	collection_screen.setup(accounts, library)
+	collection_screen.play_requested.connect(_show_match_view)
+	_show_collection_view()
+
 	client.fetch_cards()
 
 # --- Interface construction -------------------------------------------------
 
 func _build_interface() -> void:
+	# Everything the match view owns hangs off `game_root`, so the collection
+	# screen can replace it wholesale.
+	game_root = Control.new()
+	game_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	game_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(game_root)
+
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 14)
-	add_child(margin)
+	game_root.add_child(margin)
 
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 10)
@@ -137,7 +167,7 @@ func _build_interface() -> void:
 
 	# The arrow sits above everything and never takes pointer input.
 	arrow = TargetingArrow.new()
-	add_child(arrow)
+	game_root.add_child(arrow)
 
 func _build_connection_bar() -> Control:
 	var bar := HBoxContainer.new()
@@ -192,6 +222,12 @@ func _build_connection_bar() -> Control:
 	create_pve_button.text = "Create Bandit Ambush"
 	create_pve_button.pressed.connect(_create_match.bind("BANDIT_AMBUSH"))
 	bar.add_child(create_pve_button)
+
+	var collection_button := Button.new()
+	collection_button.text = "Collection"
+	collection_button.tooltip_text = "Sign in, browse your cards and build decks."
+	collection_button.pressed.connect(_show_collection_view)
+	bar.add_child(collection_button)
 	return bar
 
 func _build_status_bar() -> Control:
@@ -260,6 +296,50 @@ func _section_title(text: String) -> Label:
 	label.add_theme_font_size_override("font_size", 14)
 	return label
 
+func _show_collection_view() -> void:
+	collection_screen.visible = true
+	game_root.visible = false
+	_cancel_drag()
+
+func _show_match_view() -> void:
+	collection_screen.visible = false
+	game_root.visible = true
+	# Play with whatever the player has selected as active.
+	if accounts.is_signed_in():
+		accounts.fetch_decks()
+
+func _on_signed_in(who: Dictionary) -> void:
+	# The account's display name is the player id the server will use.
+	player_id = str(who.get("id", player_id))
+	player_input.text = str(who.get("displayName", player_id))
+	player_input.editable = false
+	_set_status("Signed in as %s." % str(who.get("displayName", "")))
+
+func _on_account_signed_out() -> void:
+	player_input.editable = true
+	active_deck_cards = []
+	active_deck_hero = ""
+
+func _on_decks_loaded(list: Array) -> void:
+	# Remember the active deck so matches use it instead of the starter list.
+	active_deck_cards = []
+	active_deck_hero = ""
+	for deck in list:
+		if typeof(deck) != TYPE_DICTIONARY:
+			continue
+		if not bool(deck.get("isActive", false)):
+			continue
+		var readiness: Variant = deck.get("readiness", {})
+		var playable := typeof(readiness) != TYPE_DICTIONARY 			or bool((readiness as Dictionary).get("playable", true))
+		if not playable:
+			_set_status("Your active deck is not ready; using the starter deck.", true)
+			return
+		var cards: Variant = deck.get("cardIds", [])
+		if typeof(cards) == TYPE_ARRAY:
+			active_deck_cards = (cards as Array).duplicate()
+		active_deck_hero = str(deck.get("heroId", ""))
+		return
+
 # --- Connection actions -----------------------------------------------------
 
 func _create_match(scenario_id: String) -> void:
@@ -268,7 +348,9 @@ func _create_match(scenario_id: String) -> void:
 		_set_status("Enter a Player ID first.", true)
 		return
 	_set_status("Creating match…")
-	client.create_match(scenario_id, player_id, _selected_hero_id(), _starter_deck())
+	var deck := active_deck_cards if not active_deck_cards.is_empty() else _starter_deck()
+	var hero := active_deck_hero if active_deck_hero != "" else _selected_hero_id()
+	client.create_match(scenario_id, player_id, hero, deck)
 
 func _on_match_created(new_match_id: String) -> void:
 	match_input.text = new_match_id
@@ -744,6 +826,11 @@ func _on_pointer_move(at: Vector2) -> void:
 	if not _dragging:
 		return
 	var hovered := _target_zone_at(at)
+	if hovered.is_empty():
+		# A miss may mean the cached rects predate the last layout pass rather
+		# than the pointer being over nothing; refresh once and look again.
+		_rebuild_drop_zones()
+		hovered = _target_zone_at(at)
 	var key := str(hovered.get("key", ""))
 	if key != _hovered_key:
 		_hovered_key = key
@@ -761,6 +848,9 @@ func _on_pointer_move(at: Vector2) -> void:
 
 func _on_pointer_up(at: Vector2) -> void:
 	if _dragging:
+		# Rects may have gone stale during the drag; refresh before committing
+		# so a legitimate drop is never discarded as a miss.
+		_rebuild_drop_zones()
 		var hovered := _target_zone_at(at)
 		if not hovered.is_empty():
 			_commit_target(str(hovered.get("key", "")))
@@ -885,19 +975,32 @@ func _commit_target(key: String) -> void:
 
 ## The drop zone under a point, restricted to the current selection's targets.
 func _target_zone_at(at: Vector2) -> Dictionary:
+	# Zones overlap — a hero strip spans the width of the board, and creature
+	# panels sit inside it — so every candidate is considered and the smallest
+	# valid one wins. Returning the first hit would let a wide zone mask a
+	# precise one, or an invalid zone hide a valid one beneath it.
+	var best: Dictionary = {}
+	var best_area := INF
 	for key in _drop_zones:
 		var zone: Dictionary = _drop_zones[key]
 		var kind := str(zone.get("kind", ""))
 		if kind != "slot" and kind != "entity":
 			continue
-		if not (zone["rect"] as Rect2).has_point(at):
+		var rect: Rect2 = zone["rect"]
+		if not rect.has_point(at):
 			continue
 		var id := str(key)
-		if slot_targets.has(id) or entity_targets.has(id):
-			return {"key": id, "zone": zone}
-	return {}
+		if not (slot_targets.has(id) or entity_targets.has(id)):
+			continue
+		var area := rect.size.x * rect.size.y
+		if area < best_area:
+			best_area = area
+			best = {"key": id, "zone": zone}
+	return best
 
 func _zone_at(at: Vector2, kinds: Array) -> Dictionary:
+	# Drag sources do not nest — a hand card and a creature panel never contain
+	# one another — so the first rect containing the point is the right one.
 	for key in _drop_zones:
 		var zone: Dictionary = _drop_zones[key]
 		if not kinds.has(str(zone.get("kind", ""))):

@@ -10,8 +10,10 @@ import type { LobbyHub } from './lobby.js';
 import type { AccountService } from './services/account-service.js';
 import type { DeckService } from './services/deck-service.js';
 import type { SocialService } from './services/social-service.js';
+import type { CollectionService } from './services/collection-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
+import { createCollectionRouter } from './routes/collection-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 
 /**
@@ -23,6 +25,7 @@ export interface AppServices {
   accounts: AccountService;
   decks: DeckService;
   social: SocialService;
+  collections: CollectionService;
   lobby: LobbyHub;
   databaseReachable?: () => Promise<boolean>;
 }
@@ -121,11 +124,24 @@ export function createApp(
   if (services) {
     // Identify the caller before any authenticated route runs.
     app.use(attachUser(services.accounts));
-    app.use('/api/auth', createAuthRouter(services.accounts, logger));
+    app.use(
+      '/api/auth',
+      createAuthRouter(services.accounts, logger, (userId) =>
+        services.collections.grantStarter(userId),
+      ),
+    );
     app.use('/api/decks', createDeckRouter(services.decks, logger));
+    app.use('/api/collection', createCollectionRouter(services.collections, logger));
     app.use(
       '/api/social',
-      createSocialRouter(services.social, services.decks, manager, services.lobby, logger),
+      createSocialRouter(
+        services.social,
+        services.decks,
+        services.collections,
+        manager,
+        services.lobby,
+        logger,
+      ),
     );
   }
 

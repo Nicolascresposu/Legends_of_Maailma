@@ -35,6 +35,12 @@ so the whole game is playable without holding the mouse button. Clicking the sam
 again clears the selection, as does right-click or Escape. The action list on the right mirrors
 whatever the current selection offers and remains usable as a fallback.
 
+The client opens on the collection screen: sign in or create an account, browse every collectible
+card with the copies you own, and build decks. Cards you do not own stay visible but dimmed, and
+the deck panel shows the server's verdict live — card count, and any card you lack copies of.
+A deck that is not ready can still be saved; it simply cannot be made active. Matches then use
+your active deck rather than a hardcoded starter list.
+
 Card names, costs, keywords and rules text are fetched once from `/api/cards`, so the board shows
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
@@ -42,6 +48,8 @@ reconnects automatically if the socket drops.
 Client scripts:
 
 - `src/main.gd` — presentation, pointer interaction, and rendering.
+- `src/collection_screen.gd` — sign-in, collection browsing and deck building.
+- `src/account_client.gd` — REST transport for accounts, collections and decks.
 - `src/match_client.gd` — REST + WebSocket transport, connection state, reconnection.
 - `src/targeting.gd` — derives valid drop targets from the server's legal actions.
 - `src/targeting_arrow.gd` — the dotted targeting arrow.
@@ -49,12 +57,14 @@ Client scripts:
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
+- `src/collection_test.gd` — registers an account and builds a deck end to end.
 
 With the server running, the client's own tests can be run from the command line:
 
 ```bash
 godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
+godot --path apps/godot-client --script src/collection_test.gd
 ```
 
 `drag_test.gd` needs a real (non-headless) run, because hit-testing depends on laid-out rects.
@@ -92,8 +102,11 @@ POST /api/auth/login           exchange credentials for a session token
 POST /api/auth/logout          revoke the current token
 GET  /api/auth/me              the signed-in player
 
-GET    /api/decks              list your decks
-POST   /api/decks              save a deck (validated by the engine)
+GET  /api/collection           every collectible card with your owned counts
+POST /api/collection/assess    check a card list without saving it
+
+GET    /api/decks              list your decks, each with its readiness
+POST   /api/decks              save a deck (legality reported, not enforced)
 GET    /api/decks/:id          one deck
 PUT    /api/decks/:id          replace a deck
 DELETE /api/decks/:id          remove a deck
@@ -109,6 +122,25 @@ POST /api/social/challenges/:id/accept              creates the match
 POST /api/social/challenges/:id/decline
 POST /api/social/challenges/:id/cancel
 ```
+
+Each account starts with the starter cards. Ownership is a count per card, because deck legality
+is already expressed in copies: two of a common, one of a legendary.
+
+Saving a deck is deliberately permissive — a player may store an unfinished deck, or one built
+toward cards they have not unlocked — so only the name, the hero and the existence of each card
+are enforced on save. Every deck the API returns carries a `readiness` marker instead:
+
+```json
+{
+  "playable": false,
+  "ruleErrors": ["Deck must contain exactly 30 cards"],
+  "missing": [{ "cardId": "darek_voln", "required": 1, "owned": 0 }]
+}
+```
+
+Rule problems and ownership problems are reported separately, so a client can say precisely why a
+deck is not ready. Ownership is enforced when a match starts: accepting a challenge with an
+unplayable deck is refused with `DECK_NOT_PLAYABLE` and the reasons.
 
 Authenticated requests carry `Authorization: Bearer <token>`. Tokens are opaque: only a SHA-256
 digest is stored, so a database leak yields no usable sessions, and logging out revokes instantly.

@@ -3,6 +3,8 @@ import { STARTER_DECK } from '@maailma/card-definitions';
 import type { Logger } from '../logger.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
+import type { CollectionService } from '../services/collection-service.js';
+import { DeckNotPlayableError } from '../services/collection-service.js';
 import type { SocialService } from '../services/social-service.js';
 import type { MatchManager } from '../match-manager.js';
 import type { LobbyHub } from '../lobby.js';
@@ -18,6 +20,7 @@ import { requireUser, respondAccountError } from './auth-routes.js';
 export function createSocialRouter(
   social: SocialService,
   decks: DeckService,
+  collections: CollectionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -118,7 +121,7 @@ export function createSocialRouter(
   });
 
   router.post('/challenges/:challengeId/accept', (request, response, next) => {
-    acceptChallenge(request, social, decks, manager, lobby, logger)
+    acceptChallenge(request, social, decks, collections, manager, lobby, logger)
       .then((payload) => response.json(payload))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
@@ -163,6 +166,7 @@ async function acceptChallenge(
   request: express.Request,
   social: SocialService,
   decks: DeckService,
+  collections: CollectionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -173,18 +177,37 @@ async function acceptChallenge(
   const challengerDeck = await decks.activeDeck(challenge.challengerId);
   const opponentDeck = await decks.activeDeck(opponentId);
 
+  // Ownership is enforced here rather than at save time: a deck may be built
+  // toward cards a player has not unlocked, but it cannot be played until
+  // every copy it uses is owned. The starter deck is always playable.
+  const challengerCards = challengerDeck?.cardIds ?? [...STARTER_DECK];
+  const opponentCards = opponentDeck?.cardIds ?? [...STARTER_DECK];
+  try {
+    await collections.assertPlayable(challenge.challengerId, challengerCards);
+  } catch (error) {
+    if (error instanceof DeckNotPlayableError) {
+      throw new AccountError(
+        'CHALLENGER_DECK_NOT_PLAYABLE',
+        `Your opponent's deck is not ready: ${error.reasons.join('; ')}`,
+        409,
+      );
+    }
+    throw error;
+  }
+  await collections.assertPlayable(opponentId, opponentCards);
+
   const engine = manager.create({
     scenarioId: challenge.scenarioId,
     players: [
       {
         playerId: challenge.challengerId,
-        deck: challengerDeck?.cardIds ?? [...STARTER_DECK],
+        deck: challengerCards,
         ...(challengerDeck ? { heroDefinitionId: challengerDeck.heroId } : {}),
         controller: 'HUMAN',
       },
       {
         playerId: opponentId,
-        deck: opponentDeck?.cardIds ?? [...STARTER_DECK],
+        deck: opponentCards,
         ...(opponentDeck ? { heroDefinitionId: opponentDeck.heroId } : {}),
         controller: 'HUMAN',
       },

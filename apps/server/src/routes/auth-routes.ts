@@ -6,6 +6,7 @@ import {
   type AuthenticatedUser,
 } from '../services/account-service.js';
 import { errorFields, type Logger } from '../logger.js';
+import { DeckNotPlayableError } from '../services/collection-service.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -50,7 +51,11 @@ export function requireUser(): express.RequestHandler {
   };
 }
 
-export function createAuthRouter(accounts: AccountService, logger: Logger): express.Router {
+export function createAuthRouter(
+  accounts: AccountService,
+  logger: Logger,
+  onRegistered?: (userId: string) => Promise<void>,
+): express.Router {
   const router = express.Router();
 
   router.post('/register', (request, response, next) => {
@@ -61,7 +66,9 @@ export function createAuthRouter(accounts: AccountService, logger: Logger): expr
         displayName: String(body?.displayName ?? ''),
         password: String(body?.password ?? ''),
       })
-      .then((session) => {
+      .then(async (session) => {
+        // A new account starts with the starter cards, so it can play at once.
+        if (onRegistered) await onRegistered(session.user.id);
         logger.info('Account registered', {
           requestId: request.requestId,
           userId: session.user.id,
@@ -111,6 +118,20 @@ export function respondAccountError(
   logger: Logger,
   next: express.NextFunction,
 ): void {
+  // A deck that cannot be played is an expected refusal, not a fault.
+  if (error instanceof DeckNotPlayableError) {
+    logger.info('Request refused', {
+      requestId: request.requestId,
+      code: error.code,
+      reasons: error.reasons,
+    });
+    response.status(error.status).json({
+      code: error.code,
+      message: error.message,
+      reasons: error.reasons,
+    });
+    return;
+  }
   if (error instanceof AccountError) {
     // Expected refusals are not server faults; log them at info.
     logger.info('Request refused', {

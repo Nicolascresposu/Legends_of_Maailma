@@ -29,6 +29,7 @@ model User {
 
   sessions            Session[]
   decks               Deck[]
+  collection          CollectionEntry[]
   sentFriendships     Friendship[] @relation("FriendshipRequester")
   receivedFriendships Friendship[] @relation("FriendshipAddressee")
   sentChallenges      Challenge[]  @relation("ChallengeChallenger")
@@ -73,6 +74,26 @@ model Deck {
   @@unique([userId, name])
   @@index([userId])
   @@map("decks")
+}
+
+/// How many copies of a card a player owns.
+///
+/// Stored as a count rather than a flag because deck legality is already
+/// expressed in copies: two of a common, one of a legendary. A card absent
+/// from this table is simply unowned.
+model CollectionEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  cardId    String
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cardId])
+  @@index([userId])
+  @@map("collection_entries")
 }
 
 enum FriendshipStatus {
