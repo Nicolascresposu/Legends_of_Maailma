@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 coverage/
 .godot/
+*.gd.uid
 *.log
 .env
