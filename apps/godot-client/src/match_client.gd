@@ -21,7 +21,8 @@ enum Status { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING }
 const RECONNECT_DELAY_SECONDS := 2.0
 const MAX_RECONNECT_ATTEMPTS := 5
 
-var http_base := "http://127.0.0.1:3000"
+## Resolved from the command line, the environment, or a saved address.
+var http_base := ClientConfig.http_base()
 var match_id := ""
 var player_id := ""
 
@@ -61,12 +62,7 @@ func is_connected_to_match() -> bool:
 
 func websocket_url() -> String:
 	# Derive the socket URL from the REST base so only one address is configured.
-	var base := http_base
-	if base.begins_with("https://"):
-		return "wss://" + base.substr(8) + "/matches"
-	if base.begins_with("http://"):
-		return "ws://" + base.substr(7) + "/matches"
-	return "ws://" + base + "/matches"
+	return ClientConfig.websocket_base(http_base) + "/matches"
 
 func fetch_cards() -> void:
 	_ensure_requests()

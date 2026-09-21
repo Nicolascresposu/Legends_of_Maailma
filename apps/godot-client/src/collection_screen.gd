@@ -9,6 +9,8 @@ class_name CollectionScreen
 
 signal play_requested()
 signal closed()
+## The player pointed the client at a different server.
+signal server_changed(http_base: String)
 
 const CARD_TILE := Vector2(190, 104)
 
@@ -26,6 +28,7 @@ var _root: VBoxContainer
 var _auth_box: VBoxContainer
 ## The inputs and buttons, hidden while a saved session is being checked.
 var _auth_form: HBoxContainer
+var _server_input: LineEdit
 var _main_box: HBoxContainer
 var _email_input: LineEdit
 var _name_input: LineEdit
@@ -113,11 +116,41 @@ func _build_auth() -> Control:
 	register_button.pressed.connect(_do_register)
 	row.add_child(register_button)
 
+	# Sign-in happens here, so the server address has to be changeable here too.
+	var server_row := HBoxContainer.new()
+	server_row.add_theme_constant_override("separation", 6)
+	_auth_box.add_child(server_row)
+	var server_label := Label.new()
+	server_label.text = "Server"
+	server_label.add_theme_font_size_override("font_size", 11)
+	server_row.add_child(server_label)
+	_server_input = LineEdit.new()
+	_server_input.text = accounts.http_base
+	_server_input.placeholder_text = "127.0.0.1:3000"
+	_server_input.tooltip_text = (
+		"Where the Node server is listening. Also settable with --server=host:port"
+		+ " or the MAAILMA_SERVER environment variable."
+	)
+	_server_input.custom_minimum_size.x = 220
+	_server_input.text_submitted.connect(func(value: String) -> void: _apply_server(value))
+	_server_input.focus_exited.connect(func() -> void: _apply_server(_server_input.text))
+	server_row.add_child(_server_input)
+
 	_auth_status = Label.new()
 	_auth_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_auth_status.text = "New accounts start with the starter cards."
 	_auth_box.add_child(_auth_status)
 	return _auth_box
+
+## Points the account client at a new address and remembers it.
+func _apply_server(raw: String) -> void:
+	var base := ClientConfig.normalize(raw)
+	if base == "" or base == accounts.http_base:
+		return
+	accounts.http_base = base
+	ClientConfig.save(base)
+	_server_input.text = base
+	server_changed.emit(base)
 
 func _build_main() -> HBoxContainer:
 	var box := HBoxContainer.new()

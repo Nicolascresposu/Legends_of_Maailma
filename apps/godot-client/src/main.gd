@@ -107,7 +107,10 @@ func _ready() -> void:
 	add_child(collection_screen)
 	collection_screen.setup(accounts, library)
 	collection_screen.play_requested.connect(_show_match_view)
+	# Keep the two address fields in step: they configure the same thing.
+	collection_screen.server_changed.connect(_on_server_changed)
 	_show_collection_view()
+	print("[maailma] server: %s (%s)" % [ClientConfig.http_base(), ClientConfig.source()])
 
 	client.fetch_cards()
 	# Resume a session saved by a previous run, if there is one. The collection
@@ -300,6 +303,12 @@ func _section_title(text: String) -> Label:
 	label.add_theme_font_size_override("font_size", 14)
 	return label
 
+func _on_server_changed(base: String) -> void:
+	client.http_base = base
+	if server_input != null:
+		server_input.text = base
+	_set_status("Server set to %s." % base)
+
 func _show_collection_view() -> void:
 	collection_screen.visible = true
 	game_root.visible = false
@@ -373,8 +382,23 @@ func _join_match() -> void:
 	client.join(target, player_id, _selected_hero_id(), false)
 
 func _apply_inputs() -> void:
-	client.http_base = server_input.text.strip_edges()
+	_apply_server_address(server_input.text)
 	player_id = player_input.text.strip_edges()
+
+## Points both clients at an address and remembers it for the next run.
+##
+## Previously this set only the match client, so signing in always went to the
+## default address no matter what the field said.
+func _apply_server_address(raw: String) -> void:
+	var base := ClientConfig.normalize(raw)
+	if base == "":
+		return
+	client.http_base = base
+	accounts.http_base = base
+	ClientConfig.save(base)
+	# Show the normalized form, so "localhost:4000" reads back in full.
+	if server_input.text != base:
+		server_input.text = base
 
 func _copy_match_id() -> void:
 	var value := match_input.text.strip_edges()

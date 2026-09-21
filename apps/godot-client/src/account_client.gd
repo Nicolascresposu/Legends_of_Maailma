@@ -22,7 +22,8 @@ signal deck_error(message: String)
 signal readiness_assessed(readiness: Dictionary)
 signal request_failed(message: String)
 
-var http_base := "http://127.0.0.1:3000"
+## Resolved from the command line, the environment, or a saved address.
+var http_base := ClientConfig.http_base()
 var token := ""
 var user: Dictionary = {}
 

@@ -45,6 +45,29 @@ Card names, costs, keywords and rules text are fetched once from `/api/cards`, s
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
 
+### Pointing the client at another server
+
+The server takes `PORT`, and the client resolves its address from, in order:
+
+```bash
+PORT=3100 npm run dev                                   # move the server
+
+godot --path apps/godot-client -- --server=127.0.0.1:3100   # 1. command line
+MAAILMA_SERVER=127.0.0.1:3100 godot --path apps/godot-client # 2. environment
+```
+
+3. `user://client.cfg`, written whenever the address is changed in the UI
+4. `http://127.0.0.1:3000`
+
+A command-line or environment address applies to that run only and is not saved, so `--server=`
+never changes the stored default. Changing the address in the UI does save it, and both the
+sign-in screen and the match bar accept it. `localhost:3100`, `127.0.0.1:3100` and
+`http://127.0.0.1:3100/` are all accepted and normalized to the same value. The resolved address
+and where it came from are printed at startup.
+
+A saved session records the server that issued it, so pointing the client somewhere else does not
+try to reuse a token from the previous one.
+
 ### Staying signed in
 
 Signing in saves the session token to Godot's per-user data directory
@@ -91,11 +114,13 @@ Client scripts:
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
 - `src/session_store.gd` — remembers a signed-in session between runs.
+- `src/client_config.gd` — resolves the server address from the command line, environment or disk.
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
+- `src/config_test.gd` — checks address parsing and override precedence.
 
 With the server running, the client's own tests can be run from the command line:
 
@@ -104,6 +129,7 @@ godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
+godot --headless --path apps/godot-client --script src/config_test.gd
 ```
 
 `drag_test.gd` needs a real (non-headless) run, because hit-testing depends on laid-out rects.
