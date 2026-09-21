@@ -300,6 +300,22 @@ func _collection_row(entry: Dictionary) -> Control:
 	row.add_theme_constant_override("separation", 8)
 	panel.add_child(row)
 
+	# The collection is a list of rows, so art reads better as a thumbnail here
+	# than as the banner used on a card tile.
+	var art := CardArt.texture_for(card_id)
+	if art != null:
+		var thumb := TextureRect.new()
+		thumb.texture = art
+		thumb.custom_minimum_size = Vector2(52, 34)
+		thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		thumb.clip_contents = true
+		thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# An unowned card's art is dimmed alongside its text.
+		if owned == 0:
+			thumb.modulate = Color(0.55, 0.55, 0.60)
+		row.add_child(thumb)
+
 	var label := Label.new()
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var kind := library.card_type(card_id)

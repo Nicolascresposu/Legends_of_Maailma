@@ -11,8 +11,9 @@ extends Control
 ## cursor, and releasing over a lit destination commits the action. A plain
 ## click selects instead, so the same move works without holding the button.
 
-const SLOT_SIZE := Vector2(148, 96)
-const CARD_SIZE := Vector2(132, 92)
+const SLOT_SIZE := Vector2(148, 112)
+const CARD_SIZE := Vector2(132, 132)
+const ARTIFACT_TILE := Vector2(92, 84)
 const MAX_LOG_LINES := 120
 ## Pointer travel before a press becomes a drag rather than a click.
 const DRAG_THRESHOLD := 10.0
@@ -544,6 +545,10 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 		var artifact_label := Label.new()
 		artifact_label.text = "Artifacts %d" % (artifacts as Array).size()
 		row.add_child(artifact_label)
+		# Artifacts are in play, so they show their art like creatures do.
+		for artifact in (artifacts as Array):
+			if typeof(artifact) == TYPE_DICTIONARY:
+				row.add_child(_artifact_tile(artifact))
 
 	if bool(hero.get("powerUsedThisTurn", false)):
 		var used := Label.new()
@@ -559,6 +564,40 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 
 	panel.set_meta("target_kind", "entity")
 	panel.set_meta("target_id", hero_id)
+	return panel
+
+## A small in-play artifact tile: art where there is art, durability always.
+func _artifact_tile(artifact: Dictionary) -> Control:
+	var definition_id := str(artifact.get("definitionId", ""))
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel.custom_minimum_size = ARTIFACT_TILE
+	panel.tooltip_text = library.tooltip(definition_id)
+	_tint(panel, COLOR_EMPTY)
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 1)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.add_theme_font_size_override("font_size", 10)
+	title.text = library.card_name(definition_id)
+	column.add_child(title)
+
+	var banner := CardArt.make_banner(definition_id, CardArt.BOARD_ART_HEIGHT)
+	if banner != null:
+		column.add_child(banner)
+
+	var durability := Label.new()
+	durability.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	durability.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	durability.add_theme_font_size_override("font_size", 10)
+	durability.text = "◈ %s" % _num(artifact.get("durability", "?"))
+	column.add_child(durability)
 	return panel
 
 func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
@@ -652,12 +691,39 @@ func _slot_panel(
 	var max_health := _num(creature.get("maxHealth", "?"))
 	# Show max health only while damaged, so a healthy creature stays uncluttered.
 	var health_text := health if health == max_health else "%s/%s" % [health, max_health]
-	label.text = "%s\n⚔ %s  ♥ %s%s" % [
-		display_name,
-		_num(creature.get("currentAttack", "?")),
-		health_text,
-		marks,
-	]
+
+	var banner := CardArt.make_banner(definition_id, CardArt.BOARD_ART_HEIGHT)
+	if banner != null:
+		# With art present, the slot reads title / art / stats like a hand card.
+		# The plain label is reused for the stats line beneath the banner.
+		panel.remove_child(label)
+		# Named `stack` because `column` is already this function's board index.
+		var stack := VBoxContainer.new()
+		stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		stack.add_theme_constant_override("separation", 1)
+		panel.add_child(stack)
+
+		var title := Label.new()
+		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		title.add_theme_font_size_override("font_size", 11)
+		title.text = display_name
+		stack.add_child(title)
+		stack.add_child(banner)
+		stack.add_child(label)
+		label.text = "⚔ %s  ♥ %s%s" % [
+			_num(creature.get("currentAttack", "?")),
+			health_text,
+			marks,
+		]
+	else:
+		label.text = "%s\n⚔ %s  ♥ %s%s" % [
+			display_name,
+			_num(creature.get("currentAttack", "?")),
+			health_text,
+			marks,
+		]
 	if not keyword_list.is_empty():
 		label.text += "\n" + ", ".join(keyword_list)
 	panel.tooltip_text = library.tooltip(definition_id)
@@ -700,16 +766,35 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	panel.custom_minimum_size = CARD_SIZE
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 
+	# Title above, art banner in the middle, remaining detail below. The whole
+	# column ignores the mouse so a press reaches the panel and starts a drag.
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 2)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.add_theme_font_size_override("font_size", 12)
+	title.text = library.card_name(definition_id)
+	column.add_child(title)
+
+	var banner := CardArt.make_banner(definition_id, CardArt.HAND_ART_HEIGHT)
+	if banner != null:
+		column.add_child(banner)
+
 	var label := Label.new()
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(label)
+	column.add_child(label)
 
 	var cost := library.cost(definition_id)
 	var kind := library.card_type(definition_id)
-	var line := "%s\n%d Taika" % [library.card_name(definition_id), cost]
+	var line := "%d Taika" % cost
 	if kind == "CREATURE":
 		line += "\n%d/%d" % [library.base_attack(definition_id), library.base_health(definition_id)]
 	elif kind != "":

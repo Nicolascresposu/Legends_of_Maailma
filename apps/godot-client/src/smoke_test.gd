@@ -103,6 +103,17 @@ func _on_actions(player: String, list: Array) -> void:
 			_check("hand card resolves to a display name",
 				resolved != str(first.get("instanceId", "")))
 
+		# Art is looked up by card id from client assets; a card without a file
+		# must fall back to text rather than rendering an empty tile.
+		_check("art resolves for a card that has a file", CardArt.has_art("wolf"))
+		_check("an unknown card has no art", not CardArt.has_art("definitely_not_a_card"))
+		_check("an empty id has no art", CardArt.texture_for("") == null)
+		_check("a banner is built when art exists", CardArt.make_banner("wolf", 40.0) != null)
+		_check(
+			"no banner is built without art",
+			CardArt.make_banner("definitely_not_a_card", 40.0) == null
+		)
+
 		# Heroes are addressed as "<playerId>:hero", not by the bare player id.
 		var hero_label := ActionFormatter.entity_name(
 			Targeting.hero_entity_id("player-a"), state, library)

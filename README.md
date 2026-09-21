@@ -45,6 +45,25 @@ Card names, costs, keywords and rules text are fetched once from `/api/cards`, s
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
 
+### Card art
+
+Art is a client asset, looked up by convention from the card id the server already sends:
+
+```text
+apps/godot-client/art/cards/<card_id>.png
+```
+
+`wolf.png` is the art for the card `wolf`. Nothing references art in the shared model or the
+engine, which the architecture keeps free of UI concepts, and no server change is involved.
+`.webp`, `.jpg` and `.svg` are also accepted, tried in that order after PNG.
+
+A card with no art file renders exactly as it did before art existed — title and stats only — so
+art can be added one card at a time. Images are cropped to fill their banner rather than
+stretched, so authoring them wider than tall (roughly 2:1) gives the best result.
+
+Art appears on hand cards and on creatures and artifacts in play, laid out as title, art banner,
+then stats. The collection browser shows the same art as a row thumbnail.
+
 Client scripts:
 
 - `src/main.gd` — presentation, pointer interaction, and rendering.
@@ -54,6 +73,7 @@ Client scripts:
 - `src/targeting.gd` — derives valid drop targets from the server's legal actions.
 - `src/targeting_arrow.gd` — the dotted targeting arrow.
 - `src/card_library.gd` — client-side cache of server card definitions.
+- `src/card_art.gd` — looks up card art by id, with a text fallback.
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
