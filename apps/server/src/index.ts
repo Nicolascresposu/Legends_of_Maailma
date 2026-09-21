@@ -1,26 +1,40 @@
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { ServerMessage } from '@maailma/protocol';
 import { isClientMessage } from '@maailma/protocol';
 import { createApp } from './app.js';
+import { createLoggerFromEnv, errorFields, type Logger } from './logger.js';
 import { MatchManager } from './match-manager.js';
 
 const port = Number(process.env.PORT ?? 3000);
+const logger = createLoggerFromEnv();
 const manager = new MatchManager();
-const server = createServer(createApp(manager));
+const server = createServer(createApp(manager, logger));
 const sockets = new Map<string, Set<WebSocket>>();
-const sessions = new Map<WebSocket, { matchId: string; playerId: string }>();
+const sessions = new Map<WebSocket, { matchId: string; playerId: string; log: Logger }>();
 const websocketServer = new WebSocketServer({ server, path: '/matches' });
 
 websocketServer.on('connection', (socket) => {
+  const connectionId = randomUUID();
+  const connectionLog = logger.child({ connectionId });
+  connectionLog.debug('WebSocket connected');
+  socket.once('close', () => connectionLog.debug('WebSocket disconnected'));
+  socket.on('error', (error) => connectionLog.error('WebSocket error', errorFields(error)));
+
   socket.on('message', (raw) => {
+    const log = sessions.get(socket)?.log ?? connectionLog;
     try {
       const message: unknown = JSON.parse(raw.toString());
-      if (!isClientMessage(message))
+      if (!isClientMessage(message)) {
+        log.warn('Rejected unknown message', { bytes: raw.toString().length });
         return send(socket, { type: 'ERROR', code: 'BAD_MESSAGE', message: 'Unknown message' });
+      }
+      log.debug('Message received', { messageType: message.type });
       if (message.type === 'JOIN_MATCH') {
         const engine = manager.get(message.matchId);
         if (!engine || !engine.state.sides[message.playerId]) {
+          log.warn('Join rejected', { matchId: message.matchId, playerId: message.playerId });
           return send(socket, {
             type: 'ERROR',
             code: 'JOIN_REJECTED',
@@ -30,11 +44,21 @@ websocketServer.on('connection', (socket) => {
         const room = sockets.get(message.matchId) ?? new Set<WebSocket>();
         room.add(socket);
         sockets.set(message.matchId, room);
-        sessions.set(socket, { matchId: message.matchId, playerId: message.playerId });
+        const sessionLog = connectionLog.child({
+          matchId: message.matchId,
+          playerId: message.playerId,
+        });
+        sessions.set(socket, {
+          matchId: message.matchId,
+          playerId: message.playerId,
+          log: sessionLog,
+        });
+        sessionLog.info('Player joined match', { room: room.size });
         socket.once('close', () => {
           room.delete(socket);
           sessions.delete(socket);
           if (room.size === 0) sockets.delete(message.matchId);
+          sessionLog.info('Player left match', { room: room.size });
         });
         send(socket, { type: 'MATCH_STATE', state: engine.state });
         send(socket, {
@@ -51,6 +75,10 @@ websocketServer.on('connection', (socket) => {
           session.matchId !== message.matchId ||
           session.playerId !== message.playerId
         ) {
+          log.warn('Hero selection rejected: actor mismatch', {
+            matchId: message.matchId,
+            playerId: message.playerId,
+          });
           return send(socket, {
             type: 'ERROR',
             code: 'ACTOR_MISMATCH',
@@ -59,11 +87,16 @@ websocketServer.on('connection', (socket) => {
         }
         try {
           manager.selectHero(message.matchId, message.playerId, message.heroDefinitionId);
+          log.info('Hero selected', { heroDefinitionId: message.heroDefinitionId });
           broadcast(message.matchId, {
             type: 'MATCH_STATE',
             state: manager.get(message.matchId)!.state,
           });
         } catch (error) {
+          log.warn('Hero selection rejected', {
+            heroDefinitionId: message.heroDefinitionId,
+            ...errorFields(error),
+          });
           send(socket, {
             type: 'ERROR',
             code: 'HERO_SELECTION_REJECTED',
@@ -77,6 +110,11 @@ websocketServer.on('connection', (socket) => {
         session.matchId !== message.matchId ||
         session.playerId !== message.action.actorId
       ) {
+        log.warn('Action rejected: actor mismatch', {
+          matchId: message.matchId,
+          actionType: message.action.type,
+          actorId: message.action.actorId,
+        });
         return send(socket, {
           type: 'ERROR',
           code: 'ACTOR_MISMATCH',
@@ -84,13 +122,25 @@ websocketServer.on('connection', (socket) => {
         });
       }
       const result = manager.act(message.matchId, message.action);
-      if (!result.ok)
+      if (!result.ok) {
+        log.info('Action rejected', {
+          actionType: message.action.type,
+          code: result.error!.code,
+          reason: result.error!.message,
+        });
         return send(socket, {
           type: 'ERROR',
           code: result.error!.code,
           message: result.error!.message,
         });
+      }
       const engine = manager.get(message.matchId)!;
+      log.debug('Action applied', {
+        actionType: message.action.type,
+        events: result.events.length,
+        turn: engine.state.turn,
+        phase: engine.state.phase,
+      });
       broadcast(message.matchId, { type: 'GAME_EVENTS', events: result.events });
       broadcast(message.matchId, { type: 'MATCH_STATE', state: engine.state });
       broadcast(message.matchId, {
@@ -99,6 +149,10 @@ websocketServer.on('connection', (socket) => {
         turn: engine.state.turn,
       });
       if (engine.state.phase === 'FINISHED') {
+        log.info('Match ended', {
+          turn: engine.state.turn,
+          ...(engine.state.winnerId ? { winnerId: engine.state.winnerId } : {}),
+        });
         broadcast(message.matchId, {
           type: 'MATCH_ENDED',
           ...(engine.state.winnerId ? { winnerId: engine.state.winnerId } : {}),
@@ -113,6 +167,9 @@ websocketServer.on('connection', (socket) => {
         }
       }
     } catch (error) {
+      // Malformed input is a client fault; anything else is the server's.
+      if (error instanceof SyntaxError) log.warn('Rejected malformed message', errorFields(error));
+      else log.error('Message handling failed', errorFields(error));
       send(socket, {
         type: 'ERROR',
         code: 'BAD_MESSAGE',
@@ -136,4 +193,6 @@ function sendToPlayer(matchId: string, playerId: string, message: ServerMessage)
   }
 }
 
-server.listen(port, () => console.log(`Maailma server listening on http://localhost:${port}`));
+server.listen(port, () =>
+  logger.info('Maailma server listening', { url: `http://localhost:${port}`, port }),
+);
