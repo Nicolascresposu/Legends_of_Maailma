@@ -23,26 +23,41 @@ match ID into a second client and join as `player-b`.
 The client does not reproduce game rules: every command is validated and resolved by the server,
 and the client only ever offers actions the server has already declared legal.
 
-Selecting one of your creatures or a card filters the action list to that entity, and reachable
-board slots become clickable so a move or summon can be confirmed on the board. Click the same
-creature or card again to clear the selection. Card names, costs, keywords and rules text are
-fetched once from `/api/cards`, so the board shows real names rather than definition ids. The
-match log narrates the server's events, and the client reconnects automatically if the socket
-drops.
+Targeting works as it does in Hearthstone. Press a card in your hand, or one of your creatures,
+and drag: every destination that selection can legally reach lights up, a dotted arrow follows the
+cursor, and releasing over a lit destination commits the action. The arrow turns green over a
+legal target and red over an illegal one. Heroes are targetable in their own right — both hero
+strips accept a drop whenever the server allows it, which covers attacks on the enemy Hero and
+healing aimed at your own.
+
+Dragging is not required: a plain click selects, and a second click on a lit destination commits,
+so the whole game is playable without holding the mouse button. Clicking the same card or creature
+again clears the selection, as does right-click or Escape. The action list on the right mirrors
+whatever the current selection offers and remains usable as a fallback.
+
+Card names, costs, keywords and rules text are fetched once from `/api/cards`, so the board shows
+real names rather than definition ids. The match log narrates the server's events, and the client
+reconnects automatically if the socket drops.
 
 Client scripts:
 
-- `src/main.gd` — presentation, selection, and rendering.
+- `src/main.gd` — presentation, pointer interaction, and rendering.
 - `src/match_client.gd` — REST + WebSocket transport, connection state, reconnection.
+- `src/targeting.gd` — derives valid drop targets from the server's legal actions.
+- `src/targeting_arrow.gd` — the dotted targeting arrow.
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
+- `src/drag_test.gd` — drives the real scene with synthetic mouse input.
 
-With the server running, the client's own tests can be run headlessly:
+With the server running, the client's own tests can be run from the command line:
 
 ```bash
 godot --headless --path apps/godot-client --script src/smoke_test.gd
+godot --path apps/godot-client --script src/drag_test.gd
 ```
+
+`drag_test.gd` needs a real (non-headless) run, because hit-testing depends on laid-out rects.
 
 ## Workspace map
 

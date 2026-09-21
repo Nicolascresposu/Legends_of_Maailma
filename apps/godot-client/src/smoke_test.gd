@@ -103,8 +103,12 @@ func _on_actions(player: String, list: Array) -> void:
 			_check("hand card resolves to a display name",
 				resolved != str(first.get("instanceId", "")))
 
-		var hero_label := ActionFormatter.entity_name("player-a", state, library)
+		# Heroes are addressed as "<playerId>:hero", not by the bare player id.
+		var hero_label := ActionFormatter.entity_name(
+			Targeting.hero_entity_id("player-a"), state, library)
 		_check("hero entity resolves to a hero name", hero_label.contains("Mender"))
+		_check("a bare player id is not mistaken for a hero",
+			ActionFormatter.entity_name("player-a", state, library) == "player-a")
 
 	# Play out a few turns to exercise state handling and the AI opponent.
 	if turns_taken >= 3:

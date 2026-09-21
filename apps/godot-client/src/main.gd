@@ -3,12 +3,19 @@ extends Control
 ## Maailma TCG presentation client.
 ##
 ## The client renders state and offers the server's legal actions. It never
-## decides legality: selecting a creature or card filters that action list, and
-## every choice is sent to the server for validation.
+## decides legality: dragging a card or creature only ever offers targets the
+## server has already declared legal, and every choice is sent for validation.
+##
+## Interaction follows Hearthstone's model. Press a hand card or one of your
+## creatures and drag: valid destinations light up, a dotted arrow follows the
+## cursor, and releasing over a lit destination commits the action. A plain
+## click selects instead, so the same move works without holding the button.
 
 const SLOT_SIZE := Vector2(148, 96)
 const CARD_SIZE := Vector2(132, 92)
 const MAX_LOG_LINES := 120
+## Pointer travel before a press becomes a drag rather than a click.
+const DRAG_THRESHOLD := 10.0
 
 const COLOR_EMPTY := Color(0.16, 0.17, 0.21)
 const COLOR_FRIENDLY := Color(0.16, 0.30, 0.24)
@@ -16,6 +23,7 @@ const COLOR_ENEMY := Color(0.34, 0.18, 0.20)
 const COLOR_SELECTED := Color(0.95, 0.76, 0.28)
 const COLOR_TARGET := Color(0.38, 0.62, 0.90)
 const COLOR_READY := Color(0.45, 0.85, 0.55)
+const COLOR_HOVER := Color(0.62, 0.82, 1.0)
 
 var client: MatchClient
 var library := CardLibrary.new()
@@ -24,11 +32,25 @@ var state: Dictionary = {}
 var legal_actions: Array = []
 var player_id := "player-a"
 var opponent_id := ""
-var selected_entity := ""
-var selected_card := ""
 var log_lines: Array[String] = []
 
-@onready var _focus_default := player_id
+## Current selection: either a hand card instance id or a board entity id.
+var selected_card := ""
+var selected_entity := ""
+## Destinations the selection can commit to, rebuilt whenever it changes.
+var slot_targets: Dictionary = {}
+var entity_targets: Dictionary = {}
+
+## Drag state. `_press_origin` is in this Control's coordinate space.
+var _pressed_source := ""
+var _pressed_is_card := false
+var _press_origin := Vector2.ZERO
+var _dragging := false
+var _hovered_key := ""
+
+## Screen rects of every droppable thing, rebuilt after each layout pass.
+## Maps a target key to {rect, kind, id, valid}.
+var _drop_zones: Dictionary = {}
 
 var status_label: Label
 var connection_dot: Panel
@@ -46,6 +68,7 @@ var end_turn_button: Button
 var create_pvp_button: Button
 var create_pve_button: Button
 var join_button: Button
+var arrow: TargetingArrow
 
 func _ready() -> void:
 	client = MatchClient.new()
@@ -111,6 +134,10 @@ func _build_interface() -> void:
 	hand_scroll.add_child(hand_container)
 
 	game_row.add_child(_build_side_panel())
+
+	# The arrow sits above everything and never takes pointer input.
+	arrow = TargetingArrow.new()
+	add_child(arrow)
 
 func _build_connection_bar() -> Control:
 	var bar := HBoxContainer.new()
@@ -195,14 +222,14 @@ func _build_side_panel() -> Control:
 
 	panel.add_child(_section_title("Available actions"))
 	action_hint = Label.new()
-	action_hint.text = "Select one of your creatures or a card to narrow this list."
+	action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target."
 	action_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	action_hint.add_theme_font_size_override("font_size", 11)
 	panel.add_child(action_hint)
 
 	var action_scroll := ScrollContainer.new()
 	action_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	action_scroll.custom_minimum_size.y = 220
+	action_scroll.custom_minimum_size.y = 200
 	panel.add_child(action_scroll)
 	action_container = VBoxContainer.new()
 	action_container.add_theme_constant_override("separation", 4)
@@ -213,7 +240,7 @@ func _build_side_panel() -> Control:
 	log_label = RichTextLabel.new()
 	log_label.bbcode_enabled = true
 	log_label.scroll_following = true
-	log_label.custom_minimum_size.y = 190
+	log_label.custom_minimum_size.y = 180
 	log_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(log_label)
 	return panel
@@ -312,14 +339,16 @@ func _on_library_loaded() -> void:
 
 func _on_match_state(new_state: Dictionary) -> void:
 	state = new_state
-	selected_entity = ""
-	selected_card = ""
+	_clear_selection()
 	_render_state()
 
 func _on_legal_actions(target_player: String, actions: Array) -> void:
 	if target_player != player_id:
 		return
 	legal_actions = actions
+	# A selection made before this arrived may no longer be legal.
+	_refresh_targets()
+	_render_state()
 	_render_actions()
 
 func _on_game_events(events: Array) -> void:
@@ -334,16 +363,19 @@ func _on_match_ended(winner_id: String) -> void:
 	turn_banner.text = "Match over — " + outcome
 	_append_log("[b]%s[/b]" % outcome)
 	end_turn_button.disabled = true
+	_cancel_drag()
 
 func _on_server_error(code: String, message: String) -> void:
 	_set_status("%s: %s" % [code, message], true)
 	_append_log("[color=#e06c75]%s — %s[/color]" % [code, message])
+	_cancel_drag()
 
 # --- Rendering --------------------------------------------------------------
 
 func _render_state() -> void:
 	_clear(board_container)
 	_clear(hand_container)
+	_drop_zones.clear()
 	if state.is_empty():
 		return
 	var sides: Variant = state.get("sides", {})
@@ -379,13 +411,24 @@ func _render_state() -> void:
 	board_container.add_child(_hero_strip(player_id, mine, true))
 
 	_render_hand(mine)
+	# Rects are only correct once the containers have laid out.
+	call_deferred("_rebuild_drop_zones")
 
-## Hero, Taika, deck and hand counts for one side.
+## Hero, Taika, deck and hand counts for one side. The strip is a drop target:
+## heroes are addressed as "<playerId>:hero" and can be attacked or healed.
 func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
+	var hero_id := Targeting.hero_entity_id(side_id)
 	var panel := PanelContainer.new()
-	_tint(panel, COLOR_FRIENDLY if is_mine else COLOR_ENEMY)
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var is_target := entity_targets.has(hero_id)
+	if is_target:
+		_tint(panel, COLOR_TARGET if _hovered_key != hero_id else COLOR_HOVER)
+	else:
+		_tint(panel, COLOR_FRIENDLY if is_mine else COLOR_ENEMY)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(row)
 
 	var hero: Dictionary = side.get("hero", {})
@@ -420,11 +463,20 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 		artifact_label.text = "Artifacts %d" % (artifacts as Array).size()
 		row.add_child(artifact_label)
 
-	if str(hero.get("powerUsedThisTurn", false)) == "true":
+	if bool(hero.get("powerUsedThisTurn", false)):
 		var used := Label.new()
 		used.text = "Hero Power used"
 		used.add_theme_color_override("font_color", Color(0.7, 0.7, 0.74))
 		row.add_child(used)
+
+	if is_target:
+		var prompt := Label.new()
+		prompt.text = "◀ target"
+		prompt.add_theme_color_override("font_color", Color(0.95, 0.98, 1.0))
+		row.add_child(prompt)
+
+	panel.set_meta("target_kind", "entity")
+	panel.set_meta("target_id", hero_id)
 	return panel
 
 func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
@@ -433,6 +485,7 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 	var width := int(config.get("width", 0))
 	if width <= 0:
 		return
+	var owner_id := str(side.get("playerId", ""))
 	var slots: Dictionary = battlefield.get("slots", {})
 	var creatures: Dictionary = side.get("creatures", {})
 	for row_name in rows:
@@ -460,28 +513,43 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 			var occupant: Variant = null
 			if typeof(row_slots) == TYPE_ARRAY and column < (row_slots as Array).size():
 				occupant = (row_slots as Array)[column]
-			grid.add_child(_slot_button(str(row_name), column, occupant, creatures, is_mine))
+			grid.add_child(
+				_slot_panel(owner_id, str(row_name), column, occupant, creatures, is_mine)
+			)
 
-func _slot_button(
-	row_name: String, column: int, occupant: Variant, creatures: Dictionary, is_mine: bool
+func _slot_panel(
+	owner_id: String,
+	row_name: String,
+	column: int,
+	occupant: Variant,
+	creatures: Dictionary,
+	is_mine: bool
 ) -> Control:
-	var button := Button.new()
-	button.custom_minimum_size = SLOT_SIZE
-	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	button.clip_text = true
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = SLOT_SIZE
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+
+	var label := Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel.add_child(label)
 
 	if occupant == null:
-		var is_open := _slot_is_targetable(row_name, column)
-		# An unreachable empty slot stays quiet; a reachable one invites a click.
-		button.text = "＋" if is_open else ""
-		button.disabled = not is_open
-		button.tooltip_text = "%s %d — empty" % [row_name.capitalize(), column]
+		var key := Targeting.slot_key(owner_id, row_name, column)
+		var is_open: bool = slot_targets.has(key)
+		label.text = "＋" if is_open else ""
+		panel.tooltip_text = "%s %d — empty" % [row_name.capitalize(), column]
+		# Every slot registers as a drop zone; whether it accepts the current
+		# selection is decided at drop time, not at layout time.
+		panel.set_meta("target_kind", "slot")
+		panel.set_meta("target_id", key)
 		if is_open:
-			_tint_button(button, COLOR_TARGET)
-			button.pressed.connect(_on_slot_pressed.bind(row_name, column))
+			_tint(panel, COLOR_HOVER if _hovered_key == key else COLOR_TARGET)
 		else:
-			_tint_button(button, COLOR_EMPTY)
-		return button
+			_tint(panel, COLOR_EMPTY)
+		return panel
 
 	var creature_id := str(occupant)
 	var creature: Dictionary = creatures.get(creature_id, {})
@@ -502,25 +570,32 @@ func _slot_button(
 	var max_health := _num(creature.get("maxHealth", "?"))
 	# Show max health only while damaged, so a healthy creature stays uncluttered.
 	var health_text := health if health == max_health else "%s/%s" % [health, max_health]
-	button.text = "%s\n⚔ %s  ♥ %s%s" % [
+	label.text = "%s\n⚔ %s  ♥ %s%s" % [
 		display_name,
 		_num(creature.get("currentAttack", "?")),
 		health_text,
 		marks,
 	]
 	if not keyword_list.is_empty():
-		button.text += "\n" + ", ".join(keyword_list)
-	button.tooltip_text = library.tooltip(definition_id)
+		label.text += "\n" + ", ".join(keyword_list)
+	panel.tooltip_text = library.tooltip(definition_id)
 
+	var is_target: bool = entity_targets.has(creature_id)
 	if creature_id == selected_entity:
-		_tint_button(button, COLOR_SELECTED)
-	elif is_mine and _entity_has_actions(creature_id):
-		_tint_button(button, COLOR_READY)
-	elif _entity_is_targetable(creature_id):
-		_tint_button(button, COLOR_TARGET)
+		_tint(panel, COLOR_SELECTED)
+	elif is_target:
+		_tint(panel, COLOR_HOVER if _hovered_key == creature_id else COLOR_TARGET)
+	elif is_mine and _entity_can_act(creature_id):
+		_tint(panel, COLOR_READY)
+	else:
+		_tint(panel, COLOR_FRIENDLY if is_mine else COLOR_ENEMY)
 
-	button.pressed.connect(_on_entity_pressed.bind(creature_id))
-	return button
+	panel.set_meta("target_kind", "entity")
+	panel.set_meta("target_id", creature_id)
+	# Your own creatures can start a drag; enemies can only be dropped onto.
+	if is_mine:
+		panel.set_meta("drag_entity", creature_id)
+	return panel
 
 func _render_hand(side: Dictionary) -> void:
 	var hand: Variant = side.get("hand", [])
@@ -539,10 +614,17 @@ func _render_hand(side: Dictionary) -> void:
 func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	var instance_id := str(card.get("instanceId", ""))
 	var definition_id := str(card.get("definitionId", ""))
-	var button := Button.new()
-	button.custom_minimum_size = CARD_SIZE
-	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	button.clip_text = true
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = CARD_SIZE
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+
+	var label := Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel.add_child(label)
+
 	var cost := library.cost(definition_id)
 	var kind := library.card_type(definition_id)
 	var line := "%s\n%d Taika" % [library.card_name(definition_id), cost]
@@ -550,133 +632,284 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 		line += "\n%d/%d" % [library.base_attack(definition_id), library.base_health(definition_id)]
 	elif kind != "":
 		line += "\n" + kind.capitalize()
-	button.text = line
-	button.tooltip_text = library.tooltip(definition_id)
+	panel.tooltip_text = library.tooltip(definition_id)
 
-	var playable := _card_has_actions(instance_id)
+	var playable := not Targeting.actions_for_card(legal_actions, instance_id).is_empty()
 	if instance_id == selected_card:
-		_tint_button(button, COLOR_SELECTED)
+		_tint(panel, COLOR_SELECTED)
 	elif playable:
-		_tint_button(button, COLOR_READY)
+		_tint(panel, COLOR_READY)
+		panel.set_meta("drag_card", instance_id)
 	else:
-		button.modulate = Color(0.68, 0.68, 0.72)
+		_tint(panel, COLOR_EMPTY)
+		panel.modulate = Color(0.72, 0.72, 0.76)
 		# Say why a card cannot be played, rather than just greying it out.
 		if cost > available_taika:
-			button.text += "\n(needs %d)" % cost
-			button.tooltip_text += "\n\nNot enough Taika: %d of %d." % [available_taika, cost]
+			line += "\n(needs %d)" % cost
+			panel.tooltip_text += "\n\nNot enough Taika: %d of %d." % [available_taika, cost]
 		else:
-			button.tooltip_text += "\n\nNo legal play for this card right now."
-	button.pressed.connect(_on_card_pressed.bind(instance_id))
-	return button
+			panel.tooltip_text += "\n\nNo legal play for this card right now."
+	if playable:
+		panel.set_meta("drag_card", instance_id)
+	label.text = line
+	return panel
 
-# --- Selection and actions --------------------------------------------------
+## Recolours existing target controls without rebuilding the board.
+##
+## Called while dragging: rebuilding would free the controls whose rects the
+## drag is hit-testing against, so only the tints change.
+func _repaint_highlights() -> void:
+	for key in _drop_zones:
+		var zone: Dictionary = _drop_zones[key]
+		var kind := str(zone.get("kind", ""))
+		if kind != "slot" and kind != "entity":
+			continue
+		var control: Variant = zone.get("control", null)
+		if not (control is Control) or not is_instance_valid(control):
+			continue
+		var id := str(key)
+		var is_target: bool = slot_targets.has(id) or entity_targets.has(id)
+		if not is_target:
+			continue
+		_tint(control as Control, COLOR_HOVER if _hovered_key == id else COLOR_TARGET)
 
-func _on_entity_pressed(entity_id: String) -> void:
-	selected_card = ""
-	selected_entity = "" if selected_entity == entity_id else entity_id
-	_render_state()
-	_render_actions()
+## Records the screen rect of every droppable or draggable control.
+func _rebuild_drop_zones() -> void:
+	_drop_zones.clear()
+	_collect_zones(board_container)
+	_collect_zones(hand_container)
 
-func _on_card_pressed(card_instance_id: String) -> void:
-	selected_entity = ""
-	selected_card = "" if selected_card == card_instance_id else card_instance_id
-	_render_state()
-	_render_actions()
+func _collect_zones(node: Node) -> void:
+	for child in node.get_children():
+		if child is Control:
+			var control := child as Control
+			if control.has_meta("target_kind"):
+				_drop_zones[str(control.get_meta("target_id"))] = {
+					"rect": control.get_global_rect(),
+					"kind": str(control.get_meta("target_kind")),
+					"control": control,
+				}
+			if control.has_meta("drag_card"):
+				_drop_zones["card:" + str(control.get_meta("drag_card"))] = {
+					"rect": control.get_global_rect(),
+					"kind": "drag_card",
+					"id": str(control.get_meta("drag_card")),
+					"control": control,
+				}
+			if control.has_meta("drag_entity"):
+				_drop_zones["drag:" + str(control.get_meta("drag_entity"))] = {
+					"rect": control.get_global_rect(),
+					"kind": "drag_entity",
+					"id": str(control.get_meta("drag_entity")),
+					"control": control,
+				}
+		_collect_zones(child)
 
-func _on_slot_pressed(row_name: String, column: int) -> void:
-	# An empty slot is only clickable when the current selection can reach it.
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
-			continue
-		var position: Variant = action.get("position", action.get("destination", null))
-		if typeof(position) != TYPE_DICTIONARY:
-			continue
-		if str((position as Dictionary).get("row", "")) != row_name:
-			continue
-		if int((position as Dictionary).get("column", -1)) != column:
-			continue
-		if _action_matches_selection(action):
-			_submit(action)
+# --- Pointer interaction ----------------------------------------------------
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index != MOUSE_BUTTON_LEFT:
+			if button.pressed and button.button_index == MOUSE_BUTTON_RIGHT:
+				# Right click cancels, as in Hearthstone.
+				_clear_selection()
+				_render_state()
+				_render_actions()
 			return
+		if button.pressed:
+			_on_pointer_down(button.global_position)
+		else:
+			_on_pointer_up(button.global_position)
+	elif event is InputEventMouseMotion and (_dragging or _pressed_source != ""):
+		_on_pointer_move((event as InputEventMouseMotion).global_position)
 
-func _action_matches_selection(action: Dictionary) -> bool:
+func _on_pointer_down(at: Vector2) -> void:
+	_rebuild_drop_zones()
+	# Starting a drag on a target of the current selection commits instead.
+	var zone := _zone_at(at, ["drag_card", "drag_entity"])
+	if zone.is_empty():
+		return
+	_pressed_source = str(zone.get("id", ""))
+	_pressed_is_card = str(zone.get("kind", "")) == "drag_card"
+	_press_origin = at
+	_dragging = false
+
+func _on_pointer_move(at: Vector2) -> void:
+	if _pressed_source == "" and not _dragging:
+		return
+	if not _dragging and at.distance_to(_press_origin) >= DRAG_THRESHOLD:
+		# Promote the press into a drag, selecting its source.
+		_begin_drag(_pressed_source, _pressed_is_card)
+	if not _dragging:
+		return
+	var hovered := _target_zone_at(at)
+	var key := str(hovered.get("key", ""))
+	if key != _hovered_key:
+		_hovered_key = key
+		# Recolour in place: a full re-render would destroy the very controls
+		# whose rects this drag is hit-testing against.
+		_repaint_highlights()
+	# Green over a legal target, red only when hovering something that is
+	# explicitly not one, neutral while the arrow is still in flight.
+	var valid: Variant = null
+	if key != "":
+		valid = true
+	elif not _zone_at(at, ["slot", "entity"]).is_empty():
+		valid = false
+	arrow.point_at(at - arrow.global_position, valid)
+
+func _on_pointer_up(at: Vector2) -> void:
+	if _dragging:
+		var hovered := _target_zone_at(at)
+		if not hovered.is_empty():
+			_commit_target(str(hovered.get("key", "")))
+		else:
+			_set_status("No legal target there.", true)
+			_clear_selection()
+		_end_drag()
+		_render_state()
+		_render_actions()
+		return
+
+	# A plain click: either pick up a source, or commit onto a lit target.
+	if _pressed_source != "":
+		var target := _target_zone_at(at)
+		if not target.is_empty() and (selected_card != "" or selected_entity != ""):
+			_commit_target(str(target.get("key", "")))
+		else:
+			_toggle_selection(_pressed_source, _pressed_is_card)
+		_pressed_source = ""
+		_render_state()
+		_render_actions()
+		return
+
+	# Clicking a lit target with an existing selection commits it.
+	var direct := _target_zone_at(at)
+	if not direct.is_empty() and (selected_card != "" or selected_entity != ""):
+		_commit_target(str(direct.get("key", "")))
+		_render_state()
+		_render_actions()
+
+func _begin_drag(source_id: String, is_card: bool) -> void:
+	if is_card:
+		selected_card = source_id
+		selected_entity = ""
+	else:
+		selected_entity = source_id
+		selected_card = ""
+	_refresh_targets()
+	if slot_targets.is_empty() and entity_targets.is_empty():
+		# Nothing to aim at; keep the selection but do not draw an arrow.
+		var immediate: Variant = _untargeted_for_selection()
+		if immediate != null:
+			_submit(immediate as Dictionary)
+			_clear_selection()
+			return
+		_set_status(Targeting.prompt_for(_selection_actions(), player_id), true)
+		return
+	_dragging = true
+	var zone_key := ("card:" if is_card else "drag:") + source_id
+	var origin := _press_origin
+	if _drop_zones.has(zone_key):
+		origin = (_drop_zones[zone_key]["rect"] as Rect2).get_center()
+	arrow.begin(origin - arrow.global_position)
+	# Light up the newly valid destinations without rebuilding the board, so
+	# the rects this drag hit-tests against stay alive.
+	_repaint_highlights()
+	_render_actions()
+
+func _end_drag() -> void:
+	_dragging = false
+	_pressed_source = ""
+	_hovered_key = ""
+	arrow.finish()
+
+func _cancel_drag() -> void:
+	_end_drag()
+	_clear_selection()
+
+func _toggle_selection(source_id: String, is_card: bool) -> void:
+	var already := (selected_card == source_id) if is_card else (selected_entity == source_id)
+	if already:
+		_clear_selection()
+		return
+	if is_card:
+		selected_card = source_id
+		selected_entity = ""
+	else:
+		selected_entity = source_id
+		selected_card = ""
+	_refresh_targets()
+	# A selection with exactly one untargeted action resolves immediately.
+	var immediate: Variant = _untargeted_for_selection()
+	if immediate != null and slot_targets.is_empty() and entity_targets.is_empty():
+		_submit(immediate as Dictionary)
+		_clear_selection()
+		return
+	_set_status(Targeting.prompt_for(_selection_actions(), player_id))
+
+func _clear_selection() -> void:
+	selected_card = ""
+	selected_entity = ""
+	slot_targets = {}
+	entity_targets = {}
+	_hovered_key = ""
+
+func _selection_actions() -> Array:
 	if selected_card != "":
-		return str(action.get("cardInstanceId", "")) == selected_card
+		return Targeting.actions_for_card(legal_actions, selected_card)
 	if selected_entity != "":
-		return str(action.get("creatureId", "")) == selected_entity
-	return false
+		return Targeting.actions_for_entity(legal_actions, selected_entity)
+	return []
 
-func _slot_is_targetable(row_name: String, column: int) -> bool:
-	if selected_card == "" and selected_entity == "":
-		return false
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
-			continue
-		var position: Variant = action.get("position", action.get("destination", null))
-		if typeof(position) != TYPE_DICTIONARY:
-			continue
-		if str((position as Dictionary).get("row", "")) == row_name \
-				and int((position as Dictionary).get("column", -1)) == column \
-				and _action_matches_selection(action):
-			return true
-	return false
+func _untargeted_for_selection() -> Variant:
+	return Targeting.untargeted_action(_selection_actions())
 
-func _entity_has_actions(entity_id: String) -> bool:
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
-			continue
-		if str(action.get("attackerId", "")) == entity_id \
-				or str(action.get("creatureId", "")) == entity_id \
-				or str(action.get("firstCreatureId", "")) == entity_id \
-				or str(action.get("secondCreatureId", "")) == entity_id:
-			return true
-	return false
+## Recomputes the lit destinations for the current selection.
+func _refresh_targets() -> void:
+	var actions := _selection_actions()
+	# A summon or a move always lands on your own battlefield.
+	slot_targets = Targeting.slot_targets(actions, player_id)
+	entity_targets = Targeting.entity_targets(actions)
 
-func _card_has_actions(card_instance_id: String) -> bool:
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
-			continue
-		if str(action.get("cardInstanceId", "")) == card_instance_id:
-			return true
-	return false
+func _commit_target(key: String) -> void:
+	if key == "":
+		return
+	var action: Variant = slot_targets.get(key, entity_targets.get(key, null))
+	if action == null:
+		_set_status("That is not a legal target for this selection.", true)
+		return
+	_submit(action as Dictionary)
+	_clear_selection()
 
-func _entity_is_targetable(entity_id: String) -> bool:
-	if selected_entity == "" and selected_card == "":
-		return false
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
+## The drop zone under a point, restricted to the current selection's targets.
+func _target_zone_at(at: Vector2) -> Dictionary:
+	for key in _drop_zones:
+		var zone: Dictionary = _drop_zones[key]
+		var kind := str(zone.get("kind", ""))
+		if kind != "slot" and kind != "entity":
 			continue
-		if str(action.get("targetId", "")) != entity_id:
+		if not (zone["rect"] as Rect2).has_point(at):
 			continue
-		if selected_card != "" and str(action.get("cardInstanceId", "")) == selected_card:
-			return true
-		if selected_entity != "" and str(action.get("attackerId", "")) == selected_entity:
-			return true
-		if selected_entity != "" and str(action.get("secondCreatureId", "")) == selected_entity:
-			return true
-	return false
+		var id := str(key)
+		if slot_targets.has(id) or entity_targets.has(id):
+			return {"key": id, "zone": zone}
+	return {}
 
-## Actions relevant to the current selection, or all of them when nothing is selected.
-func _visible_actions() -> Array:
-	if selected_card == "" and selected_entity == "":
-		return legal_actions
-	var filtered: Array = []
-	for action in legal_actions:
-		if typeof(action) != TYPE_DICTIONARY:
+func _zone_at(at: Vector2, kinds: Array) -> Dictionary:
+	for key in _drop_zones:
+		var zone: Dictionary = _drop_zones[key]
+		if not kinds.has(str(zone.get("kind", ""))):
 			continue
-		var kind := str(action.get("type", ""))
-		if kind == "END_TURN" or kind == "USE_HERO_POWER":
-			filtered.append(action)
-		elif selected_card != "" and str(action.get("cardInstanceId", "")) == selected_card:
-			filtered.append(action)
-		elif selected_entity != "" and (
-			str(action.get("attackerId", "")) == selected_entity
-			or str(action.get("creatureId", "")) == selected_entity
-			or str(action.get("firstCreatureId", "")) == selected_entity
-			or str(action.get("secondCreatureId", "")) == selected_entity
-		):
-			filtered.append(action)
-	return filtered
+		if (zone["rect"] as Rect2).has_point(at):
+			return zone
+	return {}
+
+func _entity_can_act(entity_id: String) -> bool:
+	return not Targeting.actions_for_entity(legal_actions, entity_id).is_empty()
+
+# --- Action list ------------------------------------------------------------
 
 func _render_actions() -> void:
 	_clear(action_container)
@@ -687,15 +920,15 @@ func _render_actions() -> void:
 		action_hint.text = "Waiting for the opponent…" if not is_my_turn else "No legal actions."
 		return
 
-	var visible := _visible_actions()
-	if selected_card != "":
-		action_hint.text = "Showing actions for the selected card. Click it again to clear."
-	elif selected_entity != "":
-		action_hint.text = "Showing actions for the selected creature. Click it again to clear."
+	if selected_card != "" or selected_entity != "":
+		action_hint.text = Targeting.prompt_for(_selection_actions(), player_id) \
+			+ "  Right-click or press Escape to cancel."
 	else:
-		action_hint.text = "Select one of your creatures or a card to narrow this list."
+		action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target."
 
-	# Group actions so a long list stays scannable.
+	# The list mirrors what dragging offers, and stays usable as a fallback.
+	var visible := _selection_actions() if (selected_card != "" or selected_entity != "") \
+		else legal_actions
 	var grouped: Dictionary = {}
 	for action in visible:
 		if typeof(action) != TYPE_DICTIONARY:
@@ -767,8 +1000,14 @@ func _submit(action: Dictionary) -> void:
 	if not client.submit_action(action):
 		_set_status("Not connected — press Join to reconnect.", true)
 		return
-	selected_entity = ""
-	selected_card = ""
+	_clear_selection()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and (event as InputEventKey).pressed \
+			and (event as InputEventKey).keycode == KEY_ESCAPE:
+		_cancel_drag()
+		_render_state()
+		_render_actions()
 
 # --- Small helpers ----------------------------------------------------------
 
@@ -793,14 +1032,6 @@ func _tint(panel: Control, color: Color) -> void:
 	style.content_margin_top = 4
 	style.content_margin_bottom = 4
 	panel.add_theme_stylebox_override("panel", style)
-
-func _tint_button(button: Button, color: Color) -> void:
-	for state_name in ["normal", "hover", "pressed", "focus"]:
-		var style := StyleBoxFlat.new()
-		style.bg_color = color if state_name != "hover" else color.lightened(0.12)
-		style.set_corner_radius_all(4)
-		style.set_content_margin_all(4)
-		button.add_theme_stylebox_override(state_name, style)
 
 func _clear(node: Node) -> void:
 	for child in node.get_children():

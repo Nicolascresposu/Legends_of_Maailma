@@ -32,8 +32,8 @@ static func entity_name(entity_id: String, state: Dictionary, library: CardLibra
 			var side: Variant = (sides as Dictionary)[side_id]
 			if typeof(side) != TYPE_DICTIONARY:
 				continue
-			# A Hero is addressed by its owner's player id.
-			if entity_id == side_id:
+			# A Hero is addressed as "<playerId>:hero", not by the bare player id.
+			if entity_id == Targeting.hero_entity_id(str(side_id)):
 				var hero: Variant = (side as Dictionary).get("hero", {})
 				var hero_name := "Hero"
 				if typeof(hero) == TYPE_DICTIONARY:
