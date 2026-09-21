@@ -319,3 +319,73 @@ describe('ownership at match start', () => {
     expect(accepted.status).toBe(200);
   });
 });
+
+describe('orphaned cards', () => {
+  it('reports stored card ids the registry no longer defines', async () => {
+    const user = await register('orphan');
+    await prisma.collectionEntry.create({
+      data: { userId: user.user.id, cardId: 'retired_card', quantity: 2 },
+    });
+    await prisma.deck.create({
+      data: {
+        userId: user.user.id,
+        name: 'Legacy',
+        heroId: 'healer',
+        cardIds: ['retired_card', ...Array.from({ length: 29 }, () => 'wolf')],
+      },
+    });
+
+    const report = await collections.findOrphans();
+    const entry = report.collection.find((row) => row.cardId === 'retired_card');
+    expect(entry).toBeDefined();
+    expect(entry!.rows).toBeGreaterThanOrEqual(1);
+    const deck = report.decks.find((row) => row.name === 'Legacy');
+    expect(deck).toBeDefined();
+    expect(deck!.unknown).toContain('retired_card');
+    expect(report.knownCardCount).toBeGreaterThan(0);
+  });
+
+  it('ignores a database whose cards all still exist', async () => {
+    const user = await register('noorphan');
+    const report = await collections.findOrphans();
+    expect(report.collection.some((row) => row.cardId === 'wolf')).toBe(false);
+    void user;
+  });
+
+  it('prunes orphaned collection rows but never touches decks', async () => {
+    const user = await register('prune');
+    await prisma.collectionEntry.create({
+      data: { userId: user.user.id, cardId: 'prune_me', quantity: 1 },
+    });
+    const deck = await prisma.deck.create({
+      data: {
+        userId: user.user.id,
+        name: 'Untouched',
+        heroId: 'healer',
+        cardIds: ['prune_me', ...Array.from({ length: 29 }, () => 'wolf')],
+      },
+    });
+
+    const result = await collections.pruneOrphans();
+    expect(result.cardIds).toContain('prune_me');
+    expect(await prisma.collectionEntry.count({ where: { cardId: 'prune_me' } })).toBe(0);
+
+    // The deck keeps every card it was saved with.
+    const after = await prisma.deck.findUniqueOrThrow({ where: { id: deck.id } });
+    expect(after.cardIds).toContain('prune_me');
+    expect(after.cardIds).toHaveLength(30);
+    // ...and still explains itself.
+    const readiness = await collections.assessForUser(user.user.id, after.cardIds);
+    expect(readiness.playable).toBe(false);
+    expect(readiness.ruleErrors.join(' ')).toContain('prune_me');
+  });
+
+  it('refuses to prune when the registry looks unloaded', async () => {
+    const service = new CollectionService(prisma);
+    const real = service.findOrphans.bind(service);
+    // A failed registry import would make every stored card look orphaned;
+    // pruning then would wipe every collection.
+    service.findOrphans = async () => ({ ...(await real()), knownCardCount: 0 });
+    await expect(service.pruneOrphans()).rejects.toThrow(/Refusing to prune/);
+  });
+});

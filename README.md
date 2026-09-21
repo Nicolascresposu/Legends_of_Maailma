@@ -123,6 +123,28 @@ POST /api/social/challenges/:id/decline
 POST /api/social/challenges/:id/cancel
 ```
 
+### When cards change
+
+Card ids are plain strings with no foreign key: `@maailma/card-definitions` is the only source of
+truth for which cards exist. Removing or renaming a card therefore needs no migration, and nothing
+crashes — but rows referencing the old id survive, invisible to the collection browser.
+
+The server warns about them at startup, and the seed script reports them in detail:
+
+```bash
+npm run seed -- --audit   # list stored card ids the registry no longer defines
+npm run seed -- --prune   # audit, then delete the orphaned collection rows
+```
+
+Decks are only ever reported, never rewritten: stripping unknown ids would silently alter what a
+player built, and such a deck already explains itself through its `readiness` marker. Repair those
+in the deck builder.
+
+Prefer retiring a card by setting `collectible: false` over deleting it. That hides it from the
+collection browser while keeping existing decks intelligible, and it avoids the one genuinely
+dangerous case — reusing an id for a different card later, which would silently hand the new card
+to everyone who owned the old one.
+
 ### Development accounts
 
 `npm run seed` creates a small cast to sign in as, all with the password

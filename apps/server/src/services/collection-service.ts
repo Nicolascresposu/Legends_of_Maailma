@@ -18,6 +18,20 @@ export interface CollectionCard {
   copyLimit: number;
 }
 
+/** Card ids present in stored data but absent from the registry. */
+export interface OrphanReport {
+  collection: Array<{ cardId: string; rows: number }>;
+  decks: Array<{ deckId: string; name: string; userId: string; unknown: string[] }>;
+  /** Size of the registry the report was made against, for sanity checks. */
+  knownCardCount: number;
+}
+
+/**
+ * A registry smaller than this is treated as a load failure rather than a
+ * deliberate cull, so a broken import cannot trigger a mass delete.
+ */
+const MINIMUM_PLAUSIBLE_REGISTRY = 5;
+
 export interface DeckReadiness {
   /** True when this deck may start a match. */
   playable: boolean;
@@ -59,6 +73,66 @@ export class CollectionService {
       where: { userId },
       orderBy: { cardId: 'asc' },
     });
+  }
+
+  /**
+   * Stored card ids the registry no longer defines.
+   *
+   * Card ids are plain strings with no foreign key, so removing or renaming a
+   * card in `@maailma/card-definitions` leaves rows behind that nothing
+   * validates. They are harmless — a deck holding one is already reported
+   * unplayable — but they are invisible, and an id that is later reused for a
+   * different card would be silently inherited by whoever owned the old one.
+   */
+  async findOrphans(): Promise<OrphanReport> {
+    const known = new Set(Object.keys(CARD_DEFINITIONS));
+
+    const grouped = await this.prisma.collectionEntry.groupBy({
+      by: ['cardId'],
+      _count: { _all: true },
+    });
+    const collection = grouped
+      .filter((row) => !known.has(row.cardId))
+      .map((row) => ({ cardId: row.cardId, rows: row._count._all }))
+      .sort((a, b) => a.cardId.localeCompare(b.cardId));
+
+    const storedDecks = await this.prisma.deck.findMany({
+      select: { id: true, name: true, userId: true, cardIds: true },
+    });
+    const decks: OrphanReport['decks'] = [];
+    for (const deck of storedDecks) {
+      const unknown = [...new Set(deck.cardIds.filter((cardId) => !known.has(cardId)))].sort();
+      if (unknown.length > 0) {
+        decks.push({ deckId: deck.id, name: deck.name, userId: deck.userId, unknown });
+      }
+    }
+
+    return { collection, decks, knownCardCount: known.size };
+  }
+
+  /**
+   * Deletes orphaned collection rows. Decks are never touched: rewriting one
+   * would silently alter what a player built, and the readiness marker already
+   * explains why it cannot be played.
+   *
+   * Refuses to run when the registry looks empty or implausibly small, because
+   * a failed import would otherwise make every card look orphaned and wipe
+   * every collection.
+   */
+  async pruneOrphans(): Promise<{ deleted: number; cardIds: string[] }> {
+    const report = await this.findOrphans();
+    if (report.knownCardCount < MINIMUM_PLAUSIBLE_REGISTRY) {
+      throw new Error(
+        `Refusing to prune: the card registry reports only ${report.knownCardCount} cards, ` +
+          'which suggests it failed to load rather than that every card was removed.',
+      );
+    }
+    const cardIds = report.collection.map((entry) => entry.cardId);
+    if (cardIds.length === 0) return { deleted: 0, cardIds: [] };
+    const result = await this.prisma.collectionEntry.deleteMany({
+      where: { cardId: { in: cardIds } },
+    });
+    return { deleted: result.count, cardIds };
   }
 
   /** Owned counts keyed by card id. */

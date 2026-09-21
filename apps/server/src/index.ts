@@ -273,6 +273,28 @@ function sendToPlayer(matchId: string, playerId: string, message: ServerMessage)
   }
 }
 
-server.listen(port, () =>
-  logger.info('Maailma server listening', { url: `http://localhost:${port}`, port }),
-);
+/**
+ * Card ids are code-owned, so stored rows can outlive a card that was removed
+ * or renamed. Report them once at startup rather than letting the condition
+ * stay invisible; nothing is changed, and a database that is unreachable here
+ * is already reported by the health endpoint.
+ */
+async function reportOrphanedCards(): Promise<void> {
+  try {
+    const report = await collections.findOrphans();
+    if (report.collection.length === 0 && report.decks.length === 0) return;
+    logger.warn('Stored cards are missing from the registry', {
+      collectionCardIds: report.collection.map((entry) => entry.cardId),
+      affectedCollectionRows: report.collection.reduce((sum, entry) => sum + entry.rows, 0),
+      affectedDecks: report.decks.length,
+      hint: 'npm run seed -- --audit for detail, --prune to remove orphaned collection rows',
+    });
+  } catch (error) {
+    logger.debug('Orphan check skipped', errorFields(error));
+  }
+}
+
+server.listen(port, () => {
+  logger.info('Maailma server listening', { url: `http://localhost:${port}`, port });
+  void reportOrphanedCards();
+});

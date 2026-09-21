@@ -8,6 +8,8 @@
  *   npm run seed              # create or refresh the accounts
  *   npm run seed -- --reset   # delete them first
  *   npm run seed -- --clean   # also remove accounts left by client test runs
+ *   npm run seed -- --audit   # report stored cards the registry no longer defines
+ *   npm run seed -- --prune   # audit, then delete orphaned collection rows
  *
  * Every account uses the same password, printed at the end. This is a
  * development convenience and has no place in a deployed database.
@@ -81,6 +83,13 @@ const PLANS: SeedPlan[] = [
 ];
 
 async function main(): Promise<void> {
+  // The audit is read-only and answers a different question from seeding, so
+  // it runs alone rather than alongside account creation.
+  if (process.argv.includes('--audit') || process.argv.includes('--prune')) {
+    await auditOrphans(process.argv.includes('--prune'));
+    return;
+  }
+
   const reset = process.argv.includes('--reset');
   if (reset) {
     const removed = await prisma.user.deleteMany({
@@ -166,6 +175,55 @@ async function main(): Promise<void> {
   }
   console.log('\n  alice and bob are friends; carol has a pending request to alice.');
   console.log('  * marks the active deck.');
+}
+
+/**
+ * Reports card ids stored in the database that the registry no longer defines,
+ * and optionally deletes the orphaned collection rows.
+ *
+ * Decks are only ever reported. Stripping unknown ids from a saved deck would
+ * silently rewrite what a player built, and an unplayable deck already explains
+ * itself through its readiness marker.
+ */
+async function auditOrphans(prune: boolean): Promise<void> {
+  const report = await collections.findOrphans();
+  console.log(`Registry defines ${report.knownCardCount} card(s).`);
+
+  if (report.collection.length === 0) {
+    console.log('No orphaned collection rows.');
+  } else {
+    const rows = report.collection.reduce((sum, entry) => sum + entry.rows, 0);
+    console.log(`
+Orphaned collection rows (${rows} row(s) across ${report.collection.length} card id(s)):`);
+    for (const entry of report.collection) {
+      console.log(`  ${entry.cardId}  ${entry.rows} row(s)`);
+    }
+  }
+
+  if (report.decks.length === 0) {
+    console.log('No decks reference a missing card.');
+  } else {
+    console.log(`
+Decks referencing missing cards (${report.decks.length}):`);
+    for (const deck of report.decks) {
+      console.log(`  "${deck.name}"  owner ${deck.userId}  ->  ${deck.unknown.join(', ')}`);
+    }
+    console.log('  These are left untouched; each is already reported unplayable.');
+  }
+
+  if (!prune) {
+    if (report.collection.length > 0) {
+      console.log('\nRe-run with --prune to delete the orphaned collection rows.');
+    }
+    return;
+  }
+
+  const result = await collections.pruneOrphans();
+  console.log(`
+Deleted ${result.deleted} orphaned collection row(s).`);
+  if (report.decks.length > 0) {
+    console.log('Decks were left as they are; repair them in the deck builder.');
+  }
 }
 
 /** Creates a friendship in either direction without duplicating the pair. */
