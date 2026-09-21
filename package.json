@@ -17,7 +17,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "replay": "tsx packages/game-engine/src/replay-cli.ts"
+    "replay": "tsx packages/game-engine/src/replay-cli.ts",
+    "seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

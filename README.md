@@ -123,6 +123,24 @@ POST /api/social/challenges/:id/decline
 POST /api/social/challenges/:id/cancel
 ```
 
+### Development accounts
+
+`npm run seed` creates a small cast to sign in as, all with the password
+`maailma-dev-password`:
+
+```text
+alice@maailma.dev   owns every card; two ready decks
+bob@maailma.dev     starter cards only; his "Wishlist" deck needs a legendary he lacks
+carol@maailma.dev   one unfinished 12-card deck
+```
+
+Alice and Bob are already friends, so a challenge can be sent straight away, and Carol has a
+pending request to Alice. Re-running the script is safe; `--reset` removes the seeded accounts
+first, and `--clean` also clears accounts left behind by client test runs.
+
+These exist only for local development and are created by a script that is never run against a
+deployed database.
+
 Each account starts with the starter cards. Ownership is a count per card, because deck legality
 is already expressed in copies: two of a common, one of a legendary.
 
