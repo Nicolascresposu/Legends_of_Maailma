@@ -177,13 +177,19 @@ async function acceptChallenge(
   const challengerDeck = await decks.activeDeck(challenge.challengerId);
   const opponentDeck = await decks.activeDeck(opponentId);
 
-  // Ownership is enforced here rather than at save time: a deck may be built
-  // toward cards a player has not unlocked, but it cannot be played until
-  // every copy it uses is owned. The starter deck is always playable.
+  // Ownership and format are both enforced here rather than at save time: a
+  // deck may be built toward cards a player has not unlocked, but it cannot be
+  // played until every copy it uses is owned and every card is legal in the
+  // format the deck was built for. A deck holding a rotated card is refused
+  // here rather than quietly played, and a deck referencing an unreleased card
+  // — one an admin tool may have put there — is refused in either format.
+  // The starter deck is always playable.
   const challengerCards = challengerDeck?.cardIds ?? [...STARTER_DECK];
   const opponentCards = opponentDeck?.cardIds ?? [...STARTER_DECK];
+  const challengerFormat = challengerDeck?.format ?? 'STANDARD';
+  const opponentFormat = opponentDeck?.format ?? 'STANDARD';
   try {
-    await collections.assertPlayable(challenge.challengerId, challengerCards);
+    await collections.assertPlayable(challenge.challengerId, challengerCards, challengerFormat);
   } catch (error) {
     if (error instanceof DeckNotPlayableError) {
       throw new AccountError(
@@ -194,7 +200,7 @@ async function acceptChallenge(
     }
     throw error;
   }
-  await collections.assertPlayable(opponentId, opponentCards);
+  await collections.assertPlayable(opponentId, opponentCards, opponentFormat);
 
   const engine = manager.create({
     scenarioId: challenge.scenarioId,

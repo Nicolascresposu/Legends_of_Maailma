@@ -237,3 +237,68 @@ describe('deck format round trip', () => {
     expect(verdicts[1]!.playable).toBe(true);
   });
 });
+
+describe('matchmaking enforces format, not just ownership', () => {
+  const CORE_CARD = Object.values(CARD_DEFINITIONS).find(
+    (card) => card.expansionId === 'CORE' && card.collectible,
+  )!.id;
+  const UNRELEASED_CARD = Object.values(CARD_DEFINITIONS).find(
+    (card) => card.expansionId === 'MACHINES_OF_KONA' && card.collectible,
+  )!.id;
+
+  const suffix = `m${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const made: string[] = [];
+
+  async function player(tag: string): Promise<string> {
+    const user = await prisma.user.create({
+      data: {
+        email: `${tag}.${suffix}@example.test`,
+        displayName: `${tag}_${suffix}`.slice(0, 24),
+        passwordHash: 'scrypt$16384$8$1$AAAA$AAAA',
+      },
+    });
+    made.push(user.id);
+    return user.id;
+  }
+
+  afterAll(async () => {
+    await expansions.clearOverride('CORE');
+    if (made.length > 0) await prisma.user.deleteMany({ where: { id: { in: made } } });
+  });
+
+  it('refuses a deck holding an unreleased card, however it got there', async () => {
+    // Dev tooling can put an unreleased card in a deck and even grant it.
+    // Owning it is not enough: matchmaking still has to say no, in both
+    // formats, or an unreleased set leaks into play through an old deck.
+    const user = await player('unrel');
+    await prisma.collectionEntry.create({
+      data: { userId: user, cardId: UNRELEASED_CARD, quantity: 30 },
+    });
+    const deck = Array(30).fill(UNRELEASED_CARD);
+
+    await expect(collections.assertPlayable(user, deck, 'STANDARD')).rejects.toMatchObject({
+      code: 'DECK_NOT_PLAYABLE',
+    });
+    await expect(collections.assertPlayable(user, deck, 'WILD')).rejects.toMatchObject({
+      code: 'DECK_NOT_PLAYABLE',
+    });
+  });
+
+  it('refuses a rotated deck in Standard and admits it in Wild', async () => {
+    const user = await player('rot');
+    await prisma.collectionEntry.create({
+      data: { userId: user, cardId: CORE_CARD, quantity: 30 },
+    });
+    const deck = Array(30).fill(CORE_CARD);
+
+    // Legal while the set is Standard — but a Common may only appear twice, so
+    // this deck is refused on copy limits either way. What matters is that the
+    // reason changes when the set rotates.
+    await expansions.updateFlags('CORE', { standard: false });
+    const rotated = await collections.assessForUser(user, deck, 'STANDARD');
+    expect(rotated.illegalInFormat.map((e) => e.cardId)).toContain(CORE_CARD);
+
+    const wild = await collections.assessForUser(user, deck, 'WILD');
+    expect(wild.illegalInFormat).toEqual([]);
+  });
+});
