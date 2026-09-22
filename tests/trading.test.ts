@@ -86,7 +86,12 @@ describe('trade execution', () => {
     await give(a, COMMON, 2);
     await give(b, EPIC, 1);
 
-    let trade = await stage(a, b, [{ cardId: COMMON, quantity: 2 }], [{ cardId: EPIC, quantity: 1 }]);
+    let trade = await stage(
+      a,
+      b,
+      [{ cardId: COMMON, quantity: 2 }],
+      [{ cardId: EPIC, quantity: 1 }],
+    );
     trade = await trades.accept(a, trade.id, trade.revision);
     trade = await trades.accept(b, trade.id, trade.revision);
 
@@ -216,7 +221,12 @@ describe('confirmation and revisions', () => {
     await give(a, COMMON, 2);
     await give(b, EPIC, 1);
 
-    let trade = await stage(a, b, [{ cardId: COMMON, quantity: 1 }], [{ cardId: EPIC, quantity: 1 }]);
+    let trade = await stage(
+      a,
+      b,
+      [{ cardId: COMMON, quantity: 1 }],
+      [{ cardId: EPIC, quantity: 1 }],
+    );
     trade = await trades.accept(a, trade.id, trade.revision);
     expect(trade.offers.find((o) => o.userId === a)!.accepted).toBe(true);
 

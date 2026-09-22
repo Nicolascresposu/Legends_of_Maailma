@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
+import { CARD_DEFINITIONS, EXPANSION_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
 import { createApp } from '../apps/server/src/app.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { LobbyHub } from '../apps/server/src/lobby.js';
@@ -36,9 +36,20 @@ const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 
 /** Cards outside the starter grant, so a test can rely on them being unowned. */
-const UNOWNED = Object.values(CARD_DEFINITIONS)
-  .filter((card) => card.collectible && !STARTER_DECK.includes(card.id))
-  .map((card) => card.id);
+/**
+ * Cards a new account does not start with, and could go and get.
+ *
+ * Restricted to released expansions: an unreleased set's cards are also
+ * unowned, but they are not something a player can see or reach, so they
+ * belong to the visibility tests rather than these.
+ */
+const RELEASED_COLLECTIBLE = Object.values(CARD_DEFINITIONS).filter(
+  (card) => card.collectible && EXPANSION_DEFINITIONS[card.expansionId]?.policy.released === true,
+);
+
+const UNOWNED = RELEASED_COLLECTIBLE.filter((card) => !STARTER_DECK.includes(card.id)).map(
+  (card) => card.id,
+);
 
 beforeAll(async () => {
   const manager = new MatchManager();
@@ -106,14 +117,22 @@ describe('collection contents', () => {
     }
   });
 
-  it('lists the whole registry with owned counts, including unowned cards', async () => {
+  it('lists every released card with owned counts, including unowned ones', async () => {
     const user = await register('browse');
     const body = (await (
       await fetch(`${base}/api/collection`, { headers: authed(user.token) })
     ).json()) as { cards: Array<{ cardId: string; owned: number; copyLimit: number }> };
 
-    const collectible = Object.values(CARD_DEFINITIONS).filter((card) => card.collectible);
-    expect(body.cards.length).toBe(collectible.length);
+    // Everything released, and nothing that is not: an unreleased set's names
+    // and rarities must not reach a player through this listing.
+    expect(body.cards.length).toBe(RELEASED_COLLECTIBLE.length);
+    const unreleased = Object.values(CARD_DEFINITIONS).filter(
+      (card) => EXPANSION_DEFINITIONS[card.expansionId]?.policy.released !== true,
+    );
+    expect(unreleased.length).toBeGreaterThan(0);
+    for (const card of unreleased) {
+      expect(body.cards.map((row) => row.cardId)).not.toContain(card.id);
+    }
 
     // Cards outside the starter deck exist in the listing but are unowned.
     for (const cardId of UNOWNED) {
