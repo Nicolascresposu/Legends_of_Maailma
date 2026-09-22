@@ -56,6 +56,18 @@ evaluators can be added at this boundary without forking combat rules.
 ## Persistence boundary
 
 The server's active matches are accessed through `MatchRepository`. v0.1 uses
-`InMemoryMatchRepository`; persistence can move to Redis without changing routes or rules. Future
-PostgreSQL repositories should own users, collections, deck lists, completed match metadata,
-scenario data, and campaign unlocks—not synchronous writes for every internal effect.
+`InMemoryMatchRepository`; persistence can move to Redis without changing routes or rules.
+
+PostgreSQL owns users, collections, deck lists, Fragment balances, trades and the economy ledger —
+never synchronous writes for every internal effect. The division holds because nothing in a match
+touches a collection: what a player owns is settled before the match starts and cannot change
+during it.
+
+Expansion policies sit deliberately on the database side even though expansion _definitions_ are
+code-owned alongside the cards. Rotating a set out of Standard or withdrawing it from packs is an
+operational act rather than a release, and a policy that required a redeploy to change would make
+the lifecycle a deployment problem instead of a decision.
+
+The economy ledger is an audit log and nothing more. Collection state is the quantity table, never
+a fold over the ledger, and pack generation must never read it: duplicate protection answers to
+what a player owns right now, not to what they have ever owned.

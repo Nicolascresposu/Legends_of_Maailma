@@ -137,6 +137,8 @@ Client scripts:
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
 - `src/reveal_test.gd` — checks the hover reveal's dwell, content and placement.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
+- `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
+  refusal is explained rather than merely relayed.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 - `src/config_test.gd` — checks address parsing and override precedence.
 
@@ -147,6 +149,7 @@ godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/reveal_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
+godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
 godot --headless --path apps/godot-client --script src/config_test.gd
 ```
@@ -158,8 +161,10 @@ laid-out rects.
 
 - `packages/game-model` — JSON-compatible domain types, actions, events, state, and scenarios.
 - `packages/rng` — serializable seeded random number generator.
-- `packages/card-definitions` — immutable card, Hero, starter deck, and scenario data.
-- `packages/game-engine` — battlefield rules, event/effect queue, controllers, decks, and replay.
+- `packages/card-definitions` — immutable card, Hero, expansion, pack, starter deck, and
+  scenario data, plus the crafting price table.
+- `packages/game-engine` — battlefield rules, event/effect queue, controllers, decks, pack
+  generation, and replay.
 - `packages/protocol` — transport-neutral client/server messages.
 - `apps/server` — authoritative in-memory match host with a replaceable persistence boundary.
 - `apps/godot-client` — dynamic-width Godot presentation client.
@@ -167,9 +172,12 @@ laid-out rects.
 
 ## Database
 
-Accounts, decks, friendships and challenges live in PostgreSQL behind Prisma. Active matches
-deliberately do not: they stay in memory behind `MatchRepository`, so a match in progress never
-waits on a database round trip.
+Accounts, decks, collections, Fragments, trades and the economy ledger live in PostgreSQL behind
+Prisma. Active matches deliberately do not: they stay in memory behind `MatchRepository`, so a
+match in progress never waits on a database round trip.
+
+Expansion _definitions_ are code-owned alongside the cards, but their _policies_ are not: a stored
+override shadows the shipped defaults, so a set can be rotated or withdrawn without a redeploy.
 
 Set `DATABASE_URL` in `.env` (git-ignored), then apply the schema:
 
@@ -187,8 +195,33 @@ POST /api/auth/login           exchange credentials for a session token
 POST /api/auth/logout          revoke the current token
 GET  /api/auth/me              the signed-in player
 
-GET  /api/collection           every collectible card with your owned counts
-POST /api/collection/assess    check a card list without saving it
+GET  /api/collection           every released card, with your counts and what you may do
+POST /api/collection/assess    check a card list without saving it, in a named format
+
+GET  /api/expansions           released expansions and the policies in force
+GET    /api/expansions/admin               every expansion, unreleased included (admin)
+PATCH  /api/expansions/admin/:id           change policy flags (admin)
+DELETE /api/expansions/admin/:id/override  restore the shipped policy (admin)
+
+GET  /api/economy              your Fragment balance
+GET  /api/economy/history      your economy ledger
+POST /api/economy/craft        spend Fragments to make copies
+POST /api/economy/disenchant   turn copies back into Fragments
+GET  /api/economy/extras       what disenchanting every spare would yield
+POST /api/economy/extras       do it — always an explicit request
+
+GET  /api/packs                packs you may currently open
+POST /api/packs/:id/open       open one, and receive its cards
+GET  /api/packs/:id/protection which cards a protected pack currently favours
+
+GET  /api/trades               your trades
+GET  /api/trades/history       what completed trades moved
+POST /api/trades               open a trade with another player
+GET  /api/trades/:id           one trade
+PUT  /api/trades/:id/offer     replace your own side of the offer
+POST /api/trades/:id/accept    accept one specific revision
+POST /api/trades/:id/unaccept  withdraw your acceptance
+POST /api/trades/:id/cancel    cancel; nothing moves
 
 GET    /api/decks              list your decks, each with its readiness
 POST   /api/decks              save a deck (legality reported, not enforced)
@@ -327,13 +360,53 @@ A replay JSON document has this shape:
 The scenario and decks must contain their complete definitions/IDs as represented by the shared
 model. The CLI prints the reconstructed final state and fails at the first illegal action.
 
+## The collection economy
+
+Every collectible card belongs to an expansion, and each expansion carries seven independent
+policies: `released`, `tradeable`, `duplicateProtection`, `craftable`, `disenchantable`,
+`availableInPacks` and `standard`. Nothing infers one from another, and nothing infers any of them
+from a name, a date or the order sets were added — the familiar arc of a set going from current to
+rotated to archived is a pattern an operator applies to these flags, never a state the code knows
+about. `released` is the one exception: it gates the other six, so unfinished content can be fully
+defined and still invisible.
+
+Fragments are the single crafting currency, held as an integer on the account:
+
+| Rarity    | Craft | Disenchant |
+| --------- | ----: | ---------: |
+| Common    |     5 |          1 |
+| Rare      |    20 |          5 |
+| Epic      |   100 |         20 |
+| Legendary |   300 |        100 |
+
+Duplicate protection reads **current ownership and nothing else**. There is no record of what a
+player has ever owned, and deliberately never will be: a card traded away or disenchanted becomes
+wanted again, and one crafted to a playset stops being. Players steering their own pack odds this
+way is the collection game working as intended, and `tests/packs.test.ts` pins that down explicitly
+so it is not later "fixed".
+
+Standard and Wild draw on the same collection — a card is never owned _in_ a format. Rotating a set
+out of Standard invalidates decks without deleting or editing them; they stay stored, editable, and
+playable in Wild, and the client says which cards rotated rather than implying the deck was built
+wrong.
+
+Trades move cards, never Fragments. Offered cards are not reserved, so a card in an open trade may
+still be disenchanted or promised elsewhere; it is the trade that fails at execution rather than
+the other actions that are blocked. Both players confirm the same revision, editing either side
+clears both acceptances, and execution revalidates policy and ownership inside the committing
+transaction. What a completed trade moved is frozen with the policy that permitted it, so
+withdrawing a set from trading never makes yesterday's exchange look illegal.
+
+Every economy mutation accepts a client-chosen `requestId`, so a retry after a lost response
+replays the original outcome instead of spending twice.
+
 ## v0.1 boundaries
 
-Accounts, decks, friendships and challenges are now PostgreSQL-backed; card collections and
-ownership are not, so every player may build from the full card registry. Active matches still use
-`MatchRepository`, implemented in memory so a Redis-backed store can replace it later. The admin
-web app, progression, complex boss scripting, dynamic battlefield resizing, Locations, and
-production matchmaking remain outside this milestone.
+Accounts, decks, collections, Fragments and trades are PostgreSQL-backed. Active matches still use
+`MatchRepository`, implemented in memory so a Redis-backed store can replace it later. Expansion
+policies are editable through an admin API but have no admin web app yet. Progression, complex boss
+scripting, dynamic battlefield resizing, Locations, and production matchmaking remain outside this
+milestone, as do an auction house, real-money purchases and Fragment transfers between players.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/protocol.md](docs/protocol.md) for the
 core invariants and API details.

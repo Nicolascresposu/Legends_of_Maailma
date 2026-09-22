@@ -6,7 +6,7 @@ The default server address is `http://localhost:3000`; live matches use
 ## HTTP
 
 - `GET /health`
-- `GET /api/cards`
+- `GET /api/cards` — the card registry, filtered to released expansions.
 - `GET /api/scenarios`
 - `POST /api/matches` — create an authoritative engine from a scenario, seed, and two 30-card decks.
 - `GET /api/matches/:matchId` — current authoritative state (development endpoint).
@@ -59,3 +59,16 @@ The connection is bound to its joined player and rejects actions claiming anothe
 server responds with `MATCH_STATE`, player-specific `LEGAL_ACTIONS`, `GAME_EVENTS`, `TURN_CHANGED`,
 `MATCH_ENDED`, or `ERROR`. Messages and shared state are plain JSON and contain no Godot-specific
 types.
+
+## Authenticated routes
+
+Accounts, collections, decks, expansions, the Fragment economy, packs, trading and the social
+features all sit behind a bearer token and are listed in the README. They carry no Godot-specific
+types either: the same endpoints would serve a web client unchanged.
+
+Economy failures return a structured `code` alongside their message — `CARD_NOT_CRAFTABLE`,
+`EXPANSION_NOT_RELEASED`, `INSUFFICIENT_FRAGMENTS`, `TRADE_REVISION_CHANGED` and so on — so a
+client can word the refusal itself rather than relaying a sentence composed on the server.
+
+Every economy mutation accepts an optional client-chosen `requestId`. A retry after a lost response
+replays the original outcome instead of executing a second time.
