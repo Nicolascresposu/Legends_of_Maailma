@@ -13,19 +13,60 @@ import type {
   WeaponTag,
 } from '@maailma/game-model';
 import { WEAPON_RANGES } from '@maailma/game-model';
+import { validateCardDescription } from './descriptions.js';
 import { isKnownExpansion } from './expansions.js';
 
+export * from './descriptions.js';
 export * from './expansions.js';
 export * from './economy.js';
 export * from './packs.js';
 
+/**
+ * A card's printed text. `description` is rules only, with every keyword in
+ * **bold**; `flavour` is story and nothing else, so a player never has to
+ * guess which words are rules. Markup is documented on `CardDefinition`.
+ */
+type PrintedText = Pick<CardDefinition, 'description' | 'flavour'>;
+
 const cards: CardDefinition[] = [
-  creature('wolf', 'Wolf', 1, 2, 1, ['BEAST']),
-  creature('brown_bear', 'Brown Bear', 3, 3, 4, ['BEAST']),
-  creature('hawk', 'Hawk', 2, 2, 1, ['BEAST'], ['SWIFT']),
+  creature(
+    'wolf',
+    'Wolf',
+    { description: 'No special abilities.', flavour: 'The first to find you, and never the last.' },
+    1,
+    2,
+    1,
+    ['BEAST'],
+  ),
+  creature(
+    'brown_bear',
+    'Brown Bear',
+    {
+      description: 'No special abilities.',
+      flavour: 'It does not want your camp. It wants what is in your camp.',
+    },
+    3,
+    3,
+    4,
+    ['BEAST'],
+  ),
+  creature(
+    'hawk',
+    'Hawk',
+    { description: '**Swift**', flavour: 'Seen before it is heard, and gone before either.' },
+    2,
+    2,
+    1,
+    ['BEAST'],
+    ['SWIFT'],
+  ),
   creature(
     'giant_rat',
     'Giant Rat',
+    {
+      description: '**Last Breath:** Draw a card.',
+      flavour: 'Where there is one, there are more in the walls.',
+    },
     1,
     1,
     1,
@@ -33,13 +74,55 @@ const cards: CardDefinition[] = [
     ['LAST_BREATH'],
     [{ trigger: 'LAST_BREATH', effect: { type: 'DRAW_CARD', amount: 1 } }],
   ),
-  creature('hunting_spider', 'Hunting Spider', 2, 2, 2, ['BEAST'], ['HIDDEN']),
-  creature('elf_archer', 'Elf Archer', 3, 2, 2, ['ELF', 'ARCHER'], ['RANGED']),
-  creature('dwarf_defender', 'Dwarf Defender', 3, 2, 4, ['DWARF', 'SOLDIER'], ['GUARD']),
-  creature('human_mercenary', 'Human Mercenary', 2, 3, 2, ['HUMAN', 'SOLDIER']),
+  creature(
+    'hunting_spider',
+    'Hunting Spider',
+    { description: '**Hidden**', flavour: 'The web is only a warning. The spider is the trap.' },
+    2,
+    2,
+    2,
+    ['BEAST'],
+    ['HIDDEN'],
+  ),
+  creature(
+    'elf_archer',
+    'Elf Archer',
+    { description: '**Ranged**', flavour: 'Elves measure distance in heartbeats, not paces.' },
+    3,
+    2,
+    2,
+    ['ELF', 'ARCHER'],
+    ['RANGED'],
+  ),
+  creature(
+    'dwarf_defender',
+    'Dwarf Defender',
+    { description: '**Guard**', flavour: '"Through me, or not at all."' },
+    3,
+    2,
+    4,
+    ['DWARF', 'SOLDIER'],
+    ['GUARD'],
+  ),
+  creature(
+    'human_mercenary',
+    'Human Mercenary',
+    {
+      description: 'No special abilities.',
+      flavour: 'Loyal to the last coin, and not one coin further.',
+    },
+    2,
+    3,
+    2,
+    ['HUMAN', 'SOLDIER'],
+  ),
   creature(
     'field_medic',
     'Field Medic',
+    {
+      description: '**Arrival:** Restore 3 Health to your Hero.',
+      flavour: 'Bandages first. Questions never.',
+    },
     3,
     2,
     3,
@@ -50,6 +133,10 @@ const cards: CardDefinition[] = [
   creature(
     'apprentice_mage',
     'Apprentice Mage',
+    {
+      description: '**Arrival:** Deal 1 damage to an enemy character.',
+      flavour: 'The spell works. The aim is still being taught.',
+    },
     3,
     2,
     2,
@@ -57,13 +144,29 @@ const cards: CardDefinition[] = [
     ['ARRIVAL'],
     [{ trigger: 'ARRIVAL', effect: { type: 'DEAL_DAMAGE', amount: 1, target: 'PLAY_TARGET' } }],
   ),
-  creature('maintenance_anima', 'Maintenance Anima', 2, 1, 3, ['ANIMA', 'CONSTRUCT'], ['WARD']),
+  creature(
+    'maintenance_anima',
+    'Maintenance Anima',
+    {
+      description: '**Ward**',
+      flavour: 'Built to keep the old machines running, it keeps itself running too.',
+    },
+    2,
+    1,
+    3,
+    ['ANIMA', 'CONSTRUCT'],
+    ['WARD'],
+  ),
   // The Core set's Rare slot. Every rarity has to be represented somewhere a
   // player can actually reach, or the crafting economy has a price band that
   // nothing is ever bought or sold at.
   creature(
     'warden_sentinel',
     'Warden Sentinel',
+    {
+      description: '**Guard**\n**Arrival:** Give adjacent friendly Creatures +1 Health.',
+      flavour: 'The wall is only as strong as the one who stands beside you.',
+    },
     4,
     3,
     4,
@@ -81,6 +184,10 @@ const cards: CardDefinition[] = [
   creature(
     'mercy_4',
     'Mercy-4',
+    {
+      description: '**Last Breath:** Restore 2 Health to your Hero.',
+      flavour: 'Its final directive is the same as its first.',
+    },
     4,
     3,
     4,
@@ -91,6 +198,10 @@ const cards: CardDefinition[] = [
   creature(
     'lio_varga',
     'Lio Varga',
+    {
+      description: '**Arrival:** Give adjacent friendly Creatures +1/+1.',
+      flavour: '"Give me a wrench and a grudge, and I\'ll build you a revolution."',
+    },
     5,
     4,
     5,
@@ -113,6 +224,10 @@ const cards: CardDefinition[] = [
   creature(
     'darek_voln',
     'Darek Voln',
+    {
+      description: '**Charge**, **Lifesteal**',
+      flavour: 'A Warden who turned the oath against those who wrote it.',
+    },
     6,
     5,
     5,
@@ -131,7 +246,8 @@ const cards: CardDefinition[] = [
     expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
-    text: 'Restore 4 Health to a friendly character.',
+    description: 'Restore 4 Health to a friendly character.',
+    flavour: 'Tastes of pine tar and regret.',
     targetMode: 'FRIENDLY_CHARACTER',
     effects: [{ type: 'HEAL', amount: 4, target: 'PLAY_TARGET' }],
   },
@@ -144,7 +260,8 @@ const cards: CardDefinition[] = [
     expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
-    text: 'Deal 3 damage to an enemy character.',
+    description: 'Deal 3 damage to an enemy character.',
+    flavour: 'Taika drawn in anger burns brightest.',
     targetMode: 'ENEMY_CHARACTER',
     effects: [{ type: 'DEAL_DAMAGE', amount: 3, target: 'PLAY_TARGET' }],
   },
@@ -158,17 +275,82 @@ const cards: CardDefinition[] = [
     expansionId: 'CHRONICLE',
     rarity: 'EPIC',
     collectible: true,
-    text: 'At the start of your turn, gain 1 Taika this turn.',
+    description: 'At the start of your turn, gain 1 Taika this turn.',
+    flavour: 'It hums with what the storm left behind.',
     effects: [{ trigger: 'TURN_STARTED', effect: { type: 'GAIN_TAIKA', amount: 1 } }],
   },
-  weapon('rusty_dagger', 'Rusty Dagger', 1, 1, 2, 'MELEE', ['DAGGER']),
-  weapon('iron_sword', 'Iron Sword', 2, 2, 2, 'MELEE', ['SWORD']),
-  weapon('war_axe', 'War Axe', 4, 4, 2, 'MELEE', ['AXE']),
-  weapon('hunting_bow', 'Hunting Bow', 3, 2, 2, 'RANGED', ['BOW']),
-  weapon('longbow', 'Longbow', 5, 3, 2, 'RANGED', ['BOW']),
+  weapon(
+    'rusty_dagger',
+    'Rusty Dagger',
+    {
+      description: 'Your Hero attacks with this Weapon. Creatures it strikes hit back.',
+      flavour: 'Its edge is long gone. Its bite is not.',
+    },
+    1,
+    1,
+    2,
+    'MELEE',
+    ['DAGGER'],
+  ),
+  weapon(
+    'iron_sword',
+    'Iron Sword',
+    {
+      description: 'Your Hero attacks with this Weapon. Creatures it strikes hit back.',
+      flavour: 'Plain, honest, and sharp enough.',
+    },
+    2,
+    2,
+    2,
+    'MELEE',
+    ['SWORD'],
+  ),
+  weapon(
+    'war_axe',
+    'War Axe',
+    {
+      description: 'Your Hero attacks with this Weapon. Creatures it strikes hit back.',
+      flavour: 'Swung once, and remembered by everyone who was there.',
+    },
+    4,
+    4,
+    2,
+    'MELEE',
+    ['AXE'],
+  ),
+  weapon(
+    'hunting_bow',
+    'Hunting Bow',
+    {
+      description: '**Ranged**. Your Hero attacks with this Weapon.',
+      flavour: 'Strung with sinew, and with patience.',
+    },
+    3,
+    2,
+    2,
+    'RANGED',
+    ['BOW'],
+  ),
+  weapon(
+    'longbow',
+    'Longbow',
+    {
+      description: '**Ranged**. Your Hero attacks with this Weapon.',
+      flavour: 'Taller than its archer, and it carries farther than any shout.',
+    },
+    5,
+    3,
+    2,
+    'RANGED',
+    ['BOW'],
+  ),
   weapon(
     'dwarven_maul',
     'Dwarven Maul',
+    {
+      description: 'Your Hero attacks with this Weapon. Creatures it strikes hit back.',
+      flavour: 'Dwarven smiths forge hammers to outlast the hands that swing them.',
+    },
     4,
     3,
     3,
@@ -185,6 +367,10 @@ const cards: CardDefinition[] = [
   creature(
     'kona_scrapwalker',
     'Kona Scrapwalker',
+    {
+      description: 'No special abilities.',
+      flavour: 'Assembled from whatever the last war left lying about.',
+    },
     2,
     2,
     2,
@@ -198,6 +384,7 @@ const cards: CardDefinition[] = [
   creature(
     'kona_riveter',
     'Kona Riveter',
+    { description: '**Arrival:** Gain +1 Attack.', flavour: 'Measure once, rivet twice.' },
     3,
     2,
     3,
@@ -211,6 +398,10 @@ const cards: CardDefinition[] = [
   creature(
     'kona_forgeheart',
     'Kona Forgeheart',
+    {
+      description: '**Guard**, **Ward**',
+      flavour: 'The furnace at its core has never once gone out.',
+    },
     5,
     4,
     5,
@@ -224,6 +415,10 @@ const cards: CardDefinition[] = [
   creature(
     'ilvi_kona',
     'Ilvi of Kona',
+    {
+      description: '**Charge**\n**Arrival:** Give adjacent friendly Creatures +1/+1.',
+      flavour: '"Kona was built by rebels. It will be rebuilt by them."',
+    },
     6,
     5,
     6,
@@ -242,6 +437,10 @@ const cards: CardDefinition[] = [
   weapon(
     'kona_piston_hammer',
     'Kona Piston Hammer',
+    {
+      description: 'Your Hero attacks with this Weapon. Creatures it strikes hit back.',
+      flavour: 'Every swing is a small explosion, carefully timed.',
+    },
     3,
     3,
     2,
@@ -257,6 +456,7 @@ const cards: CardDefinition[] = [
 function creature(
   id: string,
   name: string,
+  printed: PrintedText,
   cost: number,
   attack: number,
   health: number,
@@ -281,13 +481,14 @@ function creature(
     expansionId,
     rarity,
     collectible: true,
-    text: effects.length ? keywords.join(', ') : keywords.join(', ') || `${attack}/${health}`,
+    ...printed,
   };
 }
 
 function weapon(
   id: string,
   name: string,
+  printed: PrintedText,
   cost: number,
   attack: number,
   durability: number,
@@ -312,9 +513,7 @@ function weapon(
     expansionId,
     rarity,
     collectible: true,
-    // Melee is the default case and goes unsaid; Ranged changes how the card
-    // plays, so it is named on the card itself.
-    text: range === 'RANGED' ? 'Ranged' : '',
+    ...printed,
   };
 }
 
@@ -368,6 +567,7 @@ const definitionErrors = [
     .filter((card): card is WeaponDefinition => card.type === 'WEAPON')
     .flatMap(validateWeaponDefinition),
   ...cards.flatMap(validateCardExpansion),
+  ...cards.flatMap(validateCardDescription),
 ];
 if (definitionErrors.length > 0) {
   throw new Error(`Invalid card definitions: ${definitionErrors.join('; ')}`);

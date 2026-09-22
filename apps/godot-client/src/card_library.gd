@@ -4,7 +4,7 @@ class_name CardLibrary
 ## Client-side cache of the server's card definitions.
 ##
 ## The server owns card data; the client fetches it once and uses it purely for
-## presentation (names, costs, keywords, rules text). Nothing here affects rules.
+## presentation (names, costs, keywords, descriptions). Nothing here affects rules.
 
 signal loaded()
 
@@ -82,8 +82,92 @@ func cost(definition_id: String) -> int:
 func card_type(definition_id: String) -> String:
 	return str(get_card(definition_id).get("type", ""))
 
-func text(definition_id: String) -> String:
-	return str(get_card(definition_id).get("text", ""))
+## The card's description exactly as the server sent it, markup included.
+func description(definition_id: String) -> String:
+	return str(get_card(definition_id).get("description", ""))
+
+## The description as BBCode, for a RichTextLabel.
+func description_bbcode(definition_id: String) -> String:
+	return markup_to_bbcode(description(definition_id))
+
+## The description without markup, for tooltips and plain Labels.
+func description_plain(definition_id: String) -> String:
+	return markup_to_plain(description(definition_id))
+
+## The card's flavour text, markup included; "" for a card with none.
+##
+## Kept apart from the description on the server so that every word of a
+## description is a rule, and the client can style story text as story.
+func flavour(definition_id: String) -> String:
+	return str(get_card(definition_id).get("flavour", ""))
+
+## Flavour as BBCode, set in italics as a whole the way flavour is printed.
+func flavour_bbcode(definition_id: String) -> String:
+	var markup := flavour(definition_id)
+	if markup.strip_edges() == "":
+		return ""
+	return "[i]%s[/i]" % markup_to_bbcode(markup)
+
+func flavour_plain(definition_id: String) -> String:
+	return markup_to_plain(flavour(definition_id))
+
+## Splits description markup into runs of one emphasis each.
+##
+## Mirrors `parseDescription` in the card-definitions package, which validates
+## every card at load: `**` toggles bold, `*` toggles italic, and a backslash
+## makes the next character literal. Each run is
+## `{"text": String, "bold": bool, "italic": bool}`.
+static func description_spans(markup: String) -> Array:
+	var spans: Array = []
+	var bold := false
+	var italic := false
+	var run := ""
+	var index := 0
+	while index < markup.length():
+		var character := markup[index]
+		if character == "\\" and index + 1 < markup.length():
+			run += markup[index + 1]
+			index += 2
+			continue
+		if character != "*":
+			run += character
+			index += 1
+			continue
+		if run != "":
+			spans.append({"text": run, "bold": bold, "italic": italic})
+			run = ""
+		if index + 1 < markup.length() and markup[index + 1] == "*":
+			bold = not bold
+			index += 2
+		else:
+			italic = not italic
+			index += 1
+	if run != "":
+		spans.append({"text": run, "bold": bold, "italic": italic})
+	return spans
+
+## Description markup as BBCode.
+##
+## Each run opens and closes its own tags, so emphasis that overlaps in the
+## markup still nests correctly here. A literal `[` is escaped so card text
+## can never be read as a BBCode tag.
+static func markup_to_bbcode(markup: String) -> String:
+	var out := ""
+	for span in description_spans(markup):
+		var piece := str(span["text"]).replace("[", "[lb]")
+		if span["italic"]:
+			piece = "[i]%s[/i]" % piece
+		if span["bold"]:
+			piece = "[b]%s[/b]" % piece
+		out += piece
+	return out
+
+## Description markup with the markup removed.
+static func markup_to_plain(markup: String) -> String:
+	var out := ""
+	for span in description_spans(markup):
+		out += str(span["text"])
+	return out
 
 func keywords(definition_id: String) -> Array:
 	var card := get_card(definition_id)
@@ -147,8 +231,14 @@ func tooltip(definition_id: String) -> String:
 	var keyword_list := keywords(definition_id)
 	if not keyword_list.is_empty():
 		lines.append("Keywords: " + ", ".join(keyword_list))
-	var rules := text(definition_id)
+	# Built-in tooltips cannot style text, so the description loses its bold
+	# and italic here; the hover reveal is where it is shown formatted.
+	var rules := description_plain(definition_id)
 	if rules != "":
 		lines.append("")
 		lines.append(rules)
+	var story := flavour_plain(definition_id)
+	if story != "":
+		lines.append("")
+		lines.append(story)
 	return "\n".join(lines)

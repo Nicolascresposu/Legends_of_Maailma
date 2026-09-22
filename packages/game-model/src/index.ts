@@ -175,7 +175,20 @@ interface CardDefinitionBase {
   expansionId: string;
   rarity: Rarity;
   collectible: boolean;
-  text: string;
+  /**
+   * What the card does, written for players. Rules only — flavour belongs in
+   * `flavour` — so a player can trust every word of it. A light markup marks
+   * emphasis: `**bold**` (every keyword is printed bold), `*italic*`, `\*`
+   * for a literal asterisk, and a newline starts a new line. Presentation
+   * only: the engine never reads it, and it must never be the only place a
+   * rule is recorded.
+   */
+  description: string;
+  /**
+   * Story text with no rules meaning, shown apart from the description and
+   * styled as flavour by the client. Accepts the same markup.
+   */
+  flavour?: string;
 }
 
 export interface CreatureDefinition extends CardDefinitionBase {

@@ -39,7 +39,8 @@ var _type_line: Label
 var _stats: Label
 var _keywords: Label
 var _rules: RichTextLabel
-var _flavour: Label
+var _flavour: RichTextLabel
+var _marks: Label
 
 ## What is currently revealed, so a repaint of the same card is a no-op and a
 ## re-render of the board does not make the reveal flicker.
@@ -120,6 +121,19 @@ func _build() -> void:
 	_stats.add_theme_font_size_override("font_size", 17)
 	column.add_child(_stats)
 
+	# The printed description comes before the glossary: it is the card as a
+	# player would read it, and the glossary below explains its bold words.
+	_rules = RichTextLabel.new()
+	_rules.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rules.bbcode_enabled = true
+	_rules.fit_content = true
+	_rules.scroll_active = false
+	_rules.add_theme_font_size_override("normal_font_size", 13)
+	_rules.add_theme_font_size_override("bold_font_size", 13)
+	_rules.add_theme_font_size_override("italics_font_size", 13)
+	_rules.add_theme_font_size_override("bold_italics_font_size", 13)
+	column.add_child(_rules)
+
 	_keywords = Label.new()
 	_keywords.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# Left-aligned: these are sentences, and centring wrapped prose is unreadable.
@@ -128,21 +142,25 @@ func _build() -> void:
 	_keywords.add_theme_color_override("font_color", COLOR_BORDER)
 	column.add_child(_keywords)
 
-	_rules = RichTextLabel.new()
-	_rules.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_rules.bbcode_enabled = true
-	_rules.fit_content = true
-	_rules.scroll_active = false
-	_rules.add_theme_font_size_override("normal_font_size", 13)
-	column.add_child(_rules)
-
-	_flavour = Label.new()
+	# Flavour sits last and dimmed: it is read after the rules, if at all.
+	_flavour = RichTextLabel.new()
 	_flavour.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_flavour.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_flavour.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_flavour.add_theme_font_size_override("font_size", 11)
-	_flavour.add_theme_color_override("font_color", COLOR_DIM)
+	_flavour.bbcode_enabled = true
+	_flavour.fit_content = true
+	_flavour.scroll_active = false
+	for font_size in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size"]:
+		_flavour.add_theme_font_size_override(font_size, 12)
+	_flavour.add_theme_color_override("default_color", COLOR_DIM)
 	column.add_child(_flavour)
+
+	# What the creature cannot do right now ("acted", "sick").
+	_marks = Label.new()
+	_marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_marks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_marks.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_marks.add_theme_font_size_override("font_size", 11)
+	_marks.add_theme_color_override("font_color", COLOR_DIM)
+	column.add_child(_marks)
 
 ## Asks for `card` to be revealed next to `anchor` (a screen rect).
 ##
@@ -260,45 +278,19 @@ func _fill(card: Dictionary) -> void:
 	_keywords.text = "\n".join(explained)
 	_keywords.visible = not explained.is_empty()
 
-	var rules := library.text(definition_id)
-	# Simple cards carry no prose: their rules text is their stat line ("3/2")
-	# or the bare name of a keyword they already list. Either way the reveal
-	# has shown it above, and repeating it reads as a mistake.
-	if _is_redundant_rules(rules, definition_id, keyword_list):
-		rules = ""
+	# Descriptions are written for players, so they are shown as authored,
+	# with their bold keywords intact.
+	var rules := library.description_bbcode(definition_id)
 	_rules.text = rules
-	_rules.visible = rules != ""
+	_rules.visible = rules.strip_edges() != ""
+
+	var story := library.flavour_bbcode(definition_id)
+	_flavour.text = story
+	_flavour.visible = story != ""
 
 	var marks := str(card.get("marks", ""))
-	_flavour.text = marks
-	_flavour.visible = marks != ""
-
-## Whether rules text says nothing the reveal has not already shown.
-##
-## The card data gives every card a `text`, and for simple ones it holds no
-## prose: a vanilla creature repeats its stat line, and a keyword creature
-## repeats the keyword. Cards with real rules text are unaffected.
-func _is_redundant_rules(rules: String, definition_id: String, keyword_list: Array) -> bool:
-	var trimmed := rules.strip_edges()
-	if trimmed == "":
-		return true
-	if library.card_type(definition_id) == "CREATURE":
-		var stat_line := "%d/%d" % [
-			library.base_attack(definition_id),
-			library.base_health(definition_id),
-		]
-		if trimmed == stat_line:
-			return true
-	# A Weapon's text is its reach, which the type line and glossary both show.
-	if library.card_type(definition_id) == "WEAPON" \
-			and trimmed.to_upper() == library.weapon_range(definition_id):
-		return true
-	# Compared case-insensitively so "Guard" and "GUARD" both count as the
-	# keyword already listed above.
-	for keyword in keyword_list:
-		if trimmed.to_upper() == str(keyword).to_upper():
-			return true
-	return false
+	_marks.text = marks
+	_marks.visible = marks != ""
 
 ## The stat line: live board values where there are any, printed ones otherwise.
 func _stats_text(definition_id: String, card: Dictionary) -> String:

@@ -64,18 +64,22 @@ func _init() -> void:
 	var definition_id := str((zone["card"] as Dictionary).get("definition_id", ""))
 	_check("the reveal names the hovered card",
 		main.reveal._title.text == main.library.card_name(definition_id))
-	var rules: String = main.library.text(definition_id)
-	var stat_line: String = "%d/%d" % [
-		main.library.base_attack(definition_id),
-		main.library.base_health(definition_id),
-	]
-	if rules == "" or rules.strip_edges() == stat_line:
-		# A vanilla creature's rules text is just its stat line, which the
-		# reveal deliberately drops rather than printing twice.
-		_check("stat-line-only rules text is not repeated", not main.reveal._rules.visible)
+	var plain: String = main.library.description_plain(definition_id)
+	_check("every card has a description", plain.strip_edges() != "")
+	_check("the reveal shows the card's description",
+		main.reveal._rules.visible and main.reveal._rules.get_parsed_text().contains(plain))
+	# The markup must reach the label as formatting, not as literal asterisks.
+	_check("the description's markup is rendered, not printed",
+		not main.reveal._rules.get_parsed_text().contains("*"))
+	# Flavour is shown, but in its own place: never mixed into the rules.
+	var story: String = main.library.flavour_plain(definition_id)
+	if story == "":
+		_check("a card without flavour shows none", not main.reveal._flavour.visible)
 	else:
-		_check("the reveal shows the card's rules text",
-			main.reveal._rules.text.contains(rules))
+		_check("the reveal shows the card's flavour on its own line",
+			main.reveal._flavour.visible
+				and main.reveal._flavour.get_parsed_text().contains(story)
+				and not main.reveal._rules.get_parsed_text().contains(story))
 
 	# Keywords are the reason the reveal beats the board panel, which shows the
 	# bare names: each one must be spelled out.
@@ -84,6 +88,8 @@ func _init() -> void:
 		_check("a card with no keywords shows no keyword line",
 			not main.reveal._keywords.visible)
 	else:
+		_check("the description prints its keywords in bold",
+			main.reveal._rules.text.contains("[b]"))
 		var explained := true
 		for keyword in keyword_list:
 			var line: String = CardLibrary.keyword_line(str(keyword))

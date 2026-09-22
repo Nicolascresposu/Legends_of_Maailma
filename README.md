@@ -41,7 +41,7 @@ the deck panel shows the server's verdict live — card count, and any card you 
 A deck that is not ready can still be saved; it simply cannot be made active. Matches then use
 your active deck rather than a hardcoded starter list.
 
-Card names, costs, keywords and rules text are fetched once from `/api/cards`, so the board shows
+Card names, costs, keywords, descriptions and flavour are fetched once from `/api/cards`, so the board shows
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
 
@@ -107,7 +107,13 @@ then stats. The collection browser shows the same art as a row thumbnail.
 
 A board panel is too small for a card's full text, so resting the pointer on a creature or
 artifact in play blows it up beside the board, Hearthstone style: large art, the printed cost and
-type, live stats, and the rules text in full.
+type, live stats, the card's description in full, and its flavour.
+
+A description is the card's rules and nothing else, with every keyword in bold; story text lives
+in a separate `flavour` field and is shown dimmed and in italics beneath it. Both are written in a
+small markup — `**bold**`, `*italic*` — that the reveal renders as formatting and tooltips, which
+cannot style text, show with the markup stripped. The card registry refuses to load if a
+description is missing, its markup is unbalanced, or a keyword the card has is not printed bold.
 
 Keywords are spelled out rather than listed. The server sends them as bare identifiers — `GUARD`,
 `WARD` — because the rules are the engine's; what they mean to a player is presentation, so the
@@ -116,8 +122,7 @@ client's own test fails if one is missing, so a keyword added server-side is not
 
 The reveal waits out a short dwell, so sweeping the pointer across the board does not flash a card
 at every slot it crosses, and it hides while a drag is in flight rather than covering the targets
-being aimed at. Rules text that only repeats the stat line or a keyword already shown is dropped,
-which is how the simpler cards are stored.
+being aimed at.
 
 Client scripts:
 

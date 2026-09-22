@@ -6,7 +6,10 @@ The default server address is `http://localhost:3000`; live matches use
 ## HTTP
 
 - `GET /health`
-- `GET /api/cards` — the card registry, filtered to released expansions.
+- `GET /api/cards` — the card registry, filtered to released expansions. Each card carries a
+  `description` (rules only) and an optional `flavour` (story only), both in a light markup:
+  `**bold**`, `*italic*`, `\*` for a literal asterisk, and newlines as line breaks. Every keyword
+  a card has is printed in bold in its description.
 - `GET /api/scenarios`
 - `POST /api/matches` — create an authoritative engine from a scenario, seed, and two 30-card decks.
 - `GET /api/matches/:matchId` — current authoritative state (development endpoint).

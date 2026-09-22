@@ -76,6 +76,27 @@ func _on_actions(player: String, list: Array) -> void:
 		_check("library reports cost", library.cost("brown_bear") == 3)
 		_check("unknown card falls back to its id", library.card_name("nope") == "nope")
 		_check("tooltip mentions the card name", library.tooltip("wolf").contains("Wolf"))
+		_check("every card arrives with a description",
+			library.description("dwarf_defender").contains("**Guard**"))
+		_check("tooltips show descriptions without markup",
+			library.tooltip("dwarf_defender").contains("Guard\n")
+				and not library.tooltip("dwarf_defender").contains("*"))
+		_check("flavour arrives apart from the description",
+			library.flavour("dwarf_defender") != ""
+				and not library.description("dwarf_defender").contains(library.flavour("dwarf_defender")))
+		_check("flavour is set in italics",
+			library.flavour_bbcode("dwarf_defender").begins_with("[i]"))
+		_check("a card without flavour renders none", library.flavour_bbcode("nope") == "")
+		_check("bold markup becomes BBCode bold",
+			CardLibrary.markup_to_bbcode("**Guard** now") == "[b]Guard[/b] now")
+		_check("italic markup becomes BBCode italic",
+			CardLibrary.markup_to_bbcode("*quiet*") == "[i]quiet[/i]")
+		_check("bold italic nests cleanly",
+			CardLibrary.markup_to_bbcode("***both***") == "[b][i]both[/i][/b]")
+		_check("an escaped asterisk stays literal",
+			CardLibrary.markup_to_plain("2\\*3") == "2*3")
+		_check("a bracket in card text is not read as a tag",
+			CardLibrary.markup_to_bbcode("[x]") == "[lb]x]")
 
 		var labels_ok := true
 		var groups := {}
