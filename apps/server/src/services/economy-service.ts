@@ -7,6 +7,7 @@ import {
 } from '@maailma/card-definitions';
 import { cardCopyLimit } from '@maailma/game-engine';
 import { AccountError } from './account-service.js';
+import { runOnce } from './idempotency.js';
 import {
   ECONOMY_ERRORS,
   EconomyError,
@@ -126,7 +127,7 @@ export class EconomyService {
     const unitCost = craftCost(card.rarity, cardId);
     const cost = unitCost * count;
 
-    return await this.runOnce(userId, 'CRAFT', requestId, async (tx) => {
+    return await runOnce(this.prisma, userId, 'CRAFT', requestId, async (tx) => {
       // Re-read the balance inside the transaction and update it
       // conditionally, so two simultaneous crafts cannot both see enough
       // Fragments and both succeed.
@@ -187,7 +188,7 @@ export class EconomyService {
     const unitValue = disenchantValue(card.rarity, cardId);
     const gain = unitValue * count;
 
-    return await this.runOnce(userId, 'DISENCHANT', requestId, async (tx) => {
+    return await runOnce(this.prisma, userId, 'DISENCHANT', requestId, async (tx) => {
       // The conditional delete is the lock: a copy can only be removed by
       // whichever request gets there first, so two disenchants of the same
       // single copy cannot both pay out.
@@ -291,7 +292,7 @@ export class EconomyService {
       };
     }
 
-    return await this.runOnce(userId, 'DISENCHANT_EXTRAS', requestId, async (tx) => {
+    return await runOnce(this.prisma, userId, 'DISENCHANT_EXTRAS', requestId, async (tx) => {
       const disenchanted: DisenchantExtrasResult['disenchanted'] = [];
       let fragmentDelta = 0;
 
@@ -342,64 +343,6 @@ export class EconomyService {
       take: Math.min(Math.max(1, Math.trunc(limit)), 200),
     });
   }
-
-  /**
-   * Runs an operation at most once per request id.
-   *
-   * The marker row is written inside the same transaction as the effects, so
-   * either both land or neither does. A retry collides on the primary key and
-   * is answered with the stored result — the player sees the outcome they were
-   * always going to get, rather than paying twice for a lost response.
-   */
-  private async runOnce<T>(
-    userId: string,
-    operation: string,
-    requestId: string | undefined,
-    work: (tx: Prisma.TransactionClient) => Promise<T>,
-  ): Promise<T> {
-    if (!requestId) {
-      return await this.prisma.$transaction((tx) => work(tx));
-    }
-
-    const existing = await this.prisma.economyRequest.findUnique({ where: { requestId } });
-    if (existing) return replayResult<T>(existing, userId, operation);
-
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const result = await work(tx);
-        await tx.economyRequest.create({
-          data: {
-            requestId,
-            userId,
-            operation,
-            result: result as unknown as Prisma.InputJsonValue,
-          },
-        });
-        return result;
-      });
-    } catch (error) {
-      // Two copies of the same request racing: whichever lost replays the
-      // winner's result rather than reporting a conflict the player caused.
-      if (isUniqueViolation(error)) {
-        const stored = await this.prisma.economyRequest.findUnique({ where: { requestId } });
-        if (stored) return replayResult<T>(stored, userId, operation);
-      }
-      throw error;
-    }
-  }
-}
-
-function replayResult<T>(
-  stored: { userId: string; operation: string; result: unknown },
-  userId: string,
-  operation: string,
-): T {
-  // A request id is the caller's to choose, so it must not become a way to
-  // read somebody else's outcome or to replay a craft as a disenchant.
-  if (stored.userId !== userId || stored.operation !== operation) {
-    throw new AccountError('REQUEST_ID_REUSED', 'That request id has already been used', 409);
-  }
-  return stored.result as T;
 }
 
 /** Reads the economy row, creating it the first time a player needs one. */
@@ -452,10 +395,4 @@ function normalizeQuantity(quantity: number): number {
     );
   }
   return count;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002'
-  );
 }

@@ -269,6 +269,18 @@ describe('pack availability follows policy', () => {
     expect(opened.cards.length).toBe(CORE_PACK.cardCount);
   });
 
+  it('refuses a request id already used for something else', async () => {
+    // The id is the caller's to choose, so it must not become a way to replay
+    // somebody else's outcome, or to collect a craft as a pack.
+    const owner = await makeUser('packowner');
+    const other = await makeUser('packother');
+    const requestId = `pack-shared-${suffix}`;
+    await packs.open(owner, CORE_PACK.id, { seed: 'shared', requestId });
+    await expect(
+      packs.open(other, CORE_PACK.id, { seed: 'shared', requestId }),
+    ).rejects.toMatchObject({ code: 'REQUEST_ID_REUSED' });
+  });
+
   it('does not open a pack twice for a retried request', async () => {
     const user = await makeUser('packretry');
     const requestId = `pack-${suffix}-1`;

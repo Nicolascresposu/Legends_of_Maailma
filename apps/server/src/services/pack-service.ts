@@ -20,6 +20,7 @@ import {
   packsProtectDuplicates,
   type ExpansionService,
 } from './expansion-service.js';
+import { runOnce } from './idempotency.js';
 
 export interface OpenedPack extends PackResult {
   /** The seed the pack was generated from, so a result can be re-derived. */
@@ -88,21 +89,9 @@ export class PackService {
     const protectDuplicates = packsProtectDuplicates(expansion);
     const seed = options.seed ?? randomUUID();
 
-    const { requestId } = options;
-    if (requestId) {
-      const existing = await this.prisma.economyRequest.findUnique({ where: { requestId } });
-      if (existing) {
-        if (existing.userId !== userId || existing.operation !== 'PACK_OPEN') {
-          throw new EconomyError(
-            ECONOMY_ERRORS.INVALID_QUANTITY,
-            'That request id has already been used',
-          );
-        }
-        return existing.result as unknown as OpenedPack;
-      }
-    }
-
-    return await this.prisma.$transaction(async (tx) => {
+    // Opening a pack hands out cards, so a retried request must replay its
+    // original result rather than paying out a second time.
+    return await runOnce(this.prisma, userId, 'PACK_OPEN', options.requestId, async (tx) => {
       // Ownership is read inside the transaction, so protection reflects the
       // collection as it stands at the moment of opening rather than as it
       // stood when the request was received.
@@ -134,7 +123,7 @@ export class PackService {
           type: 'PACK_OPEN',
           quantity: result.cards.length,
           fragmentDelta: 0,
-          ...(requestId ? { requestId } : {}),
+          ...(options.requestId ? { requestId: options.requestId } : {}),
           metadata: {
             packId: pack.id,
             expansionId: pack.expansionId,
@@ -145,18 +134,7 @@ export class PackService {
         },
       });
 
-      const opened: OpenedPack = { ...result, seed, owned: ownedAfter };
-      if (requestId) {
-        await tx.economyRequest.create({
-          data: {
-            requestId,
-            userId,
-            operation: 'PACK_OPEN',
-            result: opened as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
-      return opened;
+      return { ...result, seed, owned: ownedAfter };
     });
   }
 
