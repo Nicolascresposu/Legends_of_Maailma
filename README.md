@@ -103,6 +103,22 @@ stretched, so authoring them wider than tall (roughly 2:1) gives the best result
 Art appears on hand cards and on creatures and artifacts in play, laid out as title, art banner,
 then stats. The collection browser shows the same art as a row thumbnail.
 
+### Hover reveal
+
+A board panel is too small for a card's full text, so resting the pointer on a creature or
+artifact in play blows it up beside the board, Hearthstone style: large art, the printed cost and
+type, live stats, and the rules text in full.
+
+Keywords are spelled out rather than listed. The server sends them as bare identifiers — `GUARD`,
+`WARD` — because the rules are the engine's; what they mean to a player is presentation, so the
+glossary lives in `card_library.gd`. A keyword with no entry falls back to its name, and the
+client's own test fails if one is missing, so a keyword added server-side is not quietly dropped.
+
+The reveal waits out a short dwell, so sweeping the pointer across the board does not flash a card
+at every slot it crosses, and it hides while a drag is in flight rather than covering the targets
+being aimed at. Rules text that only repeats the stat line or a keyword already shown is dropped,
+which is how the simpler cards are stored.
+
 Client scripts:
 
 - `src/main.gd` — presentation, pointer interaction, and rendering.
@@ -111,6 +127,7 @@ Client scripts:
 - `src/match_client.gd` — REST + WebSocket transport, connection state, reconnection.
 - `src/targeting.gd` — derives valid drop targets from the server's legal actions.
 - `src/targeting_arrow.gd` — the dotted targeting arrow.
+- `src/card_reveal.gd` — the hover reveal for cards in play.
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
 - `src/session_store.gd` — remembers a signed-in session between runs.
@@ -118,6 +135,7 @@ Client scripts:
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
+- `src/reveal_test.gd` — checks the hover reveal's dwell, content and placement.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 - `src/config_test.gd` — checks address parsing and override precedence.
@@ -127,12 +145,14 @@ With the server running, the client's own tests can be run from the command line
 ```bash
 godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
+godot --path apps/godot-client --script src/reveal_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
 godot --headless --path apps/godot-client --script src/config_test.gd
 ```
 
-`drag_test.gd` needs a real (non-headless) run, because hit-testing depends on laid-out rects.
+`drag_test.gd` and `reveal_test.gd` need a real (non-headless) run, because hit-testing depends on
+laid-out rects.
 
 ## Workspace map
 

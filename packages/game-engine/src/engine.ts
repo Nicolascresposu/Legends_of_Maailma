@@ -4,6 +4,7 @@ import type {
   CardDefinition,
   CreatureDefinition,
   CreatureInstance,
+  DamageContext,
   Effect,
   EffectTarget,
   EntityId,
@@ -16,6 +17,10 @@ import type {
   Position,
   ReplayData,
   TargetMode,
+  WeaponDefinition,
+  WeaponInstance,
+  WeaponRange,
+  WeaponRemovalReason,
 } from '@maailma/game-model';
 import { SeededRng, normalizeSeed } from '@maailma/rng';
 import {
@@ -43,12 +48,29 @@ type WorkItem =
 
 export const heroEntityId = (playerId: PlayerId): EntityId => `${playerId}:hero`;
 
+/**
+ * What an attacker is, reduced to the properties that decide target legality.
+ *
+ * Creature attacks and Hero Weapon attacks differ in who may swing and what it
+ * costs, but not in what may be hit. Both funnel through
+ * `validateAttackTarget`, so Guard, front-row shielding and Hidden have exactly
+ * one implementation and cannot drift apart.
+ */
+interface AttackProfile {
+  /** `RANGED` reaches the back row and ignores front-row shielding. */
+  range: WeaponRange;
+  /** The side swinging. */
+  attackerId: PlayerId;
+}
+
 export class GameEngine {
   readonly setup: MatchSetup;
   readonly state!: MatchState;
   private rng: SeededRng;
   private queue: WorkItem[] = [];
   private currentEvents: GameEvent[] = [];
+  /** What dealt lethal damage to an entity, read once by its death event. */
+  private lethalContext = new Map<EntityId, DamageContext>();
 
   constructor(setup: MatchSetup) {
     validateSetup(setup);
@@ -71,6 +93,7 @@ export class GameEngine {
   dispatch(action: GameAction): ActionResult {
     this.currentEvents = [];
     this.queue = [];
+    this.lethalContext.clear();
     try {
       this.validateAction(action);
       this.applyAction(action);
@@ -155,6 +178,22 @@ export class GameEngine {
       }
     }
 
+    // Hero Weapon attacks. Targets come from the same legality check the
+    // engine enforces, so a client or AI never has to recreate Guard rules.
+    if (side.hero.equippedWeapon) {
+      const enemy = this.opponentSide(playerId);
+      const candidates: EntityId[] = [
+        ...Object.values(enemy.creatures)
+          .sort(byInstanceId)
+          .map((creature) => creature.instanceId),
+        heroEntityId(enemy.playerId),
+      ];
+      for (const targetId of candidates) {
+        const action: GameAction = { type: 'HERO_ATTACK', actorId: playerId, targetId };
+        if (this.isLegal(action)) actions.push(action);
+      }
+    }
+
     const power = getHeroDefinition(side.hero.definitionId).power;
     const powerTargets =
       power.targetMode === 'NONE' ? [undefined] : this.targetsForMode(playerId, power.targetMode);
@@ -168,6 +207,24 @@ export class GameEngine {
     }
     actions.push({ type: 'END_TURN', actorId: playerId });
     return actions;
+  }
+
+  /**
+   * Resolves one effect outside a card play and returns the events it produced.
+   *
+   * Scenario scripting and tests need to apply an effect directly — "the boss
+   * shatters your Weapon" — without inventing a card for it. It runs through
+   * the ordinary queue, so ordering and triggers behave exactly as they would
+   * from a card.
+   */
+  resolveEffect(effect: Effect, ownerId: PlayerId, sourceId?: EntityId): GameEvent[] {
+    this.currentEvents = [];
+    this.queue = [];
+    this.lethalContext.clear();
+    this.enqueueEffect(effect, ownerId, sourceId);
+    this.drainQueue();
+    this.state.rngState = this.rng.state;
+    return this.currentEvents;
   }
 
   private isLegal(action: GameAction): boolean {
@@ -214,6 +271,8 @@ export class GameEngine {
       for (const definitionId of scenarioSide.startingArtifacts ?? []) {
         this.createArtifact(side, definitionId);
       }
+      // PvE Heroes may open the match already armed.
+      if (scenarioSide.startingWeapon) this.equipWeapon(side, scenarioSide.startingWeapon);
     }
     state.rngState = this.rng.state;
   }
@@ -238,6 +297,8 @@ export class GameEngine {
         currentHealth: scenarioSide.heroHealth ?? hero.health,
         maxHealth: scenarioSide.heroHealth ?? hero.health,
         powerUsedThisTurn: false,
+        equippedWeapon: null,
+        attacksUsedThisTurn: 0,
       },
       taika: {
         current: scenarioSide.startingTaika,
@@ -268,6 +329,8 @@ export class GameEngine {
         return this.validatePlayCard(action);
       case 'ATTACK':
         return this.validateAttack(action);
+      case 'HERO_ATTACK':
+        return this.validateHeroAttack(action);
       case 'MOVE_CREATURE':
         return this.validateMove(action);
       case 'SWAP_CREATURES':
@@ -306,6 +369,7 @@ export class GameEngine {
   private validateAttack(action: Extract<GameAction, { type: 'ATTACK' }>): void {
     const attacker = this.requireOwnedCreature(action.actorId, action.attackerId);
     const definition = this.creatureDefinition(attacker);
+    const ranged = definition.keywords.includes('RANGED');
     rule(!attacker.combatActionUsed, 'ACTION_USED', 'Creature already used its combat action');
     const isHero = action.targetId === heroEntityId(this.opponentId(action.actorId));
     if (attacker.summonedThisTurn) {
@@ -316,32 +380,80 @@ export class GameEngine {
         'Creature cannot attack this target on its summon turn',
       );
     }
+    // A Creature swings from where it stands; a Hero stands nowhere, which is
+    // the one targeting rule the two attackers do not share.
     rule(
-      definition.keywords.includes('RANGED') || attacker.position.row === 'FRONT',
+      ranged || attacker.position.row === 'FRONT',
       'BACK_ROW_MELEE',
       'A melee Creature must attack from the front row',
     );
-    if (isHero) {
+    this.validateAttackTarget(
+      { range: ranged ? 'RANGED' : 'MELEE', attackerId: action.actorId },
+      action.targetId,
+    );
+  }
+
+  private validateHeroAttack(action: Extract<GameAction, { type: 'HERO_ATTACK' }>): void {
+    const side = this.side(action.actorId);
+    const weapon = side.hero.equippedWeapon;
+    rule(weapon, 'NO_WEAPON', 'The Hero has no Weapon equipped');
+    rule(weapon.currentDurability > 0, 'WEAPON_BROKEN', 'The Weapon has no Durability left');
+    rule(weapon.currentAttack > 0, 'NO_ATTACK', 'The Weapon has no Attack');
+    rule(
+      side.hero.attacksUsedThisTurn < this.heroAttackAllowance(),
+      'HERO_ATTACK_USED',
+      'The Hero has already attacked this turn',
+    );
+    this.validateAttackTarget(
+      { range: this.weaponDefinition(weapon).range, attackerId: action.actorId },
+      action.targetId,
+    );
+  }
+
+  /**
+   * How many attacks this Hero has in a turn.
+   *
+   * One, always, for now. It is a method rather than a literal so that
+   * "your Hero may attack twice this turn" or a boss with a different limit
+   * lands here instead of in combat resolution. It deliberately does not reuse
+   * `ATTACK_MODIFIER`, which is about how hard an attack hits, not how many
+   * there are — a future allowance status wants a kind of its own.
+   */
+  private heroAttackAllowance(): number {
+    return 1;
+  }
+
+  /**
+   * Whether an attack may legally land on `targetId`.
+   *
+   * The single source of truth for Guard and positional legality, shared by
+   * Creature attacks and Hero Weapon attacks. Nothing here asks *what* is
+   * attacking beyond its reach, so the two can never diverge.
+   */
+  private validateAttackTarget(profile: AttackProfile, targetId: EntityId): void {
+    const defenderId = this.opponentId(profile.attackerId);
+    if (targetId === heroEntityId(defenderId)) {
+      // A Guard anywhere on the defending board seals the Hero off, at any reach.
       rule(
-        !this.hasLivingGuard(this.opponentSide(action.actorId)),
+        !this.hasLivingGuard(this.side(defenderId)),
         'HERO_GUARDED',
         'A Guard protects the Hero',
       );
       return;
     }
-    const target = this.findCreature(action.targetId);
+    const target = this.findCreature(targetId);
     rule(target, 'INVALID_TARGET', 'Attack target must be an enemy Creature or Hero');
-    rule(target.ownerId !== action.actorId, 'FRIENDLY_FIRE', 'Creatures cannot attack allies');
-    const targetDefinition = this.creatureDefinition(target);
+    rule(target.ownerId !== profile.attackerId, 'FRIENDLY_FIRE', 'Attacks cannot hit allies');
     rule(!this.isHidden(target), 'TARGET_HIDDEN', 'Hidden Creatures cannot be directly targeted');
-    if (!targetDefinition.keywords.includes('GUARD')) {
+    if (!this.creatureDefinition(target).keywords.includes('GUARD')) {
       rule(
         !this.isGuardProtected(target),
         'TARGET_GUARDED',
         'An adjacent Guard protects this Creature',
       );
     }
-    if (!definition.keywords.includes('RANGED') && target.position.row === 'BACK') {
+    // Ranged reaches past the front line; melee must wait for it to clear.
+    if (profile.range === 'MELEE' && target.position.row === 'BACK') {
       const defender = this.side(target.ownerId);
       rule(
         entityAt(defender.battlefield, { row: 'FRONT', column: target.position.column }) === null,
@@ -445,6 +557,9 @@ export class GameEngine {
       case 'ATTACK':
         this.attack(action);
         break;
+      case 'HERO_ATTACK':
+        this.heroAttack(action);
+        break;
       case 'MOVE_CREATURE':
         this.moveCreature(action);
         break;
@@ -490,6 +605,8 @@ export class GameEngine {
       for (const effect of definition.effects) {
         this.enqueueEffect(effect, side.playerId, card.instanceId, action.targetId);
       }
+    } else if (definition.type === 'WEAPON') {
+      this.equipWeapon(side, definition.id);
     } else {
       const artifact = this.createArtifact(side, definition.id);
       this.enqueueEvent({
@@ -511,15 +628,79 @@ export class GameEngine {
       sourceId: attacker.instanceId,
       targetId: action.targetId,
     });
+    const combat: DamageContext = { kind: 'CREATURE_COMBAT' };
     const target = this.findCreature(action.targetId);
     if (target) {
-      this.applyDamage(target.instanceId, attacker.currentAttack, attacker.instanceId);
-      this.applyDamage(attacker.instanceId, target.currentAttack, target.instanceId);
+      this.applyDamage(target.instanceId, attacker.currentAttack, attacker.instanceId, combat);
+      this.applyDamage(attacker.instanceId, target.currentAttack, target.instanceId, {
+        ...combat,
+        retaliation: true,
+      });
       this.checkDeaths();
     } else {
-      this.applyDamage(action.targetId, attacker.currentAttack, attacker.instanceId);
+      this.applyDamage(action.targetId, attacker.currentAttack, attacker.instanceId, combat);
       this.checkMatchEnd();
     }
+  }
+
+  /**
+   * The Hero swings its Weapon.
+   *
+   * Ordering matters and is fixed: damage resolves, the attack is marked spent,
+   * Durability is consumed, and only then may the Weapon break. Effects
+   * triggered by the attack are queued before the break, so a Weapon that
+   * breaks on its own final swing does not retroactively cancel what that swing
+   * set off (§28).
+   */
+  private heroAttack(action: Extract<GameAction, { type: 'HERO_ATTACK' }>): void {
+    const side = this.side(action.actorId);
+    const weapon = side.hero.equippedWeapon!;
+    const definition = this.weaponDefinition(weapon);
+    const heroId = heroEntityId(action.actorId);
+    // Snapshot the attack before resolution: the Weapon may be gone by the end
+    // of it, but the damage it dealt still belongs to it.
+    const context: DamageContext = {
+      kind: 'HERO_WEAPON',
+      range: definition.range,
+      weaponId: weapon.instanceId,
+      weaponDefinitionId: weapon.definitionId,
+    };
+    const damage = weapon.currentAttack;
+
+    this.enqueueEvent({
+      type: 'HERO_ATTACK_STARTED',
+      actorId: action.actorId,
+      sourceId: heroId,
+      targetId: action.targetId,
+      amount: damage,
+      cardDefinitionId: weapon.definitionId,
+    });
+
+    const target = this.findCreature(action.targetId);
+    this.applyDamage(action.targetId, damage, heroId, context);
+    // Melee trades blows; reach does not. The defender's damage is retaliation,
+    // not an attack of its own, so it costs the Creature nothing.
+    if (target && definition.range === 'MELEE') {
+      this.applyDamage(heroId, target.currentAttack, target.instanceId, {
+        kind: 'CREATURE_COMBAT',
+        retaliation: true,
+        range: 'MELEE',
+      });
+    }
+
+    side.hero.attacksUsedThisTurn += 1;
+    this.spendDurability(side, 1);
+    this.enqueueEvent({
+      type: 'HERO_ATTACK_RESOLVED',
+      actorId: action.actorId,
+      sourceId: heroId,
+      targetId: action.targetId,
+      cardDefinitionId: weapon.definitionId,
+    });
+    // Breaking is the last thing the attack does, after its triggers are queued.
+    this.breakWeaponIfSpent(side);
+    this.checkDeaths();
+    this.checkMatchEnd();
   }
 
   private moveCreature(action: Extract<GameAction, { type: 'MOVE_CREATURE' }>): void {
@@ -588,6 +769,7 @@ export class GameEngine {
     next.turnsStarted += 1;
     next.taika.current = next.taika.maximum;
     next.hero.powerUsedThisTurn = false;
+    next.hero.attacksUsedThisTurn = 0;
     for (const creature of Object.values(next.creatures)) {
       creature.combatActionUsed = false;
       creature.summonedThisTurn = false;
@@ -614,7 +796,7 @@ export class GameEngine {
         this.currentEvents.push(event);
         this.discoverTriggers(event);
       } else {
-        this.resolveEffect(work.effect, work.ownerId, work.sourceId, work.playTargetId);
+        this.applyEffect(work.effect, work.ownerId, work.sourceId, work.playTargetId);
         this.checkDeaths();
         this.checkMatchEnd();
       }
@@ -673,7 +855,7 @@ export class GameEngine {
     }
   }
 
-  private resolveEffect(
+  private applyEffect(
     effect: Effect,
     ownerId: PlayerId,
     sourceId?: EntityId,
@@ -717,7 +899,7 @@ export class GameEngine {
     for (const targetId of targets) {
       switch (effect.type) {
         case 'DEAL_DAMAGE':
-          this.applyDamage(targetId, effect.amount, sourceId);
+          this.applyDamage(targetId, effect.amount, sourceId, { kind: 'EFFECT' });
           break;
         case 'HEAL':
           this.applyHealing(targetId, effect.amount, sourceId);
@@ -750,7 +932,16 @@ export class GameEngine {
         }
         case 'DESTROY': {
           const creature = this.findCreature(targetId);
-          if (creature) creature.currentHealth = 0;
+          if (creature) {
+            creature.currentHealth = 0;
+            break;
+          }
+          // A Weapon may be named directly, so "destroy a Weapon" needs no
+          // second effect type once such a card exists.
+          const armed = this.state.playerOrder
+            .map((id) => this.side(id))
+            .find((candidate) => candidate.hero.equippedWeapon?.instanceId === targetId);
+          if (armed) this.removeWeapon(armed, 'DESTROYED_BY_EFFECT');
           break;
         }
         case 'MOVE': {
@@ -804,6 +995,14 @@ export class GameEngine {
         return Object.values(this.opponentSide(ownerId).creatures)
           .sort(byInstanceId)
           .map((creature) => creature.instanceId);
+      case 'FRIENDLY_WEAPON': {
+        const equipped = this.side(ownerId).hero.equippedWeapon;
+        return equipped ? [equipped.instanceId] : [];
+      }
+      case 'ENEMY_WEAPON': {
+        const equipped = this.opponentSide(ownerId).hero.equippedWeapon;
+        return equipped ? [equipped.instanceId] : [];
+      }
       case 'ADJACENT_FRIENDLY_CREATURES': {
         const source = sourceId ? this.findCreature(sourceId) : undefined;
         if (!source) return [];
@@ -815,7 +1014,12 @@ export class GameEngine {
     }
   }
 
-  private applyDamage(targetId: EntityId, amount: number, sourceId?: EntityId): void {
+  private applyDamage(
+    targetId: EntityId,
+    amount: number,
+    sourceId?: EntityId,
+    context?: DamageContext,
+  ): void {
     if (amount <= 0) return;
     const creature = this.findCreature(targetId);
     if (creature) {
@@ -828,6 +1032,7 @@ export class GameEngine {
           targetId,
           amount,
           reason: 'WARD',
+          ...(context ? { damage: context } : {}),
         });
         this.enqueueEvent({ type: 'STATUS_REMOVED', targetId, reason: 'WARD' });
         return;
@@ -839,7 +1044,10 @@ export class GameEngine {
         ...(sourceId ? { sourceId } : {}),
         targetId,
         amount: dealt,
+        ...(context ? { damage: context } : {}),
       });
+      // Remember what struck the killing blow, so the death event can say so.
+      if (creature.currentHealth <= 0 && context) this.lethalContext.set(targetId, context);
       this.applyLifesteal(sourceId, dealt);
       return;
     }
@@ -853,6 +1061,7 @@ export class GameEngine {
       ...(sourceId ? { sourceId } : {}),
       targetId,
       amount: dealt,
+      ...(context ? { damage: context } : {}),
     });
     this.applyLifesteal(sourceId, dealt);
   }
@@ -903,12 +1112,15 @@ export class GameEngine {
       setEntityAt(side.battlefield, creature.position, null);
       delete side.creatures[creature.instanceId];
       side.discard.push(creature.definitionId);
+      const killedBy = this.lethalContext.get(creature.instanceId);
+      this.lethalContext.delete(creature.instanceId);
       this.enqueueEvent({
         type: 'CREATURE_DIED',
         actorId: creature.ownerId,
         sourceId: creature.instanceId,
         cardDefinitionId: creature.definitionId,
         position: clonePosition(creature.position),
+        ...(killedBy ? { damage: killedBy } : {}),
       });
     }
   }
@@ -931,7 +1143,7 @@ export class GameEngine {
     const definitionId = side.deck.shift();
     if (!definitionId) {
       side.fatigue += 1;
-      this.applyDamage(heroEntityId(side.playerId), side.fatigue);
+      this.applyDamage(heroEntityId(side.playerId), side.fatigue, undefined, { kind: 'FATIGUE' });
       this.checkMatchEnd();
       return;
     }
@@ -990,6 +1202,86 @@ export class GameEngine {
     side.creatures[creature.instanceId] = creature;
     setEntityAt(side.battlefield, position, creature.instanceId);
     return creature;
+  }
+
+  /**
+   * Puts a Weapon in the Hero's one slot, displacing whatever was there.
+   *
+   * Equipping never touches the Hero's attack allowance: a Weapon swapped in
+   * after the Hero has swung does not buy a second swing, and one equipped
+   * before still allows the first (§7, §29, §47).
+   */
+  private equipWeapon(side: MatchSide, definitionId: string): WeaponInstance {
+    const definition = this.weaponDefinitionById(definitionId);
+    const previous = side.hero.equippedWeapon;
+    if (previous) this.removeWeapon(side, 'REPLACED');
+    const weapon: WeaponInstance = {
+      instanceId: this.nextId('weapon'),
+      definitionId,
+      ownerId: side.playerId,
+      currentAttack: definition.attack,
+      currentDurability: definition.durability,
+      maxDurability: definition.durability,
+      statuses: [],
+    };
+    side.hero.equippedWeapon = weapon;
+    this.enqueueEvent({
+      type: 'WEAPON_EQUIPPED',
+      actorId: side.playerId,
+      sourceId: weapon.instanceId,
+      cardDefinitionId: definitionId,
+    });
+    return weapon;
+  }
+
+  /** Takes the Weapon off the Hero, recording why it left. */
+  private removeWeapon(side: MatchSide, reason: WeaponRemovalReason): void {
+    const weapon = side.hero.equippedWeapon;
+    if (!weapon) return;
+    side.hero.equippedWeapon = null;
+    side.discard.push(weapon.definitionId);
+    const type =
+      reason === 'BROKEN'
+        ? 'WEAPON_BROKEN'
+        : reason === 'REPLACED'
+          ? 'WEAPON_REPLACED'
+          : 'WEAPON_DESTROYED';
+    this.enqueueEvent({
+      type,
+      actorId: side.playerId,
+      sourceId: weapon.instanceId,
+      cardDefinitionId: weapon.definitionId,
+      reason,
+    });
+  }
+
+  /** Spends Durability. Breaking is deliberately a separate, later step. */
+  private spendDurability(side: MatchSide, amount: number): void {
+    const weapon = side.hero.equippedWeapon;
+    if (!weapon || amount === 0) return;
+    weapon.currentDurability -= amount;
+    this.enqueueEvent({
+      type: 'WEAPON_DURABILITY_CHANGED',
+      actorId: side.playerId,
+      sourceId: weapon.instanceId,
+      cardDefinitionId: weapon.definitionId,
+      amount: -amount,
+    });
+  }
+
+  private breakWeaponIfSpent(side: MatchSide): void {
+    const weapon = side.hero.equippedWeapon;
+    if (weapon && weapon.currentDurability <= 0) this.removeWeapon(side, 'BROKEN');
+  }
+
+  private weaponDefinitionById(definitionId: string): WeaponDefinition {
+    const definition = getCardDefinition(definitionId);
+    if (definition.type !== 'WEAPON') throw new Error(`${definitionId} is not a Weapon`);
+    return definition;
+  }
+
+  private weaponDefinition(weapon: WeaponInstance): WeaponDefinition {
+    return this.weaponDefinitionById(weapon.definitionId);
   }
 
   private createArtifact(side: MatchSide, definitionId: string) {

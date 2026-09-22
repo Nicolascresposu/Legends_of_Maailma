@@ -72,7 +72,7 @@ static func card_name_for_instance(
 static func group_of(action: Dictionary) -> String:
 	match str(action.get("type", "")):
 		"PLAY_CARD": return "Play a card"
-		"ATTACK": return "Attack"
+		"ATTACK", "HERO_ATTACK": return "Attack"
 		"MOVE_CREATURE", "SWAP_CREATURES": return "Reposition"
 		"USE_HERO_POWER": return "Hero Power"
 		"END_TURN": return "Turn"
@@ -94,6 +94,10 @@ static func label_for(action: Dictionary, state: Dictionary, player_id: String, 
 				entity_name(str(action.get("attackerId", "")), state, library),
 				entity_name(str(action.get("targetId", "")), state, library),
 			]
+		"HERO_ATTACK":
+			return "Your Hero → %s" % entity_name(
+				str(action.get("targetId", "")), state, library
+			)
 		"MOVE_CREATURE":
 			return "%s → %s" % [
 				entity_name(str(action.get("creatureId", "")), state, library),
@@ -155,6 +159,34 @@ static func event_line(event: Dictionary, state: Dictionary, library: CardLibrar
 			return "%s is destroyed at %s." % [dead_name, position_text(event.get("position", {}))]
 		"HERO_POWER_USED":
 			return "%s uses their Hero Power." % str(event.get("actorId", ""))
+		"WEAPON_EQUIPPED":
+			return "%s equips %s." % [
+				str(event.get("actorId", "")),
+				library.card_name(str(event.get("cardDefinitionId", ""))),
+			]
+		"WEAPON_REPLACED":
+			return "%s is put away." % library.card_name(str(event.get("cardDefinitionId", "")))
+		"WEAPON_DURABILITY_CHANGED":
+			# `amount` is a delta, and losing Durability is the ordinary case.
+			if amount < 0:
+				return "%s loses %d Durability." % [
+					library.card_name(str(event.get("cardDefinitionId", ""))), -amount
+				]
+			return "%s gains %d Durability." % [
+				library.card_name(str(event.get("cardDefinitionId", ""))), amount
+			]
+		"WEAPON_BROKEN":
+			return "%s breaks." % library.card_name(str(event.get("cardDefinitionId", "")))
+		"WEAPON_DESTROYED":
+			return "%s is destroyed." % library.card_name(str(event.get("cardDefinitionId", "")))
+		"HERO_ATTACK_STARTED":
+			return "%s attacks %s with %s." % [
+				source,
+				target,
+				library.card_name(str(event.get("cardDefinitionId", ""))),
+			]
+		"HERO_ATTACK_RESOLVED":
+			return ""
 		"STATUS_APPLIED":
 			return "%s gains a status." % target
 		"STATUS_REMOVED":

@@ -14,6 +14,7 @@ extends Control
 const SLOT_SIZE := Vector2(148, 112)
 const CARD_SIZE := Vector2(132, 132)
 const ARTIFACT_TILE := Vector2(92, 84)
+const WEAPON_TILE := Vector2(104, 84)
 const MAX_LOG_LINES := 120
 ## Pointer travel before a press becomes a drag rather than a click.
 const DRAG_THRESHOLD := 10.0
@@ -56,6 +57,9 @@ var _pressed_is_card := false
 var _press_origin := Vector2.ZERO
 var _dragging := false
 var _hovered_key := ""
+## Where the pointer was last seen, so a board rebuilt underneath it can decide
+## whether what it was revealing is still there.
+var _hover_at := Vector2.ZERO
 
 ## Screen rects of every droppable thing, rebuilt after each layout pass.
 ## Maps a target key to {rect, kind, id, valid}.
@@ -78,6 +82,7 @@ var create_pvp_button: Button
 var create_pve_button: Button
 var join_button: Button
 var arrow: TargetingArrow
+var reveal: CardReveal
 
 func _ready() -> void:
 	client = MatchClient.new()
@@ -172,7 +177,12 @@ func _build_interface() -> void:
 
 	game_row.add_child(_build_side_panel())
 
-	# The arrow sits above everything and never takes pointer input.
+	# Both overlays sit above the board and never take pointer input. The
+	# reveal is added first so the targeting arrow draws over it.
+	reveal = CardReveal.new()
+	reveal.setup(library)
+	game_root.add_child(reveal)
+
 	arrow = TargetingArrow.new()
 	game_root.add_child(arrow)
 
@@ -463,8 +473,13 @@ func _on_legal_actions(target_player: String, actions: Array) -> void:
 
 func _on_game_events(events: Array) -> void:
 	for event in events:
-		if typeof(event) == TYPE_DICTIONARY:
-			_append_log(ActionFormatter.event_line(event, state, library))
+		if typeof(event) != TYPE_DICTIONARY:
+			continue
+		# Some events are bookkeeping the player need not read — a resolved
+		# marker whose damage lines already told the story. They format to "".
+		var line := ActionFormatter.event_line(event, state, library)
+		if line != "":
+			_append_log(line)
 
 func _on_match_ended(winner_id: String) -> void:
 	var outcome := "You win!" if winner_id == player_id else "You lose."
@@ -577,11 +592,26 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 			if typeof(artifact) == TYPE_DICTIONARY:
 				row.add_child(_artifact_tile(artifact))
 
+	# The equipped Weapon sits with the Hero it arms, not on the battlefield.
+	var equipped: Variant = hero.get("equippedWeapon", null)
+	if typeof(equipped) == TYPE_DICTIONARY:
+		row.add_child(_weapon_tile(equipped as Dictionary))
+
 	if bool(hero.get("powerUsedThisTurn", false)):
 		var used := Label.new()
 		used.text = "Hero Power used"
 		used.add_theme_color_override("font_color", Color(0.7, 0.7, 0.74))
 		row.add_child(used)
+
+	# An armed Hero with an attack left is a drag source, exactly like a
+	# Creature that can still act. Whether it may actually swing is the
+	# server's call: this only lights up when it has offered a HERO_ATTACK.
+	if is_mine and _entity_can_act(hero_id):
+		panel.set_meta("drag_entity", hero_id)
+		if not is_target and hero_id != selected_entity:
+			_tint(panel, COLOR_READY)
+	if hero_id == selected_entity:
+		_tint(panel, COLOR_SELECTED)
 
 	if is_target:
 		var prompt := Label.new()
@@ -593,14 +623,77 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 	panel.set_meta("target_id", hero_id)
 	return panel
 
+## The equipped Weapon beside its Hero: name, Attack, Durability, and Ranged
+## where it applies. Melee is the ordinary case and goes unlabelled.
+func _weapon_tile(weapon: Dictionary) -> Control:
+	var definition_id := str(weapon.get("definitionId", ""))
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel.custom_minimum_size = WEAPON_TILE
+	_tint(panel, COLOR_EMPTY)
+
+	# Revealed on hover like any other card in play, keyed by instance so a
+	# replacement is told apart from the Weapon it replaced.
+	panel.set_meta("reveal_key", str(weapon.get("instanceId", definition_id)))
+	panel.set_meta("reveal_card", {
+		"definition_id": definition_id,
+		"attack": weapon.get("currentAttack", library.base_attack(definition_id)),
+		"durability": weapon.get("currentDurability", library.base_durability(definition_id)),
+	})
+
+	var column := VBoxContainer.new()
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 1)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.add_theme_font_size_override("font_size", 10)
+	title.text = library.card_name(definition_id)
+	column.add_child(title)
+
+	var banner := CardArt.make_banner(definition_id, CardArt.BOARD_ART_HEIGHT)
+	if banner != null:
+		column.add_child(banner)
+
+	if library.is_ranged_weapon(definition_id):
+		var ranged := Label.new()
+		ranged.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ranged.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ranged.add_theme_font_size_override("font_size", 9)
+		ranged.add_theme_color_override("font_color", Color(0.62, 0.82, 1.0))
+		ranged.text = "Ranged"
+		column.add_child(ranged)
+
+	var stats := Label.new()
+	stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats.add_theme_font_size_override("font_size", 10)
+	stats.text = "⚔ %s   ◈ %s" % [
+		_num(weapon.get("currentAttack", "?")),
+		_num(weapon.get("currentDurability", "?")),
+	]
+	column.add_child(stats)
+	return panel
+
 ## A small in-play artifact tile: art where there is art, durability always.
 func _artifact_tile(artifact: Dictionary) -> Control:
 	var definition_id := str(artifact.get("definitionId", ""))
 	var panel := PanelContainer.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	panel.custom_minimum_size = ARTIFACT_TILE
-	panel.tooltip_text = library.tooltip(definition_id)
 	_tint(panel, COLOR_EMPTY)
+
+	# Artifacts are in play, so they reveal on hover like creatures do. Their
+	# instance id keys the reveal where there is one, so two copies of the same
+	# artifact are told apart.
+	panel.set_meta("reveal_key", str(artifact.get("instanceId", definition_id)))
+	panel.set_meta("reveal_card", {
+		"definition_id": definition_id,
+		"durability": artifact.get("durability", 0),
+	})
 
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -753,7 +846,17 @@ func _slot_panel(
 		]
 	if not keyword_list.is_empty():
 		label.text += "\n" + ", ".join(keyword_list)
-	panel.tooltip_text = library.tooltip(definition_id)
+	# The hover reveal replaces the built-in tooltip for cards in play: it shows
+	# the same information, but large, with art, and without the delay-and-
+	# follow behaviour of a cursor tooltip.
+	panel.set_meta("reveal_key", creature_id)
+	panel.set_meta("reveal_card", {
+		"definition_id": definition_id,
+		"attack": creature.get("currentAttack", library.base_attack(definition_id)),
+		"health": creature.get("currentHealth", library.base_health(definition_id)),
+		"max_health": creature.get("maxHealth", library.base_health(definition_id)),
+		"marks": marks.strip_edges(),
+	})
 
 	var is_target: bool = entity_targets.has(creature_id)
 	if creature_id == selected_entity:
@@ -872,6 +975,26 @@ func _rebuild_drop_zones() -> void:
 	_drop_zones.clear()
 	_collect_zones(board_container)
 	_collect_zones(hand_container)
+	_refresh_reveal()
+
+## Keeps a showing reveal honest after the board is rebuilt: a card that has
+## left play stops being revealed, and one whose stats changed re-reads them.
+func _refresh_reveal() -> void:
+	if reveal == null or not reveal.is_revealing():
+		return
+	# Hit-test the last point the pointer was seen at rather than asking the
+	# OS where the cursor is: the two agree in normal play, but synthetic
+	# input drives this code without moving the real cursor.
+	var zone := _reveal_zone_at(_hover_at)
+	if zone.is_empty():
+		reveal.hide_reveal()
+		return
+	var card: Variant = zone.get("card", {})
+	reveal.refresh(
+		str(zone.get("id", "")),
+		card if typeof(card) == TYPE_DICTIONARY else {},
+		zone["rect"] as Rect2
+	)
 
 func _collect_zones(node: Node) -> void:
 	for child in node.get_children():
@@ -897,6 +1020,14 @@ func _collect_zones(node: Node) -> void:
 					"id": str(control.get_meta("drag_entity")),
 					"control": control,
 				}
+			if control.has_meta("reveal_key"):
+				_drop_zones["reveal:" + str(control.get_meta("reveal_key"))] = {
+					"rect": control.get_global_rect(),
+					"kind": "reveal",
+					"id": str(control.get_meta("reveal_key")),
+					"card": control.get_meta("reveal_card"),
+					"control": control,
+				}
 		_collect_zones(child)
 
 # --- Pointer interaction ----------------------------------------------------
@@ -915,8 +1046,54 @@ func _gui_input(event: InputEvent) -> void:
 			_on_pointer_down(button.global_position)
 		else:
 			_on_pointer_up(button.global_position)
-	elif event is InputEventMouseMotion and (_dragging or _pressed_source != ""):
-		_on_pointer_move((event as InputEventMouseMotion).global_position)
+	elif event is InputEventMouseMotion:
+		var at := (event as InputEventMouseMotion).global_position
+		if _dragging or _pressed_source != "":
+			_on_pointer_move(at)
+		else:
+			_on_hover_move(at)
+
+## Tracks the pointer across the board and reveals whatever it rests on.
+##
+## Hit-testing the cached rects rather than each panel's `mouse_entered` keeps
+## this working through the panels' mouse-ignoring children, and reuses the map
+## the drag code already maintains.
+func _on_hover_move(at: Vector2) -> void:
+	if reveal == null:
+		return
+	_hover_at = at
+	# Rects go stale whenever the board re-renders, which happens on every
+	# state update, so refresh before trusting a miss. The board is a dozen
+	# panels, so this is cheaper than tracking when it last changed.
+	_rebuild_drop_zones()
+	var zone := _reveal_zone_at(at)
+	if zone.is_empty():
+		reveal.hide_reveal()
+		return
+	var card: Variant = zone.get("card", {})
+	reveal.request(
+		str(zone.get("id", "")),
+		card if typeof(card) == TYPE_DICTIONARY else {},
+		zone["rect"] as Rect2
+	)
+
+## The revealable card under a point; the smallest wins, so an artifact tile
+## inside a hero strip is not masked by the strip around it.
+func _reveal_zone_at(at: Vector2) -> Dictionary:
+	var best: Dictionary = {}
+	var best_area := INF
+	for key in _drop_zones:
+		var zone: Dictionary = _drop_zones[key]
+		if str(zone.get("kind", "")) != "reveal":
+			continue
+		var rect: Rect2 = zone["rect"]
+		if not rect.has_point(at):
+			continue
+		var area := rect.size.x * rect.size.y
+		if area < best_area:
+			best_area = area
+			best = zone
+	return best
 
 func _on_pointer_down(at: Vector2) -> void:
 	_rebuild_drop_zones()
@@ -1011,6 +1188,9 @@ func _begin_drag(source_id: String, is_card: bool) -> void:
 		_set_status(Targeting.prompt_for(_selection_actions(), player_id), true)
 		return
 	_dragging = true
+	# The reveal would sit over the very targets the drag is aiming at.
+	if reveal != null:
+		reveal.hide_reveal()
 	var zone_key := ("card:" if is_card else "drag:") + source_id
 	var origin := _press_origin
 	if _drop_zones.has(zone_key):
@@ -1030,6 +1210,8 @@ func _end_drag() -> void:
 func _cancel_drag() -> void:
 	_end_drag()
 	_clear_selection()
+	if reveal != null:
+		reveal.hide_reveal()
 
 func _toggle_selection(source_id: String, is_card: bool) -> void:
 	var already := (selected_card == source_id) if is_card else (selected_entity == source_id)

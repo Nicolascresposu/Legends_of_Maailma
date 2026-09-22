@@ -44,6 +44,32 @@ export type CreatureTag =
   | 'SOLDIER'
   | (string & {});
 
+/**
+ * Whether a Weapon strikes at reach.
+ *
+ * This is a rules property, not a flavour tag: the engine reads it directly to
+ * decide row targeting and retaliation, and never infers it from a card's name,
+ * text or `tags`.
+ */
+export const WEAPON_RANGES = ['MELEE', 'RANGED'] as const;
+export type WeaponRange = (typeof WEAPON_RANGES)[number];
+
+/**
+ * Weapon taxonomy — what a Weapon *is*, for effects that care ("your Bows
+ * cost 1 less"). Deliberately separate from `range`, which is what it *does*.
+ */
+export type WeaponTag =
+  | 'SWORD'
+  | 'AXE'
+  | 'BOW'
+  | 'CROSSBOW'
+  | 'DAGGER'
+  | 'HAMMER'
+  | 'DWARVEN'
+  | 'RELIC'
+  | 'ANIMA'
+  | (string & {});
+
 export type CardSource = 'CORE' | 'CHRONICLE';
 export type Rarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
 export type Trigger = 'ARRIVAL' | 'LAST_BREATH' | 'TURN_STARTED' | 'TURN_ENDED';
@@ -55,7 +81,9 @@ export type EffectTarget =
   | 'ENEMY_HERO'
   | 'RANDOM_ENEMY_CREATURE'
   | 'ALL_ENEMY_CREATURES'
-  | 'ADJACENT_FRIENDLY_CREATURES';
+  | 'ADJACENT_FRIENDLY_CREATURES'
+  | 'FRIENDLY_WEAPON'
+  | 'ENEMY_WEAPON';
 
 export type Effect =
   | { type: 'DEAL_DAMAGE'; amount: number; target: EffectTarget }
@@ -104,7 +132,17 @@ export interface ArtifactDefinition extends CardDefinitionBase {
   effects: EffectDefinition[];
 }
 
-export type CardDefinition = CreatureDefinition | ActionDefinition | ArtifactDefinition;
+export interface WeaponDefinition extends CardDefinitionBase {
+  type: 'WEAPON';
+  attack: number;
+  durability: number;
+  range: WeaponRange;
+  tags: WeaponTag[];
+  effects: EffectDefinition[];
+}
+
+export type CardDefinition =
+  CreatureDefinition | ActionDefinition | ArtifactDefinition | WeaponDefinition;
 
 export type StatusKind = 'ROOTED' | 'HIDDEN' | 'REVEALED' | 'WARD' | 'ATTACK_MODIFIER';
 
@@ -135,6 +173,28 @@ export interface ArtifactInstance {
   durability: number;
 }
 
+/**
+ * Why a Weapon left its Hero's slot.
+ *
+ * Kept distinct because future card text discriminates on it: "when your
+ * Weapon breaks, draw a card" must not fire when the owner simply swaps it out.
+ */
+export type WeaponRemovalReason = 'BROKEN' | 'REPLACED' | 'DESTROYED_BY_EFFECT';
+
+/**
+ * A Weapon in play. Definitions stay immutable, so every value an effect might
+ * change — Attack, Durability — lives here.
+ */
+export interface WeaponInstance {
+  instanceId: EntityId;
+  definitionId: string;
+  ownerId: PlayerId;
+  currentAttack: number;
+  currentDurability: number;
+  maxDurability: number;
+  statuses: StatusInstance[];
+}
+
 export interface HeroPowerDefinition {
   id: string;
   name: string;
@@ -156,6 +216,14 @@ export interface HeroInstance {
   currentHealth: number;
   maxHealth: number;
   powerUsedThisTurn: boolean;
+  /** The one Weapon slot. A Hero equips at most one Weapon at a time. */
+  equippedWeapon: WeaponInstance | null;
+  /**
+   * Attacks the Hero has made this turn. A count rather than a flag so that
+   * "your Hero may attack twice this turn" needs no change to this model, and
+   * so swapping Weapons mid-turn cannot hand back a spent attack.
+   */
+  attacksUsedThisTurn: number;
 }
 
 export interface CardInstance {
@@ -193,6 +261,8 @@ export interface ScenarioSideDefinition {
   startingCards?: string[];
   startingCreatures?: Array<{ definitionId: string; position: Position }>;
   startingArtifacts?: string[];
+  /** A Weapon the Hero begins the match holding — for PvE bosses. */
+  startingWeapon?: string;
   controller?: ControllerKind;
 }
 
@@ -283,6 +353,19 @@ export interface UseHeroPowerAction {
   targetId?: EntityId;
 }
 
+/**
+ * The Hero swings its equipped Weapon.
+ *
+ * Deliberately not folded into `ATTACK`: that action names a Creature
+ * `attackerId` and carries Creature-only concerns (summoning sickness, the
+ * attacker's own tile). A Hero has neither.
+ */
+export interface HeroAttackAction {
+  type: 'HERO_ATTACK';
+  actorId: PlayerId;
+  targetId: EntityId;
+}
+
 export interface EndTurnAction {
   type: 'END_TURN';
   actorId: PlayerId;
@@ -291,6 +374,7 @@ export interface EndTurnAction {
 export type GameAction =
   | PlayCardAction
   | AttackAction
+  | HeroAttackAction
   | MoveCreatureAction
   | SwapCreaturesAction
   | UseHeroPowerAction
@@ -315,10 +399,37 @@ export type GameEventType =
   | 'ARTIFACT_DAMAGED'
   | 'ARTIFACT_DESTROYED'
   | 'HERO_POWER_USED'
+  | 'WEAPON_EQUIPPED'
+  | 'WEAPON_REPLACED'
+  | 'WEAPON_DURABILITY_CHANGED'
+  | 'WEAPON_BROKEN'
+  | 'WEAPON_DESTROYED'
+  | 'HERO_ATTACK_STARTED'
+  | 'HERO_ATTACK_RESOLVED'
   | 'STATUS_APPLIED'
   | 'STATUS_REMOVED'
   | 'TAIKA_CHANGED'
   | 'MATCH_ENDED';
+
+/**
+ * How a point of damage was delivered.
+ *
+ * Damage is never anonymous: future card text distinguishes "whenever your Hero
+ * deals Weapon damage" from an Action's burn, and "whenever you take melee
+ * combat damage" from a ranged shot. Absent on non-damage events.
+ */
+export interface DamageContext {
+  /** What dealt it. */
+  kind: 'CREATURE_COMBAT' | 'HERO_WEAPON' | 'EFFECT' | 'FATIGUE';
+  /** True for the defender's half of a melee exchange. */
+  retaliation?: boolean;
+  /** Reach of the attack, where the distinction is meaningful. */
+  range?: WeaponRange;
+  /** The Weapon instance responsible, for `HERO_WEAPON` damage. */
+  weaponId?: EntityId;
+  /** The Weapon's definition, which outlives the instance when it breaks. */
+  weaponDefinitionId?: string;
+}
 
 export interface GameEvent {
   sequence: number;
@@ -333,6 +444,8 @@ export interface GameEvent {
   to?: Position;
   reason?: string;
   winnerId?: PlayerId;
+  /** Present on `DAMAGE_DEALT`/`CREATURE_DIED`, so kills can be attributed. */
+  damage?: DamageContext;
 }
 
 export interface ActionResult {

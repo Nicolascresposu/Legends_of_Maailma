@@ -1,3 +1,4 @@
+import { getCardDefinition } from '@maailma/card-definitions';
 import type { GameAction, MatchState, PlayerId } from '@maailma/game-model';
 import type { GameEngine } from './engine.js';
 
@@ -14,6 +15,17 @@ export class HumanController implements MatchController {
   }
 }
 
+/**
+ * A crude standing for a Weapon, used only to avoid the obviously bad play of
+ * throwing away a better Weapon for a worse one. Strategic Weapon evaluation is
+ * explicitly not a goal here.
+ */
+function weaponValue(attack: number, durability: number, ranged: boolean): number {
+  // Ranged trades damage for safety, so it is worth a little more than its
+  // raw numbers suggest.
+  return attack * durability + (ranged ? 1 : 0);
+}
+
 /** Stable priority order makes AI games exactly replayable from their emitted action log. */
 export class BasicAIController implements MatchController {
   readonly kind = 'AI' as const;
@@ -21,12 +33,34 @@ export class BasicAIController implements MatchController {
   chooseAction(engine: GameEngine, playerId: PlayerId): GameAction | undefined {
     const legal = engine.getLegalActions(playerId);
     return (
-      legal.find((action) => action.type === 'PLAY_CARD') ??
+      legal.find((action) => this.wantsToPlay(engine, playerId, action)) ??
       legal.find((action) => action.type === 'ATTACK') ??
+      legal.find((action) => action.type === 'HERO_ATTACK') ??
       legal.find((action) => action.type === 'USE_HERO_POWER') ??
       legal.find((action) => action.type === 'MOVE_CREATURE') ??
       legal.find((action) => action.type === 'SWAP_CREATURES') ??
       legal.find((action) => action.type === 'END_TURN')
+    );
+  }
+
+  /**
+   * Whether to play a card from hand. Everything is worth playing except a
+   * Weapon that would replace a better one still in good repair.
+   */
+  private wantsToPlay(engine: GameEngine, playerId: PlayerId, action: GameAction): boolean {
+    if (action.type !== 'PLAY_CARD') return false;
+    const side = engine.state.sides[playerId];
+    const card = side?.hand.find((entry) => entry.instanceId === action.cardInstanceId);
+    if (!card) return false;
+    const definition = getCardDefinition(card.definitionId);
+    if (definition.type !== 'WEAPON') return true;
+    const equipped = side!.hero.equippedWeapon;
+    if (!equipped) return true;
+    const current = getCardDefinition(equipped.definitionId);
+    if (current.type !== 'WEAPON') return true;
+    return (
+      weaponValue(definition.attack, definition.durability, definition.range === 'RANGED') >
+      weaponValue(equipped.currentAttack, equipped.currentDurability, current.range === 'RANGED')
     );
   }
 }

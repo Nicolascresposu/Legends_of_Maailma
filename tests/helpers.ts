@@ -16,6 +16,8 @@ export function makeEngine(
     deckA?: string[];
     deckB?: string[];
     seed?: number | string;
+    startingWeaponA?: string;
+    startingWeaponB?: string;
   } = {},
 ): GameEngine {
   const width = options.width ?? 3;
@@ -29,12 +31,14 @@ export function makeEngine(
       startingTaika: taika,
       maxTaika: 10,
       startingCreatures: options.a ?? [],
+      ...(options.startingWeaponA ? { startingWeapon: options.startingWeaponA } : {}),
     },
     sideB: {
       ...structuredClone(SCENARIO_DEFINITIONS.STANDARD_PVP!.sideB),
       startingTaika: taika,
       maxTaika: 10,
       startingCreatures: options.b ?? [],
+      ...(options.startingWeaponB ? { startingWeapon: options.startingWeaponB } : {}),
     },
   };
   return new GameEngine({

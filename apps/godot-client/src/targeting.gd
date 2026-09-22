@@ -38,10 +38,18 @@ static func actions_for_card(legal_actions: Array, card_instance_id: String) -> 
 	return out
 
 ## Actions that originate from a board entity (attacks, moves, swaps).
+##
+## A HERO_ATTACK names no attacker: the acting side's Hero is implied. So it
+## belongs to the selection when the selected entity is that side's Hero.
 static func actions_for_entity(legal_actions: Array, entity_id: String) -> Array:
 	var out: Array = []
+	var hero_side := hero_owner(entity_id)
 	for action in legal_actions:
 		if typeof(action) != TYPE_DICTIONARY:
+			continue
+		if str(action.get("type", "")) == "HERO_ATTACK":
+			if hero_side != "" and str(action.get("actorId", "")) == hero_side:
+				out.append(action)
 			continue
 		if str(action.get("attackerId", "")) == entity_id \
 				or str(action.get("creatureId", "")) == entity_id \

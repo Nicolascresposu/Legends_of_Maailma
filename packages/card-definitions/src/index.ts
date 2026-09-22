@@ -8,7 +8,11 @@ import type {
   Keyword,
   Rarity,
   ScenarioDefinition,
+  WeaponDefinition,
+  WeaponRange,
+  WeaponTag,
 } from '@maailma/game-model';
+import { WEAPON_RANGES } from '@maailma/game-model';
 
 const cards: CardDefinition[] = [
   creature('wolf', 'Wolf', 1, 2, 1, ['BEAST']),
@@ -129,6 +133,11 @@ const cards: CardDefinition[] = [
     text: 'At the start of your turn, gain 1 Taika this turn.',
     effects: [{ trigger: 'TURN_STARTED', effect: { type: 'GAIN_TAIKA', amount: 1 } }],
   },
+  weapon('rusty_dagger', 'Rusty Dagger', 1, 1, 2, 'MELEE', ['DAGGER']),
+  weapon('iron_sword', 'Iron Sword', 2, 2, 2, 'MELEE', ['SWORD']),
+  weapon('war_axe', 'War Axe', 4, 4, 2, 'MELEE', ['AXE']),
+  weapon('hunting_bow', 'Hunting Bow', 3, 2, 2, 'RANGED', ['BOW']),
+  weapon('longbow', 'Longbow', 5, 3, 2, 'RANGED', ['BOW']),
 ];
 
 function creature(
@@ -158,6 +167,70 @@ function creature(
     collectible: true,
     text: effects.length ? keywords.join(', ') : keywords.join(', ') || `${attack}/${health}`,
   };
+}
+
+function weapon(
+  id: string,
+  name: string,
+  cost: number,
+  attack: number,
+  durability: number,
+  range: WeaponRange,
+  tags: WeaponTag[],
+  effects: EffectDefinition[] = [],
+  source: CardSource = 'CORE',
+  rarity: Rarity = 'COMMON',
+): WeaponDefinition {
+  return {
+    id,
+    name,
+    type: 'WEAPON',
+    cost,
+    attack,
+    durability,
+    range,
+    tags,
+    effects,
+    source,
+    rarity,
+    collectible: true,
+    // Melee is the default case and goes unsaid; Ranged changes how the card
+    // plays, so it is named on the card itself.
+    text: range === 'RANGED' ? 'Ranged' : '',
+  };
+}
+
+/**
+ * Rejects malformed Weapon data at load.
+ *
+ * Weapons carry rules properties the engine trusts without re-deriving — a
+ * missing `range` or a zero-Durability Weapon would misbehave quietly deep in
+ * combat rather than loudly here.
+ */
+export function validateWeaponDefinition(definition: WeaponDefinition): string[] {
+  const errors: string[] = [];
+  const where = definition.id || '(unnamed weapon)';
+  if (definition.type !== 'WEAPON') errors.push(`${where}: type must be WEAPON`);
+  if (!Number.isInteger(definition.cost) || definition.cost < 0)
+    errors.push(`${where}: cost must be a non-negative integer`);
+  if (!Number.isInteger(definition.attack) || definition.attack < 0)
+    errors.push(`${where}: attack must be a non-negative integer`);
+  if (!Number.isInteger(definition.durability) || definition.durability <= 0)
+    errors.push(`${where}: durability must be a positive integer`);
+  if (!WEAPON_RANGES.includes(definition.range))
+    errors.push(`${where}: range must be one of ${WEAPON_RANGES.join(' or ')}`);
+  if (!Array.isArray(definition.tags) || definition.tags.some((tag) => typeof tag !== 'string'))
+    errors.push(`${where}: tags must be an array of strings`);
+  return errors;
+}
+
+// A malformed registry is a programming error, so it fails at import rather
+// than midway through somebody's match.
+const definitionErrors = cards
+  .filter((card): card is WeaponDefinition => card.type === 'WEAPON')
+  .flatMap(validateWeaponDefinition);
+if (definitionErrors.length > 0) {
+  throw new Error(`Invalid Weapon definitions: ${definitionErrors.join('; ')}`);
 }
 
 export const CARD_DEFINITIONS: Readonly<Record<string, CardDefinition>> = Object.freeze(
@@ -224,6 +297,8 @@ export const SCENARIO_DEFINITIONS: Readonly<Record<string, ScenarioDefinition>> 
       startingCreatures: [
         { definitionId: 'human_mercenary', position: { row: 'FRONT', column: 0 } },
       ],
+      // The ambusher opens armed, which is the PvE case Weapons must support.
+      startingWeapon: 'rusty_dagger',
     },
     victoryConditions: [{ type: 'ENEMY_HERO_DEFEATED' }],
   },
