@@ -495,6 +495,9 @@ describe('trading feeds back into duplicate protection', () => {
     let trade = await stage(a, b, [{ cardId: EPIC, quantity: 1 }]);
     trade = await trades.accept(a, trade.id, trade.revision);
     trade = await trades.accept(b, trade.id, trade.revision);
+    // Asserted, so that a silently failed trade cannot pass this test by
+    // leaving the collection untouched for the wrong reason.
+    expect(trade.status).toBe('ACCEPTED');
 
     expect((await packs.protectionPreview(b, 'CHRONICLE_PACK')).eligible).not.toContain(EPIC);
   });
