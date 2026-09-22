@@ -14,6 +14,7 @@ import type { CollectionService } from './services/collection-service.js';
 import type { ExpansionService } from './services/expansion-service.js';
 import type { EconomyService } from './services/economy-service.js';
 import type { PackService } from './services/pack-service.js';
+import type { TradeService } from './services/trade-service.js';
 import { visibleCards } from './services/expansion-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
@@ -21,6 +22,7 @@ import { createCollectionRouter } from './routes/collection-routes.js';
 import { createExpansionRouter } from './routes/expansion-routes.js';
 import { createEconomyRouter } from './routes/economy-routes.js';
 import { createPackRouter } from './routes/pack-routes.js';
+import { createTradeRouter } from './routes/trade-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 
 /**
@@ -36,6 +38,7 @@ export interface AppServices {
   expansions: ExpansionService;
   economy: EconomyService;
   packs: PackService;
+  trades: TradeService;
   lobby: LobbyHub;
   databaseReachable?: () => Promise<boolean>;
 }
@@ -164,6 +167,7 @@ export function createApp(
     app.use('/api/expansions', createExpansionRouter(services.expansions, logger));
     app.use('/api/economy', createEconomyRouter(services.economy, logger));
     app.use('/api/packs', createPackRouter(services.packs, logger));
+    app.use('/api/trades', createTradeRouter(services.trades, logger));
     app.use(
       '/api/social',
       createSocialRouter(

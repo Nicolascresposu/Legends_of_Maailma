@@ -15,6 +15,7 @@ import { CollectionService } from './services/collection-service.js';
 import { ExpansionService } from './services/expansion-service.js';
 import { EconomyService } from './services/economy-service.js';
 import { PackService } from './services/pack-service.js';
+import { TradeService } from './services/trade-service.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const logger = createLoggerFromEnv();
@@ -25,6 +26,7 @@ const expansions = new ExpansionService(prisma);
 const collections = new CollectionService(prisma, expansions);
 const economy = new EconomyService(prisma, expansions);
 const packs = new PackService(prisma, expansions);
+const trades = new TradeService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 const server = createServer(
@@ -36,6 +38,7 @@ const server = createServer(
     expansions,
     economy,
     packs,
+    trades,
     lobby,
     databaseReachable: () => databaseReachable(),
   }),

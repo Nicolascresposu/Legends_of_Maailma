@@ -13,6 +13,7 @@ import { CollectionService } from '../apps/server/src/services/collection-servic
 import { ExpansionService } from '../apps/server/src/services/expansion-service.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
 import { PackService } from '../apps/server/src/services/pack-service.js';
+import { TradeService } from '../apps/server/src/services/trade-service.js';
 
 /**
  * Exercises the account, deck and social stack against a real PostgreSQL
@@ -31,6 +32,7 @@ const expansions = new ExpansionService(prisma);
 const collections = new CollectionService(prisma, expansions);
 const economy = new EconomyService(prisma, expansions);
 const packs = new PackService(prisma, expansions);
+const trades = new TradeService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 
@@ -46,6 +48,7 @@ beforeAll(async () => {
       expansions,
       economy,
       packs,
+      trades,
       lobby,
     }),
   );
