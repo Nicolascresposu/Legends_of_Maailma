@@ -21,6 +21,19 @@ signal deck_saved(deck: Dictionary)
 signal deck_error(message: String)
 signal readiness_assessed(readiness: Dictionary)
 signal request_failed(message: String)
+## The player's Fragment balance changed, or was read for the first time.
+signal fragments_changed(fragments: int)
+## A craft or disenchant landed. `result` carries the new balance and count.
+signal economy_result(operation: String, result: Dictionary)
+## An economy request was refused, with the server's own code so the UI can
+## explain the refusal rather than relay an English sentence.
+signal economy_refused(code: String, message: String)
+signal expansions_loaded(expansions: Array)
+signal packs_loaded(packs: Array)
+signal pack_opened(pack: Dictionary)
+signal trades_loaded(trades: Array)
+signal trade_updated(trade: Dictionary)
+signal trade_history_loaded(history: Array)
 
 ## Resolved from the command line, the environment, or a saved address.
 var http_base := ClientConfig.http_base()
@@ -35,6 +48,13 @@ var _deck_request: HTTPRequest
 var _deck_mutate_request: HTTPRequest
 var _assess_request: HTTPRequest
 var _me_request: HTTPRequest
+var _economy_request: HTTPRequest
+var _economy_mutate_request: HTTPRequest
+var _expansion_request: HTTPRequest
+var _pack_request: HTTPRequest
+var _pack_open_request: HTTPRequest
+var _trade_request: HTTPRequest
+var _trade_mutate_request: HTTPRequest
 
 func _ready() -> void:
 	_ensure_requests()
@@ -64,6 +84,34 @@ func _ensure_requests() -> void:
 		_me_request = HTTPRequest.new()
 		_me_request.request_completed.connect(_on_me_completed)
 		add_child(_me_request)
+	if _economy_request == null:
+		_economy_request = HTTPRequest.new()
+		_economy_request.request_completed.connect(_on_balance_completed)
+		add_child(_economy_request)
+	if _economy_mutate_request == null:
+		_economy_mutate_request = HTTPRequest.new()
+		_economy_mutate_request.request_completed.connect(_on_economy_mutated)
+		add_child(_economy_mutate_request)
+	if _expansion_request == null:
+		_expansion_request = HTTPRequest.new()
+		_expansion_request.request_completed.connect(_on_expansions_completed)
+		add_child(_expansion_request)
+	if _pack_request == null:
+		_pack_request = HTTPRequest.new()
+		_pack_request.request_completed.connect(_on_packs_completed)
+		add_child(_pack_request)
+	if _pack_open_request == null:
+		_pack_open_request = HTTPRequest.new()
+		_pack_open_request.request_completed.connect(_on_pack_opened)
+		add_child(_pack_open_request)
+	if _trade_request == null:
+		_trade_request = HTTPRequest.new()
+		_trade_request.request_completed.connect(_on_trades_completed)
+		add_child(_trade_request)
+	if _trade_mutate_request == null:
+		_trade_mutate_request = HTTPRequest.new()
+		_trade_mutate_request.request_completed.connect(_on_trade_mutated)
+		add_child(_trade_mutate_request)
 
 ## True only once the server has confirmed who the token belongs to.
 ##
@@ -227,13 +275,16 @@ func _on_collection_completed(
 	collection_loaded.emit(cards if typeof(cards) == TYPE_ARRAY else [])
 
 ## Checks a card list without saving, so a builder can show readiness live.
-func assess(card_ids: Array) -> void:
+##
+## The format is part of the question: the same thirty cards can be an illegal
+## Standard deck and a legal Wild one, and the server decides which.
+func assess(card_ids: Array, format: String = "STANDARD") -> void:
 	await _await_tree()
 	var error := _assess_request.request(
 		http_base + "/api/collection/assess",
 		_headers(),
 		HTTPClient.METHOD_POST,
-		JSON.stringify({"cardIds": card_ids})
+		JSON.stringify({"cardIds": card_ids, "format": format})
 	)
 	if error != OK:
 		request_failed.emit("Could not check that deck.")
@@ -269,9 +320,15 @@ func _on_decks_completed(
 	var list: Variant = (parsed as Dictionary).get("decks", [])
 	decks_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
 
-func save_deck(name: String, hero_id: String, card_ids: Array, deck_id: String = "") -> void:
+func save_deck(
+	name: String,
+	hero_id: String,
+	card_ids: Array,
+	deck_id: String = "",
+	format: String = "STANDARD"
+) -> void:
 	await _await_tree()
-	var body := {"name": name, "heroId": hero_id, "cardIds": card_ids}
+	var body := {"name": name, "heroId": hero_id, "cardIds": card_ids, "format": format}
 	var url := http_base + "/api/decks"
 	var method := HTTPClient.METHOD_POST
 	if deck_id != "":
@@ -314,3 +371,279 @@ func _on_deck_mutated(
 		return
 	var deck: Variant = payload.get("deck", {})
 	deck_saved.emit(deck if typeof(deck) == TYPE_DICTIONARY else {})
+
+# --- Fragments, crafting and disenchanting ----------------------------------
+#
+# The client sends requests and shows what came back. It never decides whether
+# a craft is allowed, what it costs, or what a player ends up owning: every one
+# of those is the server's answer, and each reply carries the new balance so the
+# UI never has to compute one for itself.
+
+## What the last mutation was, so the reply can be reported as what it was.
+var _pending_economy_operation := ""
+
+func fetch_fragments() -> void:
+	await _await_tree()
+	var error := _economy_request.request(http_base + "/api/economy", _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load your Fragments.")
+
+func _on_balance_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load your Fragments.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	fragments_changed.emit(int((parsed as Dictionary).get("fragments", 0)))
+
+## A fresh id per attempt, so a retry after a lost reply cannot craft twice.
+func _new_request_id(prefix: String) -> String:
+	return "%s-%d-%d" % [prefix, Time.get_ticks_msec(), randi()]
+
+func craft_card(card_id: String, quantity: int = 1, request_id: String = "") -> void:
+	await _await_tree()
+	_pending_economy_operation = "CRAFT"
+	var body := {
+		"cardId": card_id,
+		"quantity": quantity,
+		"requestId": request_id if request_id != "" else _new_request_id("craft"),
+	}
+	var error := _economy_mutate_request.request(
+		http_base + "/api/economy/craft", _headers(), HTTPClient.METHOD_POST, JSON.stringify(body)
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func disenchant_card(card_id: String, quantity: int = 1, request_id: String = "") -> void:
+	await _await_tree()
+	_pending_economy_operation = "DISENCHANT"
+	var body := {
+		"cardId": card_id,
+		"quantity": quantity,
+		"requestId": request_id if request_id != "" else _new_request_id("dust"),
+	}
+	var error := _economy_mutate_request.request(
+		http_base + "/api/economy/disenchant",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify(body)
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+## Disenchants every copy held above the playable limit. Always explicit: the
+## client asks for this, it never happens because spares were noticed.
+func disenchant_extras(request_id: String = "") -> void:
+	await _await_tree()
+	_pending_economy_operation = "DISENCHANT_EXTRAS"
+	var body := {"requestId": request_id if request_id != "" else _new_request_id("extras")}
+	var error := _economy_mutate_request.request(
+		http_base + "/api/economy/extras", _headers(), HTTPClient.METHOD_POST, JSON.stringify(body)
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func _on_economy_mutated(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	var operation := _pending_economy_operation
+	_pending_economy_operation = ""
+	if result != HTTPRequest.RESULT_SUCCESS:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	if response_code != 200:
+		# The server's own code travels with the message, so the UI can say
+		# "this set cannot be crafted yet" rather than echoing a sentence.
+		economy_refused.emit(
+			str(payload.get("code", "ECONOMY_ERROR")),
+			str(payload.get("message", "That could not be completed."))
+		)
+		return
+	var outcome: Variant = payload.get("result", {})
+	var dict: Dictionary = outcome if typeof(outcome) == TYPE_DICTIONARY else {}
+	if dict.has("fragmentBalance"):
+		fragments_changed.emit(int(dict["fragmentBalance"]))
+	economy_result.emit(operation, dict)
+
+# --- Expansions --------------------------------------------------------------
+
+## The expansions a player may currently see, with their live policies.
+##
+## Unreleased sets never appear here: the server filters them out rather than
+## trusting the client to hide them.
+func fetch_expansions() -> void:
+	await _await_tree()
+	var error := _expansion_request.request(http_base + "/api/expansions", _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load the expansions.")
+
+func _on_expansions_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load the expansions.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var list: Variant = (parsed as Dictionary).get("expansions", [])
+	expansions_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+
+# --- Packs -------------------------------------------------------------------
+
+func fetch_packs() -> void:
+	await _await_tree()
+	var error := _pack_request.request(http_base + "/api/packs", _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load the available packs.")
+
+func _on_packs_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load the available packs.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var list: Variant = (parsed as Dictionary).get("packs", [])
+	packs_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+
+func open_pack(pack_id: String, request_id: String = "") -> void:
+	await _await_tree()
+	var body := {"requestId": request_id if request_id != "" else _new_request_id("pack")}
+	var error := _pack_open_request.request(
+		http_base + "/api/packs/" + pack_id + "/open",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify(body)
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func _on_pack_opened(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	if response_code != 200:
+		economy_refused.emit(
+			str(payload.get("code", "PACK_ERROR")),
+			str(payload.get("message", "That pack could not be opened."))
+		)
+		return
+	var pack: Variant = payload.get("pack", {})
+	pack_opened.emit(pack if typeof(pack) == TYPE_DICTIONARY else {})
+
+# --- Trading -----------------------------------------------------------------
+#
+# Offers are assembled here and judged entirely on the server. The revision
+# travels with every acceptance, so a client that accepted a stale offer is
+# refused rather than being taken to have agreed to something it never showed.
+
+func fetch_trades(status: String = "") -> void:
+	await _await_tree()
+	var url := http_base + "/api/trades"
+	if status != "":
+		url += "?status=" + status
+	var error := _trade_request.request(url, _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load your trades.")
+
+func fetch_trade_history() -> void:
+	await _await_tree()
+	var error := _trade_request.request(http_base + "/api/trades/history", _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load your trade history.")
+
+func _on_trades_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load your trades.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var payload: Dictionary = parsed
+	# One request node serves both listings, so the reply is told apart by what
+	# it carries rather than by which call was made.
+	if payload.has("history"):
+		var history: Variant = payload["history"]
+		trade_history_loaded.emit(history if typeof(history) == TYPE_ARRAY else [])
+		return
+	var list: Variant = payload.get("trades", [])
+	trades_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+
+func create_trade(opponent_id: String) -> void:
+	await _await_tree()
+	var error := _trade_mutate_request.request(
+		http_base + "/api/trades",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"opponentId": opponent_id})
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+## Replaces the player's own side of the offer. `cards` is a list of
+## `{cardId, quantity}` dictionaries.
+func update_trade_offer(trade_id: String, cards: Array) -> void:
+	await _await_tree()
+	var error := _trade_mutate_request.request(
+		http_base + "/api/trades/" + trade_id + "/offer",
+		_headers(),
+		HTTPClient.METHOD_PUT,
+		JSON.stringify({"cards": cards})
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+## Accepts one specific revision, never simply "the trade". An offer edited
+## since the client drew it is refused rather than silently agreed to.
+func accept_trade(trade_id: String, revision: int) -> void:
+	await _await_tree()
+	var error := _trade_mutate_request.request(
+		http_base + "/api/trades/" + trade_id + "/accept",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"revision": revision})
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func cancel_trade(trade_id: String) -> void:
+	await _await_tree()
+	var error := _trade_mutate_request.request(
+		http_base + "/api/trades/" + trade_id + "/cancel",
+		_headers(false),
+		HTTPClient.METHOD_POST,
+		""
+	)
+	if error != OK:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func _on_trade_mutated(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	if response_code != 200 and response_code != 201:
+		economy_refused.emit(
+			str(payload.get("code", "TRADE_ERROR")),
+			str(payload.get("message", "That trade could not be updated."))
+		)
+		return
+	var trade: Variant = payload.get("trade", {})
+	trade_updated.emit(trade if typeof(trade) == TYPE_DICTIONARY else {})

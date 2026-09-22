@@ -23,6 +23,13 @@ var decks: Array = []
 var draft: Dictionary = {}
 var editing_deck_id := ""
 var selected_hero := "healer"
+## The format the deck being edited is built for. Legality is still the
+## server's call; this only says which question to ask it.
+var selected_format := "STANDARD"
+## The player's Fragment balance, as the server last reported it.
+var fragments := 0
+## Packs currently openable, as the server last reported them.
+var available_packs: Array = []
 
 var _root: VBoxContainer
 var _auth_box: VBoxContainer
@@ -42,6 +49,10 @@ var _draft_name: LineEdit
 var _hero_picker: OptionButton
 var _readiness_label: RichTextLabel
 var _count_label: Label
+var _fragments_label: Label
+var _format_picker: OptionButton
+var _pack_row: HBoxContainer
+var _economy_status: Label
 
 func setup(account_client: AccountClient, card_library: CardLibrary) -> void:
 	accounts = account_client
@@ -57,6 +68,11 @@ func setup(account_client: AccountClient, card_library: CardLibrary) -> void:
 	accounts.deck_error.connect(_on_deck_error)
 	accounts.readiness_assessed.connect(_on_readiness)
 	accounts.request_failed.connect(_on_deck_error)
+	accounts.fragments_changed.connect(_on_fragments_changed)
+	accounts.economy_result.connect(_on_economy_result)
+	accounts.economy_refused.connect(_on_economy_refused)
+	accounts.packs_loaded.connect(_on_packs_loaded)
+	accounts.pack_opened.connect(_on_pack_opened)
 	_build()
 
 func _build() -> void:
@@ -171,12 +187,26 @@ func _build_main() -> HBoxContainer:
 	collection_title.add_theme_font_size_override("font_size", 16)
 	collection_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(collection_title)
+	# The balance sits beside the collection because that is where it is spent.
+	_fragments_label = Label.new()
+	_fragments_label.text = "0 Fragments"
+	header.add_child(_fragments_label)
 	_who_label = Label.new()
 	header.add_child(_who_label)
 	var sign_out := Button.new()
 	sign_out.text = "Sign out"
 	sign_out.pressed.connect(func() -> void: accounts.sign_out())
 	header.add_child(sign_out)
+
+	# Packs, and whatever the last economy action had to say. Both live above
+	# the list because both change what the list shows.
+	_pack_row = HBoxContainer.new()
+	_pack_row.add_theme_constant_override("separation", 6)
+	left.add_child(_pack_row)
+
+	_economy_status = Label.new()
+	_economy_status.add_theme_font_size_override("font_size", 11)
+	left.add_child(_economy_status)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -213,6 +243,17 @@ func _build_main() -> HBoxContainer:
 		func(index: int) -> void: selected_hero = "striker" if index == 1 else "healer"
 	)
 	name_row.add_child(_hero_picker)
+
+	# Standard and Wild draw on the same collection; only the question differs.
+	_format_picker = OptionButton.new()
+	_format_picker.add_item("Standard", 0)
+	_format_picker.add_item("Wild", 1)
+	_format_picker.item_selected.connect(
+		func(index: int) -> void:
+			selected_format = "WILD" if index == 1 else "STANDARD"
+			_request_readiness()
+	)
+	name_row.add_child(_format_picker)
 
 	_count_label = Label.new()
 	right.add_child(_count_label)
@@ -294,6 +335,8 @@ func _on_signed_in(who: Dictionary) -> void:
 	_who_label.text = str(who.get("displayName", ""))
 	accounts.fetch_collection()
 	accounts.fetch_decks()
+	accounts.fetch_fragments()
+	accounts.fetch_packs()
 
 ## A saved session is being checked: hide the form so it does not flash away.
 func _on_restore_started() -> void:
@@ -407,6 +450,33 @@ func _collection_row(entry: Dictionary) -> Control:
 	remove.disabled = in_deck <= 0
 	remove.pressed.connect(_remove_card.bind(card_id))
 	row.add_child(remove)
+
+	# Crafting and disenchanting are offered only where the server says the
+	# expansion currently allows them. This is presentation: the server refuses
+	# the request anyway, and a policy may change between drawing and clicking.
+	var craft := Button.new()
+	craft.text = "Craft %d" % int(entry.get("craftCost", 0))
+	craft.tooltip_text = "Spend Fragments to make one copy"
+	if not bool(entry.get("craftable", false)):
+		craft.disabled = true
+		craft.tooltip_text = "Crafting is not available for this expansion right now"
+	elif fragments < int(entry.get("craftCost", 0)):
+		craft.disabled = true
+		craft.tooltip_text = "Not enough Fragments"
+	craft.pressed.connect(func() -> void: accounts.craft_card(card_id, 1))
+	row.add_child(craft)
+
+	var dust := Button.new()
+	dust.text = "+%d" % int(entry.get("disenchantValue", 0))
+	dust.tooltip_text = "Disenchant one copy for Fragments"
+	if not bool(entry.get("disenchantable", false)):
+		dust.disabled = true
+		dust.tooltip_text = "Disenchanting is not available for this expansion right now"
+	elif owned <= 0:
+		dust.disabled = true
+		dust.tooltip_text = "You own none of this card"
+	dust.pressed.connect(func() -> void: accounts.disenchant_card(card_id, 1))
+	row.add_child(dust)
 	return panel
 
 func _add_card(card_id: String, limit: int) -> void:
@@ -462,11 +532,14 @@ func _render_draft() -> void:
 		"font_color", Color(0.45, 0.85, 0.55) if total == 30 else Color(0.93, 0.62, 0.40)
 	)
 	_render_collection()
-	# Ask the server for the authoritative verdict.
-	if total > 0:
-		accounts.assess(draft_card_ids())
-	else:
+	_request_readiness()
+
+## Asks the server for the authoritative verdict, in the chosen format.
+func _request_readiness() -> void:
+	if draft.is_empty():
 		_readiness_label.text = "Add cards to build a deck."
+		return
+	accounts.assess(draft_card_ids(), selected_format)
 
 func _owned_count(card_id: String) -> int:
 	for entry in collection:
@@ -498,6 +571,27 @@ func _readiness_text(readiness: Dictionary) -> String:
 				int(entry.get("required", 0)),
 				int(entry.get("owned", 0)),
 			])
+	# Rotation is called out separately, and worded as something that happened
+	# to the deck rather than something wrong with it: these cards were legal
+	# when the deck was built, and it is still perfectly good in Wild.
+	var illegal: Variant = readiness.get("illegalInFormat", [])
+	if typeof(illegal) == TYPE_ARRAY and not (illegal as Array).is_empty():
+		var copies := 0
+		var names: Array[String] = []
+		for entry in (illegal as Array):
+			if typeof(entry) != TYPE_DICTIONARY:
+				continue
+			copies += int((entry as Dictionary).get("copies", 0))
+			names.append(library.card_name(str((entry as Dictionary).get("cardId", ""))))
+		var format := str(readiness.get("format", selected_format))
+		lines.append("[color=#e8c06a]⚠ %d card%s no longer legal in %s: %s[/color]" % [
+			copies,
+			"" if copies == 1 else "s",
+			format.capitalize(),
+			", ".join(names),
+		])
+		if format == "STANDARD":
+			lines.append("  This deck can still be played in Wild.")
 	return "\n".join(lines)
 
 ## Tops the deck up to 30 using only cards the player actually owns.
@@ -518,7 +612,7 @@ func _save_draft() -> void:
 	if name.is_empty():
 		_readiness_label.text = "[color=#e06c75]Give the deck a name first.[/color]"
 		return
-	accounts.save_deck(name, selected_hero, draft_card_ids(), editing_deck_id)
+	accounts.save_deck(name, selected_hero, draft_card_ids(), editing_deck_id, selected_format)
 
 func _on_deck_saved(_deck: Dictionary) -> void:
 	accounts.fetch_decks()
@@ -622,3 +716,126 @@ func _clear(node: Node) -> void:
 	for child in node.get_children():
 		node.remove_child(child)
 		child.queue_free()
+
+# --- Fragments, crafting and packs ------------------------------------------
+#
+# Nothing here decides anything. The balance shown is the one the server last
+# reported, the buttons are enabled from the policies it sent with each card,
+# and every refusal is the server's own — the client only has to say it well.
+
+func _on_fragments_changed(balance: int) -> void:
+	fragments = balance
+	_fragments_label.text = "%d Fragments" % balance
+	# Affordability is drawn from the balance, so the rows follow it.
+	_render_collection()
+
+func _on_economy_result(operation: String, result: Dictionary) -> void:
+	match operation:
+		"CRAFT":
+			_economy_status.text = "Crafted %d × %s." % [
+				int(result.get("quantity", 1)),
+				library.card_name(str(result.get("cardId", ""))),
+			]
+		"DISENCHANT":
+			_economy_status.text = "Disenchanted %d × %s for %d Fragments." % [
+				int(result.get("quantity", 1)),
+				library.card_name(str(result.get("cardId", ""))),
+				int(result.get("fragmentDelta", 0)),
+			]
+		"DISENCHANT_EXTRAS":
+			var disenchanted: Variant = result.get("disenchanted", [])
+			var count := (disenchanted as Array).size() if typeof(disenchanted) == TYPE_ARRAY else 0
+			_economy_status.text = "Disenchanted spares of %d card%s for %d Fragments." % [
+				count,
+				"" if count == 1 else "s",
+				int(result.get("fragmentDelta", 0)),
+			]
+			# Spares the server declined to touch are named, so a skipped card
+			# does not simply look forgotten.
+			var skipped: Variant = result.get("skipped", [])
+			if typeof(skipped) == TYPE_ARRAY and not (skipped as Array).is_empty():
+				var names: Array[String] = []
+				for entry in (skipped as Array):
+					if typeof(entry) == TYPE_DICTIONARY:
+						names.append(library.card_name(str((entry as Dictionary).get("cardId", ""))))
+				_economy_status.text += "  Left alone: %s." % ", ".join(names)
+		_:
+			_economy_status.text = "Done."
+	_economy_status.remove_theme_color_override("font_color")
+	# The collection changed, so re-read it rather than guessing at the new counts.
+	accounts.fetch_collection()
+
+## Explains a refusal in the client's own words, keyed on the server's code.
+##
+## The code is what travels; the sentence is ours. A message written on the
+## server would be the wrong one to show as soon as this screen is translated.
+func _on_economy_refused(code: String, message: String) -> void:
+	var explanation := message
+	match code:
+		"CARD_NOT_CRAFTABLE":
+			explanation = "Crafting is not available for that expansion right now."
+		"CARD_NOT_DISENCHANTABLE":
+			explanation = "Disenchanting is not available for that expansion right now."
+		"CARD_NOT_TRADEABLE":
+			explanation = "Those cards cannot be traded right now."
+		"EXPANSION_NOT_RELEASED":
+			explanation = "That card is not available."
+		"EXPANSION_NOT_AVAILABLE_IN_PACKS":
+			explanation = "Those packs are not available right now."
+		"INSUFFICIENT_FRAGMENTS":
+			explanation = "You do not have enough Fragments."
+		"INSUFFICIENT_CARD_QUANTITY":
+			explanation = "You do not own that many copies."
+		"TRADE_REVISION_CHANGED":
+			explanation = "The offer changed. Review it and accept again."
+		"UNREACHABLE":
+			explanation = "Could not reach the server."
+	_economy_status.text = explanation
+	_economy_status.add_theme_color_override("font_color", Color(0.88, 0.42, 0.45))
+	# A refusal may mean the policy moved under us, so re-read what is true now.
+	accounts.fetch_collection()
+	accounts.fetch_packs()
+
+func _on_packs_loaded(list: Array) -> void:
+	available_packs = list
+	_render_packs()
+
+func _render_packs() -> void:
+	_clear(_pack_row)
+	if available_packs.is_empty():
+		var none := Label.new()
+		none.text = "(no packs available)"
+		none.add_theme_font_size_override("font_size", 11)
+		_pack_row.add_child(none)
+	else:
+		for pack in available_packs:
+			if typeof(pack) != TYPE_DICTIONARY:
+				continue
+			var button := Button.new()
+			button.text = "Open %s" % str((pack as Dictionary).get("name", "Pack"))
+			var pack_id := str((pack as Dictionary).get("id", ""))
+			button.pressed.connect(func() -> void: accounts.open_pack(pack_id))
+			_pack_row.add_child(button)
+
+	# Disenchanting spares is always an explicit request, never something that
+	# happens because the server noticed them.
+	var extras := Button.new()
+	extras.text = "Disenchant spares"
+	extras.tooltip_text = "Turn every copy above the playable limit into Fragments"
+	extras.pressed.connect(func() -> void: accounts.disenchant_extras())
+	_pack_row.add_child(extras)
+
+func _on_pack_opened(pack: Dictionary) -> void:
+	var cards: Variant = pack.get("cards", [])
+	var names: Array[String] = []
+	if typeof(cards) == TYPE_ARRAY:
+		for slot in (cards as Array):
+			if typeof(slot) != TYPE_DICTIONARY:
+				continue
+			names.append(library.card_name(str((slot as Dictionary).get("cardId", ""))))
+	_economy_status.text = "Opened %s: %s" % [
+		str(pack.get("packId", "pack")),
+		", ".join(names),
+	]
+	_economy_status.remove_theme_color_override("font_color")
+	accounts.fetch_collection()
