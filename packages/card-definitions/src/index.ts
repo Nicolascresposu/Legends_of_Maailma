@@ -57,6 +57,26 @@ const cards: CardDefinition[] = [
     [{ trigger: 'ARRIVAL', effect: { type: 'DEAL_DAMAGE', amount: 1, target: 'PLAY_TARGET' } }],
   ),
   creature('maintenance_anima', 'Maintenance Anima', 2, 1, 3, ['ANIMA', 'CONSTRUCT'], ['WARD']),
+  // The Core set's Rare slot. Every rarity has to be represented somewhere a
+  // player can actually reach, or the crafting economy has a price band that
+  // nothing is ever bought or sold at.
+  creature(
+    'warden_sentinel',
+    'Warden Sentinel',
+    4,
+    3,
+    4,
+    ['HUMAN', 'WARDEN'],
+    ['GUARD', 'ARRIVAL'],
+    [
+      {
+        trigger: 'ARRIVAL',
+        effect: { type: 'BUFF', attack: 0, health: 1, target: 'ADJACENT_FRIENDLY_CREATURES' },
+      },
+    ],
+    'CORE',
+    'RARE',
+  ),
   creature(
     'mercy_4',
     'Mercy-4',
@@ -145,6 +165,18 @@ const cards: CardDefinition[] = [
   weapon('war_axe', 'War Axe', 4, 4, 2, 'MELEE', ['AXE']),
   weapon('hunting_bow', 'Hunting Bow', 3, 2, 2, 'RANGED', ['BOW']),
   weapon('longbow', 'Longbow', 5, 3, 2, 'RANGED', ['BOW']),
+  weapon(
+    'dwarven_maul',
+    'Dwarven Maul',
+    4,
+    3,
+    3,
+    'MELEE',
+    ['HAMMER', 'DWARVEN'],
+    [],
+    'CORE',
+    'RARE',
+  ),
 ];
 
 function creature(

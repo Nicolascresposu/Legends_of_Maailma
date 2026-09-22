@@ -12,11 +12,13 @@ import type { DeckService } from './services/deck-service.js';
 import type { SocialService } from './services/social-service.js';
 import type { CollectionService } from './services/collection-service.js';
 import type { ExpansionService } from './services/expansion-service.js';
+import type { EconomyService } from './services/economy-service.js';
 import { visibleCards } from './services/expansion-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
 import { createCollectionRouter } from './routes/collection-routes.js';
 import { createExpansionRouter } from './routes/expansion-routes.js';
+import { createEconomyRouter } from './routes/economy-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 
 /**
@@ -30,6 +32,7 @@ export interface AppServices {
   social: SocialService;
   collections: CollectionService;
   expansions: ExpansionService;
+  economy: EconomyService;
   lobby: LobbyHub;
   databaseReachable?: () => Promise<boolean>;
 }
@@ -156,6 +159,7 @@ export function createApp(
     app.use('/api/decks', createDeckRouter(services.decks, logger));
     app.use('/api/collection', createCollectionRouter(services.collections, logger));
     app.use('/api/expansions', createExpansionRouter(services.expansions, logger));
+    app.use('/api/economy', createEconomyRouter(services.economy, logger));
     app.use(
       '/api/social',
       createSocialRouter(

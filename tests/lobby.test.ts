@@ -12,6 +12,7 @@ import { DeckService } from '../apps/server/src/services/deck-service.js';
 import { SocialService } from '../apps/server/src/services/social-service.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
 import { ExpansionService } from '../apps/server/src/services/expansion-service.js';
+import { EconomyService } from '../apps/server/src/services/economy-service.js';
 
 /**
  * Covers the lobby socket: authentication, and that a challenge sent over REST
@@ -28,6 +29,7 @@ let wsBase = '';
 const accounts = new AccountService(prisma);
 const expansions = new ExpansionService(prisma);
 const collections = new CollectionService(prisma, expansions);
+const economy = new EconomyService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 const lobby = new LobbyHub(silentLogger);
@@ -35,7 +37,15 @@ const lobby = new LobbyHub(silentLogger);
 beforeAll(async () => {
   const manager = new MatchManager();
   server = createServer(
-    createApp(manager, silentLogger, { accounts, decks, social, collections, expansions, lobby }),
+    createApp(manager, silentLogger, {
+      accounts,
+      decks,
+      social,
+      collections,
+      expansions,
+      economy,
+      lobby,
+    }),
   );
 
   // Mirrors the lobby wiring in index.ts.
