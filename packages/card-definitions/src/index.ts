@@ -13,6 +13,9 @@ import type {
   WeaponTag,
 } from '@maailma/game-model';
 import { WEAPON_RANGES } from '@maailma/game-model';
+import { isKnownExpansion } from './expansions.js';
+
+export * from './expansions.js';
 
 const cards: CardDefinition[] = [
   creature('wolf', 'Wolf', 1, 2, 1, ['BEAST']),
@@ -103,6 +106,7 @@ const cards: CardDefinition[] = [
     type: 'ACTION',
     cost: 1,
     source: 'CORE',
+    expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
     text: 'Restore 4 Health to a friendly character.',
@@ -115,6 +119,7 @@ const cards: CardDefinition[] = [
     type: 'ACTION',
     cost: 2,
     source: 'CORE',
+    expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
     text: 'Deal 3 damage to an enemy character.',
@@ -128,6 +133,7 @@ const cards: CardDefinition[] = [
     cost: 3,
     durability: 3,
     source: 'CHRONICLE',
+    expansionId: 'CHRONICLE',
     rarity: 'EPIC',
     collectible: true,
     text: 'At the start of your turn, gain 1 Taika this turn.',
@@ -151,6 +157,7 @@ function creature(
   effects: EffectDefinition[] = [],
   source: CardSource = 'CORE',
   rarity: Rarity = 'COMMON',
+  expansionId: string = source,
 ): CreatureDefinition {
   return {
     id,
@@ -163,6 +170,7 @@ function creature(
     keywords,
     effects,
     source,
+    expansionId,
     rarity,
     collectible: true,
     text: effects.length ? keywords.join(', ') : keywords.join(', ') || `${attack}/${health}`,
@@ -180,6 +188,7 @@ function weapon(
   effects: EffectDefinition[] = [],
   source: CardSource = 'CORE',
   rarity: Rarity = 'COMMON',
+  expansionId: string = source,
 ): WeaponDefinition {
   return {
     id,
@@ -192,6 +201,7 @@ function weapon(
     tags,
     effects,
     source,
+    expansionId,
     rarity,
     collectible: true,
     // Melee is the default case and goes unsaid; Ranged changes how the card
@@ -224,13 +234,35 @@ export function validateWeaponDefinition(definition: WeaponDefinition): string[]
   return errors;
 }
 
+/**
+ * Rejects a card that names an expansion nothing defines.
+ *
+ * Every economy and legality question about a card is answered by its
+ * expansion's policy, so a card pointing at a missing one has no answer at
+ * all — it would be uncraftable, untradeable and format-illegal for reasons
+ * no message could explain. Better to fail here than to ship it.
+ */
+function validateCardExpansion(card: CardDefinition): string[] {
+  const where = card.id || '(unnamed card)';
+  if (typeof card.expansionId !== 'string' || card.expansionId.trim() === '') {
+    return [`${where}: expansionId must be a non-empty string`];
+  }
+  if (!isKnownExpansion(card.expansionId)) {
+    return [`${where}: unknown expansion "${card.expansionId}"`];
+  }
+  return [];
+}
+
 // A malformed registry is a programming error, so it fails at import rather
 // than midway through somebody's match.
-const definitionErrors = cards
-  .filter((card): card is WeaponDefinition => card.type === 'WEAPON')
-  .flatMap(validateWeaponDefinition);
+const definitionErrors = [
+  ...cards
+    .filter((card): card is WeaponDefinition => card.type === 'WEAPON')
+    .flatMap(validateWeaponDefinition),
+  ...cards.flatMap(validateCardExpansion),
+];
 if (definitionErrors.length > 0) {
-  throw new Error(`Invalid Weapon definitions: ${definitionErrors.join('; ')}`);
+  throw new Error(`Invalid card definitions: ${definitionErrors.join('; ')}`);
 }
 
 export const CARD_DEFINITIONS: Readonly<Record<string, CardDefinition>> = Object.freeze(

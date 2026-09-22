@@ -72,6 +72,67 @@ export type WeaponTag =
 
 export type CardSource = 'CORE' | 'CHRONICLE';
 export type Rarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'] as const;
+
+/**
+ * What a player may currently do with an expansion's cards.
+ *
+ * Every flag is independent and every flag is live: flipping one changes what
+ * the next request may do, with no migration and no rewriting of what already
+ * happened. Nothing here is inferred from a name, a date or the order
+ * expansions were added — a lifecycle like "current, then rotated, then
+ * archived" is a pattern an operator applies to these flags, never a state the
+ * code knows about.
+ *
+ * `released` is the one flag with authority over the others: it is the public
+ * gate, and the rest describe what becomes true once that gate opens.
+ */
+export interface ExpansionPolicy {
+  /** Public availability. False hides the expansion from players entirely. */
+  released: boolean;
+  /** Whether cards may move between players in a newly executed trade. */
+  tradeable: boolean;
+  /** Whether packs prefer cards the player owns fewer than a playset of. */
+  duplicateProtection: boolean;
+  /** Whether Fragments may be spent to create these cards. */
+  craftable: boolean;
+  /** Whether owned copies may be converted back into Fragments. */
+  disenchantable: boolean;
+  /** Whether this expansion's packs may currently be opened. */
+  availableInPacks: boolean;
+  /** Standard-format legality, subject to `released`. */
+  standard: boolean;
+}
+
+export const EXPANSION_POLICY_FLAGS = [
+  'released',
+  'tradeable',
+  'duplicateProtection',
+  'craftable',
+  'disenchantable',
+  'availableInPacks',
+  'standard',
+] as const;
+
+export type ExpansionPolicyFlag = (typeof EXPANSION_POLICY_FLAGS)[number];
+
+export interface ExpansionDefinition {
+  id: string;
+  name: string;
+  policy: ExpansionPolicy;
+}
+
+/**
+ * The formats a deck can be built for.
+ *
+ * Both draw on the same collection: a card is never owned "in Standard" or
+ * "in Wild", it is simply owned, and the format decides whether it may be
+ * played. Rotating an expansion out of Standard therefore invalidates decks
+ * without touching either the decks or the collections behind them.
+ */
+export const DECK_FORMATS = ['STANDARD', 'WILD'] as const;
+export type DeckFormat = (typeof DECK_FORMATS)[number];
+
 export type Trigger = 'ARRIVAL' | 'LAST_BREATH' | 'TURN_STARTED' | 'TURN_ENDED';
 
 export type EffectTarget =
@@ -106,6 +167,12 @@ interface CardDefinitionBase {
   name: string;
   cost: number;
   source: CardSource;
+  /**
+   * The expansion this card belongs to. Required, not nullable: every
+   * collectible card's economy and legality is read from its expansion's
+   * policy, and a card without one would have no answer to "may I craft this?"
+   */
+  expansionId: string;
   rarity: Rarity;
   collectible: boolean;
   text: string;

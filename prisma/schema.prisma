@@ -30,10 +30,15 @@ model User {
   sessions            Session[]
   decks               Deck[]
   collection          CollectionEntry[]
-  sentFriendships     Friendship[] @relation("FriendshipRequester")
-  receivedFriendships Friendship[] @relation("FriendshipAddressee")
-  sentChallenges      Challenge[]  @relation("ChallengeChallenger")
-  receivedChallenges  Challenge[]  @relation("ChallengeOpponent")
+  economy             UserEconomy?
+  transactions        EconomyTransaction[]
+  economyRequests     EconomyRequest[]
+  tradesAsA           Trade[]              @relation("TradeParticipantA")
+  tradesAsB           Trade[]              @relation("TradeParticipantB")
+  sentFriendships     Friendship[]         @relation("FriendshipRequester")
+  receivedFriendships Friendship[]         @relation("FriendshipAddressee")
+  sentChallenges      Challenge[]          @relation("ChallengeChallenger")
+  receivedChallenges  Challenge[]          @relation("ChallengeOpponent")
 
   @@map("users")
 }
@@ -59,15 +64,24 @@ model Session {
 /// A saved deck list. Card ids reference the immutable card registry in
 /// `@maailma/card-definitions` rather than a table, because definitions are
 /// code-owned data in this milestone.
+enum DeckFormat {
+  STANDARD
+  WILD
+}
+
 model Deck {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   userId    String
   name      String
   heroId    String
   cardIds   String[]
-  isActive  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  /// The format the deck is built for. Standard is the default because it is
+  /// the format a new deck is normally meant for; a deck holding rotated cards
+  /// is stored all the same and simply reports itself unplayable in Standard.
+  format    DeckFormat @default(STANDARD)
+  isActive  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -149,4 +163,180 @@ model Challenge {
   @@index([opponentId, status])
   @@index([challengerId, status])
   @@map("challenges")
+}
+
+/// A live override of an expansion's shipped policy.
+///
+/// Expansion definitions themselves stay code-owned alongside the cards, but
+/// their policies have to be changeable without a redeploy: rotating a set out
+/// of Standard or switching duplicate protection on is an operational act, not
+/// a release. A row here shadows the defaults in `@maailma/card-definitions`;
+/// absent, the shipped values apply. Every flag is stored outright rather than
+/// as a partial patch, so what is in effect is readable in one glance.
+model ExpansionPolicyOverride {
+  expansionId         String   @id
+  released            Boolean
+  tradeable           Boolean
+  duplicateProtection Boolean
+  craftable           Boolean
+  disenchantable      Boolean
+  availableInPacks    Boolean
+  standard            Boolean
+  updatedAt           DateTime @updatedAt
+  updatedBy           String?
+
+  @@map("expansion_policy_overrides")
+}
+
+/// A player's Fragment balance.
+///
+/// Separate from `User` so that crafting can lock this row alone: two
+/// simultaneous crafts contend on the balance, not on the account. `version`
+/// gives optimistic concurrency a handle for callers that prefer it to a
+/// conditional update.
+model UserEconomy {
+  userId          String   @id
+  fragmentBalance Int      @default(0)
+  version         Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_economy")
+}
+
+enum EconomyTransactionType {
+  CRAFT
+  DISENCHANT
+  TRADE
+  PACK_OPEN
+  REWARD
+  ADMIN_GRANT
+}
+
+/// An immutable record of everything that moved a card or a Fragment.
+///
+/// Deliberately an audit log and nothing more: collection state is the
+/// quantity table, never a fold over this one. Pack generation in particular
+/// must not read it — duplicate protection answers to what a player owns right
+/// now, not to what they have ever owned.
+model EconomyTransaction {
+  id            String                 @id @default(uuid())
+  userId        String
+  type          EconomyTransactionType
+  cardId        String?
+  quantity      Int                    @default(0)
+  fragmentDelta Int                    @default(0)
+  /// Free-form context: the trade or pack behind this row, the policy that
+  /// applied, the rarity that priced it.
+  metadata      Json?
+  tradeId       String?
+  requestId     String?
+  createdAt     DateTime               @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([tradeId])
+  @@map("economy_transactions")
+}
+
+/// A completed economy request, keyed by the client's own request id.
+///
+/// A retried craft must not spend the Fragments twice. The first attempt
+/// writes this row inside the same transaction as its effects, so a duplicate
+/// request collides on the primary key and is answered with the original
+/// outcome instead of being executed again.
+model EconomyRequest {
+  requestId String   @id
+  userId    String
+  operation String
+  /// The response the first attempt produced, replayed verbatim on a retry.
+  result    Json
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("economy_requests")
+}
+
+enum TradeStatus {
+  OPEN
+  ACCEPTED
+  CANCELLED
+  FAILED
+}
+
+/// A direct card-for-card trade between two players.
+///
+/// Offered cards are never reserved: a player may disenchant or re-offer a
+/// card that sits in an open trade, and it is the trade that fails at
+/// execution rather than the other actions that are blocked. `revision` is
+/// what both acceptances have to agree on, so an offer edited after one player
+/// accepted cannot execute on the strength of that stale acceptance.
+model Trade {
+  id             String      @id @default(uuid())
+  participantAId String
+  participantBId String
+  status         TradeStatus @default(OPEN)
+  revision       Int         @default(0)
+  acceptedARev   Int?
+  acceptedBRev   Int?
+  /// Why a finalisation failed, kept so the UI can say more than "it failed".
+  failureCode    String?
+  failureMessage String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  completedAt    DateTime?
+
+  participantA User        @relation("TradeParticipantA", fields: [participantAId], references: [id], onDelete: Cascade)
+  participantB User        @relation("TradeParticipantB", fields: [participantBId], references: [id], onDelete: Cascade)
+  items        TradeItem[]
+
+  @@index([participantAId, status])
+  @@index([participantBId, status])
+  @@map("trades")
+}
+
+/// One card stack on one side of a trade. A card appears at most once per
+/// side: quantities are normalised rather than accumulated across rows.
+model TradeItem {
+  id             String @id @default(uuid())
+  tradeId        String
+  offeringUserId String
+  cardId         String
+  quantity       Int
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, offeringUserId, cardId])
+  @@index([tradeId])
+  @@map("trade_items")
+}
+
+/// What a completed trade moved, frozen at the moment it committed.
+///
+/// Kept apart from `TradeItem` because that table goes on describing a live,
+/// editable offer, while this one must still read true years later — after the
+/// expansions involved have stopped being tradeable, and after the cards
+/// themselves have moved on again.
+model TradeHistoryEntry {
+  id          String   @id @default(uuid())
+  tradeId     String
+  revision    Int
+  fromUserId  String
+  toUserId    String
+  cardId      String
+  quantity    Int
+  /// The expansion and policy context that permitted the trade, recorded so a
+  /// later policy change never makes history look illegal.
+  context     Json?
+  completedAt DateTime @default(now())
+
+  @@index([tradeId])
+  @@index([fromUserId, completedAt])
+  @@index([toUserId, completedAt])
+  @@map("trade_history")
 }
