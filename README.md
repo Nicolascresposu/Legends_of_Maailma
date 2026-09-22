@@ -141,6 +141,8 @@ Client scripts:
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
 - `src/drag_test.gd` — drives the real scene with synthetic mouse input.
 - `src/reveal_test.gd` — checks the hover reveal's dwell, content and placement.
+- `src/reveal_layout_test.gd` — headless, needs no server: checks the reveal stays on screen
+  when a tall card replaces a short one.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
   refusal is explained rather than merely relayed.
@@ -153,6 +155,7 @@ With the server running, the client's own tests can be run from the command line
 godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/reveal_test.gd
+godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd

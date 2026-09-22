@@ -50,6 +50,8 @@ var _pending_key := ""
 var _pending_card: Dictionary = {}
 var _pending_anchor := Rect2()
 var _elapsed := 0.0
+## Whether a re-place is already waiting on the deferred queue.
+var _place_queued := false
 
 func _init() -> void:
 	# An overlay: it must never intercept a press meant for the card beneath it.
@@ -79,6 +81,7 @@ func _build() -> void:
 	style.shadow_color = Color(0, 0, 0, 0.45)
 	style.shadow_size = 10
 	_panel.add_theme_stylebox_override("panel", style)
+	_panel.minimum_size_changed.connect(_queue_place)
 	add_child(_panel)
 
 	var column := VBoxContainer.new()
@@ -230,13 +233,29 @@ func _reveal() -> void:
 	_shown_key = _pending_key
 	_fill(_pending_card)
 	visible = true
-	# The panel sizes itself from its content, so its final height is known
-	# only after a layout pass. Place it now so it is never drawn in the wrong
-	# spot, then again once the pass has happened.
+	# Place it now so it is never drawn in the wrong spot; `_queue_place`
+	# corrects it as layout settles the content's real height.
 	_place(_pending_anchor)
+	_queue_place()
+
+## Re-places the panel once its content has finished laying out.
+##
+## The panel's height is only final after its wrapped text has been laid out
+## at the panel's width, and that can take several passes: a line that was
+## hidden for the previous card still has the width it was last given, often
+## 1px, so it first measures as one glyph per line and only shrinks once its
+## container has sorted it. Every one of those changes reaches the panel as a
+## change of minimum size, so re-placing on that signal — deferred, and at
+## most once per flush — tracks the height to its final value before the
+## frame is drawn, however many passes it takes.
+func _queue_place() -> void:
+	if _place_queued or _shown_key == "":
+		return
+	_place_queued = true
 	call_deferred("_place_again")
 
 func _place_again() -> void:
+	_place_queued = false
 	if _shown_key != "":
 		_place(_pending_anchor)
 
