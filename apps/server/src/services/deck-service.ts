@@ -1,5 +1,7 @@
 import type { Deck, PrismaClient } from '@prisma/client';
 import { getCardDefinition, getHeroDefinition } from '@maailma/card-definitions';
+import type { DeckFormat } from '@maailma/game-model';
+import { DECK_FORMATS } from '@maailma/game-model';
 import { AccountError } from './account-service.js';
 import type { CollectionService, DeckReadiness } from './collection-service.js';
 
@@ -7,6 +9,8 @@ export interface DeckInput {
   name: string;
   heroId: string;
   cardIds: string[];
+  /** The format the deck is built for. Defaults to Standard. */
+  format?: DeckFormat;
 }
 
 /** A stored deck with its current readiness attached. */
@@ -41,19 +45,28 @@ export class DeckService {
   async listWithReadiness(userId: string): Promise<DeckWithReadiness[]> {
     const decks = await this.list(userId);
     if (!this.collections) {
-      return decks.map((deck) => ({ ...deck, readiness: emptyReadiness() }));
+      return decks.map((deck) => ({ ...deck, readiness: emptyReadiness(deck.format) }));
     }
-    const owned = await this.collections.ownedCounts(userId);
+    // One collection read and one policy read serve the whole list: readiness
+    // for every deck is judged against the same instant, so two decks sharing
+    // a card can never disagree about whether it is legal.
+    const [owned, policies] = await Promise.all([
+      this.collections.ownedCounts(userId),
+      this.collections.policiesSnapshot(),
+    ]);
     return decks.map((deck) => ({
       ...deck,
-      readiness: this.collections!.assess(deck.cardIds, owned),
+      readiness: this.collections!.assess(deck.cardIds, owned, policies, deck.format),
     }));
   }
 
   async getWithReadiness(userId: string, deckId: string): Promise<DeckWithReadiness> {
     const deck = await this.get(userId, deckId);
-    if (!this.collections) return { ...deck, readiness: emptyReadiness() };
-    return { ...deck, readiness: await this.collections.assessForUser(userId, deck.cardIds) };
+    if (!this.collections) return { ...deck, readiness: emptyReadiness(deck.format) };
+    return {
+      ...deck,
+      readiness: await this.collections.assessForUser(userId, deck.cardIds, deck.format),
+    };
   }
 
   async get(userId: string, deckId: string): Promise<Deck> {
@@ -70,7 +83,13 @@ export class DeckService {
     const clean = this.validate(input);
     try {
       const deck = await this.prisma.deck.create({
-        data: { userId, name: clean.name, heroId: clean.heroId, cardIds: clean.cardIds },
+        data: {
+          userId,
+          name: clean.name,
+          heroId: clean.heroId,
+          cardIds: clean.cardIds,
+          format: clean.format!,
+        },
       });
       // A player's first deck becomes their active one.
       const count = await this.prisma.deck.count({ where: { userId } });
@@ -90,7 +109,12 @@ export class DeckService {
     try {
       return await this.prisma.deck.update({
         where: { id: deckId },
-        data: { name: clean.name, heroId: clean.heroId, cardIds: clean.cardIds },
+        data: {
+          name: clean.name,
+          heroId: clean.heroId,
+          cardIds: clean.cardIds,
+          format: clean.format!,
+        },
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -142,6 +166,10 @@ export class DeckService {
     if (cardIds.length > MAX_DECK_CARDS) {
       throw new AccountError('DECK_TOO_LARGE', `A deck may hold at most ${MAX_DECK_CARDS} cards`);
     }
+    const format = (input?.format ?? 'STANDARD') as DeckFormat;
+    if (!DECK_FORMATS.includes(format)) {
+      throw new AccountError('INVALID_FORMAT', `Unknown deck format: ${String(input?.format)}`);
+    }
     for (const cardId of cardIds) {
       try {
         getCardDefinition(cardId);
@@ -149,7 +177,7 @@ export class DeckService {
         throw new AccountError('UNKNOWN_CARD', `Unknown card: ${cardId}`);
       }
     }
-    return { name, heroId, cardIds };
+    return { name, heroId, cardIds, format };
   }
 }
 
@@ -160,6 +188,6 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /** Readiness when collections are not configured: rules unknown, not blocked. */
-function emptyReadiness(): DeckReadiness {
-  return { playable: true, ruleErrors: [], missing: [] };
+function emptyReadiness(format: DeckFormat = 'STANDARD'): DeckReadiness {
+  return { playable: true, ruleErrors: [], missing: [], format, illegalInFormat: [] };
 }

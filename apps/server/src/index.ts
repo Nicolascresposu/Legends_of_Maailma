@@ -12,13 +12,15 @@ import { AccountService } from './services/account-service.js';
 import { DeckService } from './services/deck-service.js';
 import { SocialService } from './services/social-service.js';
 import { CollectionService } from './services/collection-service.js';
+import { ExpansionService } from './services/expansion-service.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const logger = createLoggerFromEnv();
 const manager = new MatchManager();
 const lobby = new LobbyHub(logger);
 const accounts = new AccountService(prisma);
-const collections = new CollectionService(prisma);
+const expansions = new ExpansionService(prisma);
+const collections = new CollectionService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 const server = createServer(
@@ -27,6 +29,7 @@ const server = createServer(
     decks,
     social,
     collections,
+    expansions,
     lobby,
     databaseReachable: () => databaseReachable(),
   }),

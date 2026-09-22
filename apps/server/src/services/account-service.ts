@@ -17,6 +17,8 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   displayName: string;
+  /** Whether this account may change expansion policies. */
+  isAdmin: boolean;
 }
 
 export interface SignedInSession {
@@ -142,7 +144,12 @@ const PLACEHOLDER_HASH =
   'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$' + Buffer.alloc(64).toString('base64');
 
 function publicUser(user: User): AuthenticatedUser {
-  return { id: user.id, email: user.email, displayName: user.displayName };
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    isAdmin: user.isAdmin,
+  };
 }
 
 function normalizeEmail(value: unknown): string {

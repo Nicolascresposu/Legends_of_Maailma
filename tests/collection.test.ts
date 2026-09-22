@@ -10,6 +10,7 @@ import { AccountService } from '../apps/server/src/services/account-service.js';
 import { DeckService } from '../apps/server/src/services/deck-service.js';
 import { SocialService } from '../apps/server/src/services/social-service.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
+import { ExpansionService } from '../apps/server/src/services/expansion-service.js';
 
 /**
  * Collections: what each player owns, and how ownership gates play without
@@ -23,7 +24,8 @@ let server: Server | undefined;
 let base = '';
 
 const accounts = new AccountService(prisma);
-const collections = new CollectionService(prisma);
+const expansions = new ExpansionService(prisma);
+const collections = new CollectionService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 
@@ -36,7 +38,7 @@ beforeAll(async () => {
   const manager = new MatchManager();
   const lobby = new LobbyHub(silentLogger);
   server = createServer(
-    createApp(manager, silentLogger, { accounts, decks, social, collections, lobby }),
+    createApp(manager, silentLogger, { accounts, decks, social, collections, expansions, lobby }),
   );
   await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
   const address = server.address();

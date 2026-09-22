@@ -24,6 +24,10 @@ model User {
   email        String   @unique
   displayName  String   @unique
   passwordHash String
+  /// Whether this account may change expansion policies and reach the
+  /// unreleased content those policies hide. Off by default: an ordinary
+  /// player must not be able to release a set by guessing a route.
+  isAdmin      Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

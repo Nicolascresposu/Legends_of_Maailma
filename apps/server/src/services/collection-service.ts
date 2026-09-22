@@ -1,14 +1,29 @@
 import type { CollectionEntry, PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, STARTER_DECK, getCardDefinition } from '@maailma/card-definitions';
-import { validateDeck } from '@maailma/game-engine';
+import {
+  CARD_DEFINITIONS,
+  EXPANSION_DEFINITIONS,
+  STARTER_DECK,
+  canCraftExpansion,
+  canDisenchantExpansion,
+  canTradeExpansion,
+  craftCost,
+  disenchantValue,
+  getCardDefinition,
+  isExpansionStandardLegal,
+} from '@maailma/card-definitions';
+import { cardCopyLimit, validateDeck } from '@maailma/game-engine';
+import type { DeckFormat, Rarity } from '@maailma/game-model';
+import { isCardLegalIn, type ExpansionService, type LivePolicies } from './expansion-service.js';
 
-/** How many copies of one card a deck may hold, by rarity. */
+/**
+ * How many copies of one card a deck may hold.
+ *
+ * Delegates to the engine rather than restating the rule, because duplicate
+ * protection asks the same question when deciding whether a player still needs
+ * a card. Two copies of that rule would eventually disagree.
+ */
 export function copyLimit(cardId: string): number {
-  try {
-    return getCardDefinition(cardId).rarity === 'LEGENDARY' ? 1 : 2;
-  } catch {
-    return 0;
-  }
+  return cardCopyLimit(cardId);
 }
 
 export interface CollectionCard {
@@ -16,6 +31,17 @@ export interface CollectionCard {
   owned: number;
   /** Most copies a deck may use, so a client can cap its controls. */
   copyLimit: number;
+  /** Which expansion it belongs to, for filtering and policy display. */
+  expansionId: string;
+  rarity: Rarity;
+  /** What the player may do with it right now, under current policy. */
+  craftable: boolean;
+  disenchantable: boolean;
+  tradeable: boolean;
+  standardLegal: boolean;
+  /** Fragment cost to craft one copy, and the value of disenchanting one. */
+  craftCost: number;
+  disenchantValue: number;
 }
 
 /** Card ids present in stored data but absent from the registry. */
@@ -33,12 +59,23 @@ export interface OrphanReport {
 const MINIMUM_PLAUSIBLE_REGISTRY = 5;
 
 export interface DeckReadiness {
-  /** True when this deck may start a match. */
+  /** True when this deck may start a match in the format it was judged for. */
   playable: boolean;
   /** Size, copy-limit and unknown-card problems from the engine. */
   ruleErrors: string[];
   /** Cards the deck uses more copies of than the player owns. */
   missing: Array<{ cardId: string; required: number; owned: number }>;
+  /** The format this verdict was reached under. */
+  format: DeckFormat;
+  /**
+   * Cards the format does not admit — rotated out, or never released.
+   *
+   * Reported separately from `ruleErrors` because it is the one kind of
+   * problem a player did not create: a deck legal when it was built becomes
+   * illegal when a set rotates, and the client says so rather than implying
+   * the player built it wrong.
+   */
+  illegalInFormat: Array<{ cardId: string; copies: number }>;
 }
 
 /**
@@ -50,7 +87,33 @@ export interface DeckReadiness {
  * is only playable once every copy it uses is owned.
  */
 export class CollectionService {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly expansions?: ExpansionService,
+  ) {}
+
+  /**
+   * The policy snapshot to judge one operation by.
+   *
+   * Without an expansion service — the configuration the engine tests use —
+   * every expansion reads as its shipped default, so collections behave as
+   * they did before policies existed rather than refusing everything.
+   */
+  private async livePolicies(): Promise<LivePolicies> {
+    if (this.expansions) return await this.expansions.policies();
+    return EXPANSION_DEFINITIONS;
+  }
+
+  /**
+   * A policy snapshot for a caller judging several things at once.
+   *
+   * Exposed so that a list of decks is assessed against one instant rather
+   * than re-reading policy per deck, which could otherwise show two decks
+   * disagreeing about the same card mid-rotation.
+   */
+  async policiesSnapshot(): Promise<LivePolicies> {
+    return await this.livePolicies();
+  }
 
   /** The cards granted to a new account, derived from the starter deck. */
   static starterGrant(): Map<string, number> {
@@ -146,15 +209,32 @@ export class CollectionService {
    * browser can show unowned cards too rather than hiding what exists.
    */
   async browse(userId: string): Promise<CollectionCard[]> {
-    const owned = await this.ownedCounts(userId);
-    return Object.values(CARD_DEFINITIONS)
-      .filter((card) => card.collectible)
-      .map((card) => ({
-        cardId: card.id,
-        owned: owned.get(card.id) ?? 0,
-        copyLimit: copyLimit(card.id),
-      }))
-      .sort((a, b) => a.cardId.localeCompare(b.cardId));
+    const [owned, policies] = await Promise.all([this.ownedCounts(userId), this.livePolicies()]);
+    return (
+      Object.values(CARD_DEFINITIONS)
+        .filter((card) => card.collectible)
+        // An unreleased expansion is not merely hidden in the client: its names,
+        // art and rarities never leave the server, so an upcoming set cannot be
+        // read out of an API response ahead of its release.
+        .filter((card) => policies[card.expansionId]?.policy.released === true)
+        .map((card) => {
+          const expansion = policies[card.expansionId]!;
+          return {
+            cardId: card.id,
+            owned: owned.get(card.id) ?? 0,
+            copyLimit: copyLimit(card.id),
+            expansionId: card.expansionId,
+            rarity: card.rarity,
+            craftable: canCraftExpansion(expansion),
+            disenchantable: canDisenchantExpansion(expansion),
+            tradeable: canTradeExpansion(expansion),
+            standardLegal: isExpansionStandardLegal(expansion),
+            craftCost: craftCost(card.rarity, card.id),
+            disenchantValue: disenchantValue(card.rarity, card.id),
+          };
+        })
+        .sort((a, b) => a.cardId.localeCompare(b.cardId))
+    );
   }
 
   /** Adds copies, capped at the deck copy limit so grants cannot overfill. */
@@ -179,8 +259,16 @@ export class CollectionService {
    * both at once: the engine's own rules (30 cards, copy limits, unknown
    * cards) and cards the player does not own enough copies of.
    */
-  assess(cardIds: readonly string[], owned: Map<string, number>): DeckReadiness {
-    const rules = validateDeck(cardIds);
+  assess(
+    cardIds: readonly string[],
+    owned: Map<string, number>,
+    policies: LivePolicies,
+    format: DeckFormat = 'STANDARD',
+  ): DeckReadiness {
+    const rules = validateDeck(cardIds, {
+      format,
+      isLegalInFormat: (cardId, deckFormat) => isCardLegalIn(policies, cardId, deckFormat),
+    });
     const required = new Map<string, number>();
     for (const cardId of cardIds) required.set(cardId, (required.get(cardId) ?? 0) + 1);
 
@@ -191,20 +279,36 @@ export class CollectionService {
     }
     missing.sort((a, b) => a.cardId.localeCompare(b.cardId));
 
+    const illegalInFormat = [...required]
+      .filter(([cardId]) => !isCardLegalIn(policies, cardId, format))
+      .map(([cardId, copies]) => ({ cardId, copies }))
+      .sort((a, b) => a.cardId.localeCompare(b.cardId));
+
     return {
       playable: rules.valid && missing.length === 0,
       ruleErrors: rules.errors,
       missing,
+      format,
+      illegalInFormat,
     };
   }
 
-  async assessForUser(userId: string, cardIds: readonly string[]): Promise<DeckReadiness> {
-    return this.assess(cardIds, await this.ownedCounts(userId));
+  async assessForUser(
+    userId: string,
+    cardIds: readonly string[],
+    format: DeckFormat = 'STANDARD',
+  ): Promise<DeckReadiness> {
+    const [owned, policies] = await Promise.all([this.ownedCounts(userId), this.livePolicies()]);
+    return this.assess(cardIds, owned, policies, format);
   }
 
   /** Throws when a deck may not be played, with a reason worth showing. */
-  async assertPlayable(userId: string, cardIds: readonly string[]): Promise<void> {
-    const readiness = await this.assessForUser(userId, cardIds);
+  async assertPlayable(
+    userId: string,
+    cardIds: readonly string[],
+    format: DeckFormat = 'STANDARD',
+  ): Promise<void> {
+    const readiness = await this.assessForUser(userId, cardIds, format);
     if (readiness.playable) return;
     const reasons = [...readiness.ruleErrors];
     for (const entry of readiness.missing) {

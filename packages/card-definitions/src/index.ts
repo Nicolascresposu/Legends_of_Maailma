@@ -16,6 +16,7 @@ import { WEAPON_RANGES } from '@maailma/game-model';
 import { isKnownExpansion } from './expansions.js';
 
 export * from './expansions.js';
+export * from './economy.js';
 
 const cards: CardDefinition[] = [
   creature('wolf', 'Wolf', 1, 2, 1, ['BEAST']),

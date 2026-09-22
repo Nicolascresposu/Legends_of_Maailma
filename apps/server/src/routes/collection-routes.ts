@@ -1,4 +1,5 @@
 import express from 'express';
+import type { DeckFormat } from '@maailma/game-model';
 import type { CollectionService } from '../services/collection-service.js';
 import type { Logger } from '../logger.js';
 import { requireUser, respondAccountError } from './auth-routes.js';
@@ -21,12 +22,19 @@ export function createCollectionRouter(
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
 
-  /** Checks an arbitrary card list without saving it, for a deck builder. */
+  /**
+   * Checks an arbitrary card list without saving it, for a deck builder.
+   *
+   * The format is part of the question, not a property of the list: the same
+   * thirty cards are a legal Wild deck and an illegal Standard one once a set
+   * rotates, and a builder needs to ask about either.
+   */
   router.post('/assess', (request, response, next) => {
-    const body = request.body as { cardIds?: unknown };
+    const body = request.body as { cardIds?: unknown; format?: unknown };
     const cardIds = Array.isArray(body?.cardIds) ? body.cardIds.map((id) => String(id)) : [];
+    const format: DeckFormat = body?.format === 'WILD' ? 'WILD' : 'STANDARD';
     collections
-      .assessForUser(request.user!.id, cardIds)
+      .assessForUser(request.user!.id, cardIds, format)
       .then((readiness) => response.json({ readiness }))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });

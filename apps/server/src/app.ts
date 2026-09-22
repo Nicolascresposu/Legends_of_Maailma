@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
-import { CARD_DEFINITIONS, SCENARIO_DEFINITIONS } from '@maailma/card-definitions';
+import { EXPANSION_DEFINITIONS, SCENARIO_DEFINITIONS } from '@maailma/card-definitions';
 import type { GameAction } from '@maailma/game-model';
 import type { CreateMatchRequest } from '@maailma/protocol';
 import { errorFields, silentLogger, type Logger } from './logger.js';
@@ -11,9 +11,12 @@ import type { AccountService } from './services/account-service.js';
 import type { DeckService } from './services/deck-service.js';
 import type { SocialService } from './services/social-service.js';
 import type { CollectionService } from './services/collection-service.js';
+import type { ExpansionService } from './services/expansion-service.js';
+import { visibleCards } from './services/expansion-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
 import { createCollectionRouter } from './routes/collection-routes.js';
+import { createExpansionRouter } from './routes/expansion-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 
 /**
@@ -26,6 +29,7 @@ export interface AppServices {
   decks: DeckService;
   social: SocialService;
   collections: CollectionService;
+  expansions: ExpansionService;
   lobby: LobbyHub;
   databaseReachable?: () => Promise<boolean>;
 }
@@ -56,7 +60,26 @@ export function createApp(
       )
       .catch(() => response.status(503).json({ ok: false, service: 'maailma-tcg' }));
   });
-  app.get('/api/cards', (_request, response) => response.json(Object.values(CARD_DEFINITIONS)));
+  /**
+   * The card registry.
+   *
+   * Filtered by live policy when the database is configured, so an unreleased
+   * expansion's names, art and rarities never leave the server. Without a
+   * database — the anonymous match configuration the engine tests use — there
+   * are no stored policies to consult, so the shipped defaults apply, which
+   * hide unreleased sets just the same.
+   */
+  app.get('/api/cards', (_request, response) => {
+    const source = services?.expansions;
+    if (!source) {
+      response.json(visibleCards(EXPANSION_DEFINITIONS));
+      return;
+    }
+    source
+      .policies()
+      .then((policies) => response.json(visibleCards(policies)))
+      .catch(() => response.json(visibleCards(EXPANSION_DEFINITIONS)));
+  });
   app.get('/api/scenarios', (_request, response) =>
     response.json(Object.values(SCENARIO_DEFINITIONS)),
   );
@@ -132,6 +155,7 @@ export function createApp(
     );
     app.use('/api/decks', createDeckRouter(services.decks, logger));
     app.use('/api/collection', createCollectionRouter(services.collections, logger));
+    app.use('/api/expansions', createExpansionRouter(services.expansions, logger));
     app.use(
       '/api/social',
       createSocialRouter(

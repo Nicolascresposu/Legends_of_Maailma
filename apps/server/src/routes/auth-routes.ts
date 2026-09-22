@@ -51,6 +51,23 @@ export function requireUser(): express.RequestHandler {
   };
 }
 
+/**
+ * Restricts a route to administrators.
+ *
+ * Answers a non-admin with 404 rather than 403, because the routes behind this
+ * guard are the ones that can read and release unreleased content: a 403 would
+ * confirm that an expansion exists to be released.
+ */
+export function requireAdmin(): express.RequestHandler {
+  return (request, response, next) => {
+    if (!request.user?.isAdmin) {
+      response.status(404).json({ code: 'NOT_FOUND', message: 'Not found' });
+      return;
+    }
+    next();
+  };
+}
+
 export function createAuthRouter(
   accounts: AccountService,
   logger: Logger,
