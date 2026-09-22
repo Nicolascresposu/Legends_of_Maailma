@@ -17,6 +17,7 @@ import { isKnownExpansion } from './expansions.js';
 
 export * from './expansions.js';
 export * from './economy.js';
+export * from './packs.js';
 
 const cards: CardDefinition[] = [
   creature('wolf', 'Wolf', 1, 2, 1, ['BEAST']),

@@ -12,6 +12,7 @@ import { SocialService } from '../apps/server/src/services/social-service.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
 import { ExpansionService } from '../apps/server/src/services/expansion-service.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
+import { PackService } from '../apps/server/src/services/pack-service.js';
 
 /**
  * Collections: what each player owns, and how ownership gates play without
@@ -28,6 +29,7 @@ const accounts = new AccountService(prisma);
 const expansions = new ExpansionService(prisma);
 const collections = new CollectionService(prisma, expansions);
 const economy = new EconomyService(prisma, expansions);
+const packs = new PackService(prisma, expansions);
 const decks = new DeckService(prisma, collections);
 const social = new SocialService(prisma);
 
@@ -47,6 +49,7 @@ beforeAll(async () => {
       collections,
       expansions,
       economy,
+      packs,
       lobby,
     }),
   );

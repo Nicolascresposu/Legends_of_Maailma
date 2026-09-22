@@ -13,12 +13,14 @@ import type { SocialService } from './services/social-service.js';
 import type { CollectionService } from './services/collection-service.js';
 import type { ExpansionService } from './services/expansion-service.js';
 import type { EconomyService } from './services/economy-service.js';
+import type { PackService } from './services/pack-service.js';
 import { visibleCards } from './services/expansion-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
 import { createCollectionRouter } from './routes/collection-routes.js';
 import { createExpansionRouter } from './routes/expansion-routes.js';
 import { createEconomyRouter } from './routes/economy-routes.js';
+import { createPackRouter } from './routes/pack-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 
 /**
@@ -33,6 +35,7 @@ export interface AppServices {
   collections: CollectionService;
   expansions: ExpansionService;
   economy: EconomyService;
+  packs: PackService;
   lobby: LobbyHub;
   databaseReachable?: () => Promise<boolean>;
 }
@@ -160,6 +163,7 @@ export function createApp(
     app.use('/api/collection', createCollectionRouter(services.collections, logger));
     app.use('/api/expansions', createExpansionRouter(services.expansions, logger));
     app.use('/api/economy', createEconomyRouter(services.economy, logger));
+    app.use('/api/packs', createPackRouter(services.packs, logger));
     app.use(
       '/api/social',
       createSocialRouter(
