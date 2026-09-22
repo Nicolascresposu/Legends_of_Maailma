@@ -34,6 +34,15 @@ signal pack_opened(pack: Dictionary)
 signal trades_loaded(trades: Array)
 signal trade_updated(trade: Dictionary)
 signal trade_history_loaded(history: Array)
+## A trade request was refused. Kept apart from `economy_refused` so the trade
+## screen and the collection screen each explain only their own refusals.
+signal trade_refused(code: String, message: String)
+signal friends_loaded(friends: Array)
+## Friend requests addressed to this player that are still waiting on them.
+signal friend_requests_loaded(requests: Array)
+## A friend request was sent or answered; the lists should be re-read.
+signal friendship_changed()
+signal friendship_refused(code: String, message: String)
 
 ## Resolved from the command line, the environment, or a saved address.
 var http_base := ClientConfig.http_base()
@@ -55,6 +64,10 @@ var _pack_request: HTTPRequest
 var _pack_open_request: HTTPRequest
 var _trade_request: HTTPRequest
 var _trade_mutate_request: HTTPRequest
+var _trade_history_request: HTTPRequest
+var _friends_request: HTTPRequest
+var _friend_requests_request: HTTPRequest
+var _friend_mutate_request: HTTPRequest
 
 func _ready() -> void:
 	_ensure_requests()
@@ -112,6 +125,22 @@ func _ensure_requests() -> void:
 		_trade_mutate_request = HTTPRequest.new()
 		_trade_mutate_request.request_completed.connect(_on_trade_mutated)
 		add_child(_trade_mutate_request)
+	if _trade_history_request == null:
+		_trade_history_request = HTTPRequest.new()
+		_trade_history_request.request_completed.connect(_on_trades_completed)
+		add_child(_trade_history_request)
+	if _friends_request == null:
+		_friends_request = HTTPRequest.new()
+		_friends_request.request_completed.connect(_on_friends_completed)
+		add_child(_friends_request)
+	if _friend_requests_request == null:
+		_friend_requests_request = HTTPRequest.new()
+		_friend_requests_request.request_completed.connect(_on_friend_requests_completed)
+		add_child(_friend_requests_request)
+	if _friend_mutate_request == null:
+		_friend_mutate_request = HTTPRequest.new()
+		_friend_mutate_request.request_completed.connect(_on_friendship_mutated)
+		add_child(_friend_mutate_request)
 
 ## True only once the server has confirmed who the token belongs to.
 ##
@@ -124,6 +153,10 @@ func is_signed_in() -> bool:
 ## True while a saved token is set but not yet confirmed.
 func is_restoring() -> bool:
 	return token != "" and user.is_empty()
+
+## True while a request node is still waiting on its previous call.
+func _busy(request: HTTPRequest) -> bool:
+	return request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED
 
 func _headers(with_body: bool = true) -> PackedStringArray:
 	var headers := PackedStringArray()
@@ -256,8 +289,15 @@ func _on_me_completed(
 
 # --- Collection -------------------------------------------------------------
 
+## Set when a read was asked for while another was in flight. That reply may
+## predate whatever prompted the second ask, so one more read follows it.
+var _collection_stale := false
+
 func fetch_collection() -> void:
 	await _await_tree()
+	if _busy(_collection_request):
+		_collection_stale = true
+		return
 	var error := _collection_request.request(http_base + "/api/collection", _headers(false))
 	if error != OK:
 		request_failed.emit("Could not load your collection.")
@@ -266,6 +306,7 @@ func _on_collection_completed(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		_collection_stale = false
 		request_failed.emit("Could not load your collection.")
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
@@ -273,6 +314,9 @@ func _on_collection_completed(
 		return
 	var cards: Variant = (parsed as Dictionary).get("cards", [])
 	collection_loaded.emit(cards if typeof(cards) == TYPE_ARRAY else [])
+	if _collection_stale:
+		_collection_stale = false
+		fetch_collection()
 
 ## Checks a card list without saving, so a builder can show readiness live.
 ##
@@ -549,8 +593,12 @@ func _on_pack_opened(
 # travels with every acceptance, so a client that accepted a stale offer is
 # refused rather than being taken to have agreed to something it never showed.
 
+## Safe to call on a timer: a poll that lands while the last is still in
+## flight is skipped rather than reported as a failure.
 func fetch_trades(status: String = "") -> void:
 	await _await_tree()
+	if _busy(_trade_request):
+		return
 	var url := http_base + "/api/trades"
 	if status != "":
 		url += "?status=" + status
@@ -560,7 +608,11 @@ func fetch_trades(status: String = "") -> void:
 
 func fetch_trade_history() -> void:
 	await _await_tree()
-	var error := _trade_request.request(http_base + "/api/trades/history", _headers(false))
+	if _busy(_trade_history_request):
+		return
+	var error := _trade_history_request.request(
+		http_base + "/api/trades/history", _headers(false)
+	)
 	if error != OK:
 		request_failed.emit("Could not load your trade history.")
 
@@ -574,8 +626,8 @@ func _on_trades_completed(
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
 	var payload: Dictionary = parsed
-	# One request node serves both listings, so the reply is told apart by what
-	# it carries rather than by which call was made.
+	# Both listings share this handler, so the reply is told apart by what it
+	# carries rather than by which call was made.
 	if payload.has("history"):
 		var history: Variant = payload["history"]
 		trade_history_loaded.emit(history if typeof(history) == TYPE_ARRAY else [])
@@ -592,7 +644,7 @@ func create_trade(opponent_id: String) -> void:
 		JSON.stringify({"opponentId": opponent_id})
 	)
 	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
 
 ## Replaces the player's own side of the offer. `cards` is a list of
 ## `{cardId, quantity}` dictionaries.
@@ -605,7 +657,7 @@ func update_trade_offer(trade_id: String, cards: Array) -> void:
 		JSON.stringify({"cards": cards})
 	)
 	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
 
 ## Accepts one specific revision, never simply "the trade". An offer edited
 ## since the client drew it is refused rather than silently agreed to.
@@ -618,7 +670,19 @@ func accept_trade(trade_id: String, revision: int) -> void:
 		JSON.stringify({"revision": revision})
 	)
 	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+## Withdraws this player's acceptance while the trade is still open.
+func unaccept_trade(trade_id: String) -> void:
+	await _await_tree()
+	var error := _trade_mutate_request.request(
+		http_base + "/api/trades/" + trade_id + "/unaccept",
+		_headers(false),
+		HTTPClient.METHOD_POST,
+		""
+	)
+	if error != OK:
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
 
 func cancel_trade(trade_id: String) -> void:
 	await _await_tree()
@@ -629,21 +693,107 @@ func cancel_trade(trade_id: String) -> void:
 		""
 	)
 	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
 
 func _on_trade_mutated(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		trade_refused.emit("UNREACHABLE", "Could not reach the server.")
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
 	var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
 	if response_code != 200 and response_code != 201:
-		economy_refused.emit(
+		trade_refused.emit(
 			str(payload.get("code", "TRADE_ERROR")),
 			str(payload.get("message", "That trade could not be updated."))
 		)
 		return
 	var trade: Variant = payload.get("trade", {})
 	trade_updated.emit(trade if typeof(trade) == TYPE_DICTIONARY else {})
+
+# --- Friends -----------------------------------------------------------------
+#
+# Only what trading needs: who a player's friends are, and a way to make more.
+# Whether two players may become friends is, as ever, the server's call.
+
+func fetch_friends() -> void:
+	await _await_tree()
+	if _busy(_friends_request):
+		return
+	var error := _friends_request.request(http_base + "/api/social/friends", _headers(false))
+	if error != OK:
+		request_failed.emit("Could not load your friends.")
+
+func _on_friends_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load your friends.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var list: Variant = (parsed as Dictionary).get("friends", [])
+	friends_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+
+func fetch_friend_requests() -> void:
+	await _await_tree()
+	if _busy(_friend_requests_request):
+		return
+	var error := _friend_requests_request.request(
+		http_base + "/api/social/friends/requests", _headers(false)
+	)
+	if error != OK:
+		request_failed.emit("Could not load your friend requests.")
+
+func _on_friend_requests_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		request_failed.emit("Could not load your friend requests.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var list: Variant = (parsed as Dictionary).get("requests", [])
+	friend_requests_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+
+## Friends are found by display name, the one thing a player can tell another.
+func request_friend(display_name: String) -> void:
+	await _await_tree()
+	var error := _friend_mutate_request.request(
+		http_base + "/api/social/friends/requests",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"displayName": display_name})
+	)
+	if error != OK:
+		friendship_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func respond_to_friend_request(friendship_id: String, accept: bool) -> void:
+	await _await_tree()
+	var error := _friend_mutate_request.request(
+		http_base + "/api/social/friends/requests/" + friendship_id + "/respond",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"accept": accept})
+	)
+	if error != OK:
+		friendship_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func _on_friendship_mutated(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		friendship_refused.emit("UNREACHABLE", "Could not reach the server.")
+		return
+	if response_code != 200 and response_code != 201:
+		var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+		var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+		friendship_refused.emit(
+			str(payload.get("code", "FRIENDSHIP_ERROR")),
+			str(payload.get("message", "That could not be completed."))
+		)
+		return
+	friendship_changed.emit()

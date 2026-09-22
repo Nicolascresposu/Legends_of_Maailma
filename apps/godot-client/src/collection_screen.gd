@@ -8,6 +8,8 @@ class_name CollectionScreen
 ## computes. It never decides for itself whether a deck may be played.
 
 signal play_requested()
+## The player wants to trade cards with a friend.
+signal trade_requested()
 signal closed()
 ## The player pointed the client at a different server.
 signal server_changed(http_base: String)
@@ -193,6 +195,11 @@ func _build_main() -> HBoxContainer:
 	header.add_child(_fragments_label)
 	_who_label = Label.new()
 	header.add_child(_who_label)
+	var trade := Button.new()
+	trade.text = "Trade"
+	trade.tooltip_text = "Trade cards with your friends."
+	trade.pressed.connect(func() -> void: trade_requested.emit())
+	header.add_child(trade)
 	var sign_out := Button.new()
 	sign_out.text = "Sign out"
 	sign_out.pressed.connect(func() -> void: accounts.sign_out())
@@ -776,8 +783,6 @@ func _on_economy_refused(code: String, message: String) -> void:
 			explanation = "Crafting is not available for that expansion right now."
 		"CARD_NOT_DISENCHANTABLE":
 			explanation = "Disenchanting is not available for that expansion right now."
-		"CARD_NOT_TRADEABLE":
-			explanation = "Those cards cannot be traded right now."
 		"EXPANSION_NOT_RELEASED":
 			explanation = "That card is not available."
 		"EXPANSION_NOT_AVAILABLE_IN_PACKS":
@@ -786,8 +791,6 @@ func _on_economy_refused(code: String, message: String) -> void:
 			explanation = "You do not have enough Fragments."
 		"INSUFFICIENT_CARD_QUANTITY":
 			explanation = "You do not own that many copies."
-		"TRADE_REVISION_CHANGED":
-			explanation = "The offer changed. Review it and accept again."
 		"UNREACHABLE":
 			explanation = "Could not reach the server."
 	_economy_status.text = explanation

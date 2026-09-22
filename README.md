@@ -128,6 +128,7 @@ Client scripts:
 
 - `src/main.gd` — presentation, pointer interaction, and rendering.
 - `src/collection_screen.gd` — sign-in, collection browsing and deck building.
+- `src/trade_screen.gd` — friends, and trading cards with them.
 - `src/account_client.gd` — REST transport for accounts, collections and decks.
 - `src/match_client.gd` — REST + WebSocket transport, connection state, reconnection.
 - `src/targeting.gd` — derives valid drop targets from the server's legal actions.
@@ -146,6 +147,8 @@ Client scripts:
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
   refusal is explained rather than merely relayed.
+- `src/trade_test.gd` — two accounts become friends and complete a trade, with one acceptance
+  invalidated along the way by an edited offer.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 - `src/config_test.gd` — checks address parsing and override precedence.
 
@@ -158,6 +161,7 @@ godot --path apps/godot-client --script src/reveal_test.gd
 godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
+godot --headless --path apps/godot-client --script src/trade_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
 godot --headless --path apps/godot-client --script src/config_test.gd
 ```
@@ -404,6 +408,14 @@ the other actions that are blocked. Both players confirm the same revision, edit
 clears both acceptances, and execution revalidates policy and ownership inside the committing
 transaction. What a completed trade moved is frozen with the policy that permitted it, so
 withdrawing a set from trading never makes yesterday's exchange look illegal.
+
+In the client, **Trade** on the collection screen opens the trade screen. Friends are added by
+display name and requests are answered there, and each friend has a button that opens a trade with
+them, or reopens the one already open. A player builds their own side from the cards they own, and
+only cards the server marks tradeable can be added. Edits stay local until **Send offer**, and
+**Accept** always names the revision on screen. The screen re-reads its trades every few seconds
+while it is open, since trade changes are not pushed, so a friend's edits and acceptances show up
+without a manual refresh.
 
 Every economy mutation accepts a client-chosen `requestId`, so a retry after a lost response
 replays the original outcome instead of spending twice.

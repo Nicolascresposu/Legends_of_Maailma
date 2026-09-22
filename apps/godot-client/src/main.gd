@@ -31,6 +31,7 @@ var client: MatchClient
 var accounts: AccountClient
 var library := CardLibrary.new()
 var collection_screen: CollectionScreen
+var trade_screen: TradeScreen
 var game_root: Control
 ## The active deck fetched for the signed-in player, empty when playing
 ## anonymously. Falls back to the starter list so the client still works
@@ -114,6 +115,13 @@ func _ready() -> void:
 	collection_screen.play_requested.connect(_show_match_view)
 	# Keep the two address fields in step: they configure the same thing.
 	collection_screen.server_changed.connect(_on_server_changed)
+	collection_screen.trade_requested.connect(_show_trade_view)
+
+	trade_screen = TradeScreen.new()
+	trade_screen.visible = false
+	add_child(trade_screen)
+	trade_screen.setup(accounts, library)
+	trade_screen.closed.connect(_show_collection_view)
 	_show_collection_view()
 	print("[maailma] server: %s (%s)" % [ClientConfig.http_base(), ClientConfig.source()])
 
@@ -321,11 +329,19 @@ func _on_server_changed(base: String) -> void:
 
 func _show_collection_view() -> void:
 	collection_screen.visible = true
+	trade_screen.visible = false
+	game_root.visible = false
+	_cancel_drag()
+
+func _show_trade_view() -> void:
+	collection_screen.visible = false
+	trade_screen.visible = true
 	game_root.visible = false
 	_cancel_drag()
 
 func _show_match_view() -> void:
 	collection_screen.visible = false
+	trade_screen.visible = false
 	game_root.visible = true
 	# Play with whatever the player has selected as active.
 	if accounts.is_signed_in():
@@ -339,6 +355,9 @@ func _on_signed_in(who: Dictionary) -> void:
 	_set_status("Signed in as %s." % str(who.get("displayName", "")))
 
 func _on_account_signed_out() -> void:
+	# Trading needs an account, so signing out lands back on the sign-in form.
+	if trade_screen.visible:
+		_show_collection_view()
 	player_input.editable = true
 	active_deck_cards = []
 	active_deck_hero = ""
