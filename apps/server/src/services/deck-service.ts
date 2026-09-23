@@ -56,7 +56,7 @@ export class DeckService {
     ]);
     return decks.map((deck) => ({
       ...deck,
-      readiness: this.collections!.assess(deck.cardIds, owned, policies, deck.format),
+      readiness: this.collections!.assess(deck.cardIds, owned, policies, deck.format, deck.heroId),
     }));
   }
 
@@ -65,7 +65,12 @@ export class DeckService {
     if (!this.collections) return { ...deck, readiness: emptyReadiness(deck.format) };
     return {
       ...deck,
-      readiness: await this.collections.assessForUser(userId, deck.cardIds, deck.format),
+      readiness: await this.collections.assessForUser(
+        userId,
+        deck.cardIds,
+        deck.format,
+        deck.heroId,
+      ),
     };
   }
 
@@ -189,5 +194,12 @@ function isUniqueViolation(error: unknown): boolean {
 
 /** Readiness when collections are not configured: rules unknown, not blocked. */
 function emptyReadiness(format: DeckFormat = 'STANDARD'): DeckReadiness {
-  return { playable: true, ruleErrors: [], missing: [], format, illegalInFormat: [] };
+  return {
+    playable: true,
+    ruleErrors: [],
+    missing: [],
+    format,
+    illegalInFormat: [],
+    classId: null,
+  };
 }

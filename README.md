@@ -173,7 +173,7 @@ laid-out rects.
 
 - `packages/game-model` — JSON-compatible domain types, actions, events, state, and scenarios.
 - `packages/rng` — serializable seeded random number generator.
-- `packages/card-definitions` — immutable card, Hero, expansion, pack, starter deck, and
+- `packages/card-definitions` — immutable card, class, Hero, expansion, pack, starter deck, and
   scenario data, plus the crafting price table.
 - `packages/game-engine` — battlefield rules, event/effect queue, controllers, decks, pack
   generation, and replay.
@@ -293,8 +293,14 @@ first, and `--clean` also clears accounts left behind by client test runs.
 These exist only for local development and are created by a script that is never run against a
 deployed database.
 
-Each account starts with the starter cards. Ownership is a count per card, because deck legality
-is already expressed in copies: two of a common, one of a legendary.
+Each account starts with the starter cards: enough copies to build the starter deck of every
+class, so a new player's first deck is playable whichever hero they pick. Ownership is a count per
+card, because deck legality is already expressed in copies: two of a common, one of a legendary.
+
+A deck belongs to the class of its hero, and may hold that class's cards and neutral cards but no
+other class's cards. A card of the wrong class is reported in the deck's readiness like any other
+rule problem, and the deck builder will not add one. The terms are defined in
+[docs/architecture.md](docs/architecture.md#glossary).
 
 Saving a deck is deliberately permissive — a player may store an unfinished deck, or one built
 toward cards they have not unlocked — so only the name, the hero and the existence of each card
@@ -390,6 +396,9 @@ Fragments are the single crafting currency, held as an integer on the account:
 | Rare      |    20 |          5 |
 | Epic      |   100 |         20 |
 | Legendary |   300 |        100 |
+
+Basic cards have no row: every player is given them, so they are never crafted, disenchanted or
+found in packs. The Brown Bear is the one Basic card for now, there to exercise the rule.
 
 Duplicate protection reads **current ownership and nothing else**. There is no record of what a
 player has ever owned, and deliberately never will be: a card traded away or disenchanted becomes

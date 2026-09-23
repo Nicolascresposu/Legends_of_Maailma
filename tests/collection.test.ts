@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, EXPANSION_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
+import {
+  CARD_DEFINITIONS,
+  EXPANSION_DEFINITIONS,
+  STARTER_COLLECTION,
+  starterDeckFor,
+} from '@maailma/card-definitions';
 import { createApp } from '../apps/server/src/app.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { LobbyHub } from '../apps/server/src/lobby.js';
@@ -47,9 +52,14 @@ const RELEASED_COLLECTIBLE = Object.values(CARD_DEFINITIONS).filter(
   (card) => card.collectible && EXPANSION_DEFINITIONS[card.expansionId]?.policy.released === true,
 );
 
-const UNOWNED = RELEASED_COLLECTIBLE.filter((card) => !STARTER_DECK.includes(card.id)).map(
-  (card) => card.id,
-);
+// Neutral, so any deck may hold one: a class card would make a deck illegal
+// for its class rather than merely unowned.
+const UNOWNED = RELEASED_COLLECTIBLE.filter(
+  (card) => !STARTER_COLLECTION.has(card.id) && card.classId === undefined,
+).map((card) => card.id);
+
+/** Every deck in this file is built for The Mender, a Priest. */
+const PRIEST_STARTER = starterDeckFor('healer');
 
 beforeAll(async () => {
   const manager = new MatchManager();
@@ -109,11 +119,9 @@ describe('collection contents', () => {
   it('grants the starter cards to a new account', async () => {
     const user = await register('grant');
     const rows = await prisma.collectionEntry.findMany({ where: { userId: user.user.id } });
-    const starterUnique = new Set(STARTER_DECK);
-    expect(rows.length).toBe(starterUnique.size);
+    expect(rows.length).toBe(STARTER_COLLECTION.size);
     for (const row of rows) {
-      const expected = STARTER_DECK.filter((id) => id === row.cardId).length;
-      expect(row.quantity).toBe(expected);
+      expect(row.quantity).toBe(STARTER_COLLECTION.get(row.cardId));
     }
   });
 
@@ -182,7 +190,7 @@ describe('deck readiness', () => {
     const saved = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(user.token),
-      body: JSON.stringify({ name: 'Starter', heroId: 'healer', cardIds: STARTER_DECK }),
+      body: JSON.stringify({ name: 'Starter', heroId: 'healer', cardIds: PRIEST_STARTER }),
     });
     expect(saved.status).toBe(201);
     const list = (await (
@@ -194,7 +202,7 @@ describe('deck readiness', () => {
   it('saves a deck with unowned cards but reports what is missing', async () => {
     const user = await register('missing');
     // Swap two starter cards for a card the player does not own.
-    const cardIds = [...STARTER_DECK.slice(0, 28), UNOWNED[0]!, UNOWNED[0]!];
+    const cardIds = [...PRIEST_STARTER.slice(0, 28), UNOWNED[0]!, UNOWNED[0]!];
     const saved = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(user.token),
@@ -236,7 +244,7 @@ describe('deck readiness', () => {
     const response = await fetch(`${base}/api/collection/assess`, {
       method: 'POST',
       headers: authed(user.token),
-      body: JSON.stringify({ cardIds: STARTER_DECK }),
+      body: JSON.stringify({ cardIds: PRIEST_STARTER }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { readiness: { playable: boolean } };
@@ -283,7 +291,7 @@ describe('ownership at match start', () => {
     await befriend(challenger, opponent);
 
     // The opponent's active deck uses a card they do not own.
-    const cardIds = [...STARTER_DECK.slice(0, 28), UNOWNED[0]!, UNOWNED[0]!];
+    const cardIds = [...PRIEST_STARTER.slice(0, 28), UNOWNED[0]!, UNOWNED[0]!];
     await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(opponent.token),
@@ -313,7 +321,7 @@ describe('ownership at match start', () => {
     const opponent = await register('okayb');
     await befriend(challenger, opponent);
 
-    const cardIds = [...STARTER_DECK.slice(0, 29), UNOWNED[0]!];
+    const cardIds = [...PRIEST_STARTER.slice(0, 29), UNOWNED[0]!];
     await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(opponent.token),

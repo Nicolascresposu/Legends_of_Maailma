@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, CRAFTING_VALUES } from '@maailma/card-definitions';
+import { CARD_DEFINITIONS, CRAFTING_VALUES, type EarnedRarity } from '@maailma/card-definitions';
 import { hashPassword } from '../apps/server/src/auth/passwords.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
@@ -181,7 +181,9 @@ describe('an expansion from before release to archive', () => {
     const card = cardsIn(SET)[0]!;
     const before = await economy.balance(alice);
     const result = await economy.craft(alice, card, 1);
-    expect(result.fragmentDelta).toBe(-CRAFTING_VALUES[CARD_DEFINITIONS[card]!.rarity].craft);
+    expect(result.fragmentDelta).toBe(
+      -CRAFTING_VALUES[CARD_DEFINITIONS[card]!.rarity as EarnedRarity].craft,
+    );
     expect(await economy.balance(alice)).toBeLessThan(before);
 
     // Nothing else moved when that one flag did.

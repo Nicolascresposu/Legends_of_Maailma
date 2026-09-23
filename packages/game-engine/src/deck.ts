@@ -1,4 +1,4 @@
-import { getCardDefinition } from '@maailma/card-definitions';
+import { CLASS_DEFINITIONS, cardFitsClass, getCardDefinition } from '@maailma/card-definitions';
 import type { DeckFormat, Rarity } from '@maailma/game-model';
 
 export interface DeckValidationResult {
@@ -40,6 +40,11 @@ export type FormatLegality = (cardId: string, format: DeckFormat) => boolean;
 
 export interface DeckValidationOptions {
   requiredSize?: number;
+  /**
+   * The class the deck is played as — its hero's class. Omitted, class is not
+   * checked; given, every class card must belong to it.
+   */
+  classId?: string;
   /** The format to judge against. Omitted, format legality is not checked. */
   format?: DeckFormat;
   /** Answers whether a card's expansion is admitted by that format. */
@@ -71,6 +76,22 @@ export function validateDeck(
     const definition = getCardDefinition(cardId);
     const maximum = deckCopyLimit(definition.rarity);
     if (count > maximum) errors.push(`${definition.name} exceeds its ${maximum}-copy limit`);
+  }
+
+  // Named per card, like format legality: "Firebolt is a Wizard card" tells a
+  // player what to take out, where "wrong class" alone would not.
+  if (options.classId !== undefined) {
+    const deckClass = CLASS_DEFINITIONS[options.classId]?.name ?? options.classId;
+    const foreign = [...counts.keys()]
+      .filter((cardId) => !cardFitsClass(getCardDefinition(cardId), options.classId!))
+      .sort();
+    for (const cardId of foreign) {
+      const definition = getCardDefinition(cardId);
+      const cardClass = CLASS_DEFINITIONS[definition.classId!]?.name ?? definition.classId;
+      errors.push(
+        `${definition.name} is a ${cardClass} card and cannot be played in a ${deckClass} deck`,
+      );
+    }
   }
 
   // Format legality is reported per card rather than as one verdict, so a

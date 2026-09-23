@@ -70,7 +70,8 @@ describe('card descriptions', () => {
   });
 
   it('allows a card with no flavour', () => {
-    const card: CardDefinition = { ...getCardDefinition('wolf'), flavour: undefined };
+    const card = { ...getCardDefinition('wolf') };
+    delete card.flavour;
     expect(validateCardDescription(card)).toEqual([]);
   });
 

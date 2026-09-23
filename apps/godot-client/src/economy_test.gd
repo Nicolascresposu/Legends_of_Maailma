@@ -85,6 +85,27 @@ func _init() -> void:
 			break
 	_check("cards arrive with their current policies", has_policy_fields)
 
+	# --- A Basic card offers neither crafting nor disenchanting. ---
+	var bear: Dictionary = {}
+	for entry in screen.collection:
+		if typeof(entry) == TYPE_DICTIONARY and str((entry as Dictionary).get("cardId", "")) == "brown_bear":
+			bear = entry
+	_check("the Brown Bear is listed as Basic", str(bear.get("rarity", "")) == "BASIC")
+	if not bear.is_empty():
+		var row := screen._collection_row(bear)
+		var craft: Button = null
+		var dust: Button = null
+		for button in row.find_children("*", "Button", true, false):
+			if (button as Button).text.begins_with("Craft"):
+				craft = button
+			elif (button as Button).text.begins_with("+") and (button as Button).text != "+":
+				dust = button
+		_check("a Basic card's Craft button is disabled", craft != null and craft.disabled)
+		_check("a Basic card's Disenchant button is disabled", dust != null and dust.disabled)
+		_check("the refusal is explained as Basic, not as policy",
+			craft != null and craft.tooltip_text.contains("Basic"))
+		row.free()
+
 	# --- A refusal is explained, and nothing is spent. ---
 	# A new account cannot afford a Legendary, so this exercises the refusal
 	# path rather than the spending one.

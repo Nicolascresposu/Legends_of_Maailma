@@ -71,8 +71,28 @@ export type WeaponTag =
   | (string & {});
 
 export type CardSource = 'CORE' | 'CHRONICLE';
-export type Rarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
-export const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'] as const;
+/**
+ * How rare a card is.
+ *
+ * `BASIC` is the odd one out: Basic cards are given to every player for free,
+ * so they sit outside the economy entirely — never crafted, never
+ * disenchanted, never found in a pack — and print no rarity gem. Every other
+ * rarity is earned, and priced by how rare it is.
+ */
+export type Rarity = 'BASIC' | 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export const RARITIES = ['BASIC', 'COMMON', 'RARE', 'EPIC', 'LEGENDARY'] as const;
+
+/**
+ * A class: a faction with its own heroes and its own class cards.
+ *
+ * A deck belongs to the class of the hero it is built for, and may hold that
+ * class's cards alongside neutral cards — cards that belong to no class —
+ * but never another class's cards.
+ */
+export interface ClassDefinition {
+  id: string;
+  name: string;
+}
 
 /**
  * What a player may currently do with an expansion's cards.
@@ -175,6 +195,11 @@ interface CardDefinitionBase {
   expansionId: string;
   rarity: Rarity;
   collectible: boolean;
+  /**
+   * The class this card belongs to. Absent means a neutral card, which any
+   * deck may hold; a class card may only go in a deck of its own class.
+   */
+  classId?: string;
   /**
    * What the card does, written for players. Rules only — flavour belongs in
    * `flavour` — so a player can trust every word of it. A light markup marks
@@ -287,6 +312,8 @@ export interface HeroPowerDefinition {
 export interface HeroDefinition {
   id: string;
   name: string;
+  /** Every hero belongs to exactly one class, and so does its deck. */
+  classId: string;
   health: number;
   power: HeroPowerDefinition;
 }

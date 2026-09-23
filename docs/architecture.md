@@ -21,6 +21,26 @@ game-engine <- protocol <- server / clients
 Definitions are immutable registry data. Runtime instances contain damage, statuses, position,
 summoning sickness, and combat-action exhaustion; no match mutates a definition.
 
+## Glossary
+
+The terms the code, the docs and the card text use, and use only in these senses:
+
+- **Class** — a faction with its own heroes and its own class cards. There are two: Wizard and
+  Priest.
+- **Hero** — the character a player plays as. Every hero belongs to one class and has its own
+  health and hero power. The Striker is a Wizard hero; The Mender is a Priest hero.
+- **Class card** — a card that belongs to a class (`classId` on its definition).
+- **Neutral card** — a card with no class. Any deck may hold one.
+- **Deck class** — the class of the deck's hero. A deck may hold its class's cards and neutral
+  cards, never another class's cards. The class is not stored separately: it is always read from
+  the hero, so the two cannot disagree.
+- **Basic** — a rarity for cards every player is given for free. Basic cards are never crafted,
+  disenchanted or found in packs, and print no rarity gem. Every other rarity — Common, Rare,
+  Epic, Legendary — is earned, prints a rarity gem, and is priced by the economy.
+- **Starter deck** — the deck of a class a player can always fall back on: one per class, made of
+  neutral cards and that class's cards. A new account is given enough copies to build every one.
+- **Card type** — Creature, Action, Artifact or Weapon.
+
 ## Battlefield and combat
 
 Each side owns a battlefield whose rows are always `FRONT` and `BACK`. Its column count comes only

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { STARTER_DECK } from '@maailma/card-definitions';
+import { starterDeckFor } from '@maailma/card-definitions';
 import { createApp } from '../apps/server/src/app.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { createLogger, type LogRecord } from '../apps/server/src/logger.js';
@@ -31,8 +31,8 @@ describe('authoritative HTTP server', () => {
         scenarioId: 'STANDARD_PVP',
         seed: 99,
         players: [
-          { playerId: 'a', deck: STARTER_DECK },
-          { playerId: 'b', deck: STARTER_DECK },
+          { playerId: 'a', deck: starterDeckFor('healer') },
+          { playerId: 'b', deck: starterDeckFor('striker') },
         ],
       }),
     });

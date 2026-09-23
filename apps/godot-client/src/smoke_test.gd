@@ -37,7 +37,8 @@ func _init() -> void:
 	# Let the client enter the tree before issuing HTTP requests.
 	await process_frame
 	client.fetch_cards()
-	client.create_match("BANDIT_AMBUSH", "player-a", "healer", _starter_deck())
+	# No deck: the server deals the starter deck of the hero's class.
+	client.create_match("BANDIT_AMBUSH", "player-a", "healer", [])
 	_timeout()
 
 func _timeout() -> void:
@@ -183,16 +184,3 @@ func _fail(reason: String) -> void:
 	checks += 1
 	failures.append(reason)
 	print("  [XX] ", reason)
-
-func _starter_deck() -> Array:
-	var ids := [
-		"wolf", "brown_bear", "hawk", "giant_rat", "hunting_spider",
-		"elf_archer", "dwarf_defender", "human_mercenary", "field_medic",
-		"apprentice_mage", "maintenance_anima", "mercy_4", "healing_potion",
-		"firebolt", "arcane_battery",
-	]
-	var deck: Array = []
-	for id in ids:
-		deck.append(id)
-		deck.append(id)
-	return deck

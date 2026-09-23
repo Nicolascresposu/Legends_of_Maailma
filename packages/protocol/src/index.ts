@@ -19,13 +19,24 @@ export type ServerMessage =
   | { type: 'MATCH_ENDED'; winnerId?: PlayerId }
   | { type: 'ERROR'; code: string; message: string };
 
+/**
+ * One side of a match being created.
+ *
+ * Both the hero and the deck may be left out: the hero defaults to the
+ * scenario's, and the deck to the starter deck of that hero's class, so a
+ * match can always be started before any deck has been built.
+ */
+export interface CreateMatchPlayer {
+  playerId: string;
+  heroDefinitionId?: string;
+  deck?: string[];
+  controller?: 'HUMAN' | 'AI';
+}
+
 export interface CreateMatchRequest {
   scenarioId: string;
   seed?: number | string;
-  players: readonly [
-    { playerId: string; heroDefinitionId?: string; deck: string[]; controller?: 'HUMAN' | 'AI' },
-    { playerId: string; heroDefinitionId?: string; deck: string[]; controller?: 'HUMAN' | 'AI' },
-  ];
+  players: readonly [CreateMatchPlayer, CreateMatchPlayer];
 }
 
 export interface CreateMatchResponse {

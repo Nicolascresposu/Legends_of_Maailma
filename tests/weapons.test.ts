@@ -5,7 +5,7 @@ import { MatchManager } from '../apps/server/src/match-manager.js';
 import {
   CARD_DEFINITIONS,
   SCENARIO_DEFINITIONS,
-  STARTER_DECK,
+  starterDeckFor,
   getCardDefinition,
   validateWeaponDefinition,
 } from '@maailma/card-definitions';
@@ -915,16 +915,21 @@ describe('AI with Weapons', () => {
 
 describe('deck and collection integration', () => {
   it('accepts Weapons as ordinary deck cards under the usual copy limits', () => {
-    // Two copies of a common Weapon, in an otherwise legal 30-card deck.
-    const deck = [...STARTER_DECK.slice(0, 28), 'iron_sword', 'iron_sword'];
+    // The starter deck already carries two copies of a common Weapon.
+    const deck = starterDeckFor('healer');
+    expect(deck.filter((id) => id === 'iron_sword')).toHaveLength(2);
     expect(validateDeck(deck)).toEqual({ valid: true, errors: [] });
 
-    const tooMany = [...STARTER_DECK.slice(0, 27), 'iron_sword', 'iron_sword', 'iron_sword'];
+    // Trading both Wolves for a third Iron Sword and a Wolf keeps 30 cards
+    // but breaks the copy limit.
+    const tooMany = [...deck.filter((id) => id !== 'wolf'), 'iron_sword', 'wolf'];
+    expect(tooMany).toHaveLength(30);
     expect(validateDeck(tooMany).valid).toBe(false);
   });
 
   it('leaves existing Creature, Action and Artifact decks valid', () => {
-    expect(validateDeck(STARTER_DECK)).toEqual({ valid: true, errors: [] });
+    expect(validateDeck(starterDeckFor('healer'))).toEqual({ valid: true, errors: [] });
+    expect(validateDeck(starterDeckFor('striker'))).toEqual({ valid: true, errors: [] });
   });
 });
 
@@ -954,8 +959,8 @@ describe('authoritative server protocol', () => {
         scenarioId: 'STANDARD_PVP',
         seed: 7,
         players: [
-          { playerId: 'a', deck: STARTER_DECK },
-          { playerId: 'b', deck: STARTER_DECK },
+          { playerId: 'a', deck: starterDeckFor('healer') },
+          { playerId: 'b', deck: starterDeckFor('striker') },
         ],
       }),
     });
@@ -1031,8 +1036,8 @@ describe('authoritative server protocol', () => {
         scenarioId: 'STANDARD_PVP',
         seed: 7,
         players: [
-          { playerId: 'a', deck: STARTER_DECK },
-          { playerId: 'b', deck: STARTER_DECK },
+          { playerId: 'a', deck: starterDeckFor('healer') },
+          { playerId: 'b', deck: starterDeckFor('striker') },
         ],
       }),
     });
@@ -1058,8 +1063,8 @@ describe('PvE parity', () => {
       scenarioId: 'BANDIT_AMBUSH',
       seed: 4242,
       players: [
-        { playerId: 'hero', deck: STARTER_DECK, controller: 'HUMAN' },
-        { playerId: 'boss', deck: STARTER_DECK, controller: 'AI' },
+        { playerId: 'hero', deck: starterDeckFor('healer'), controller: 'HUMAN' },
+        { playerId: 'boss', deck: starterDeckFor('striker'), controller: 'AI' },
       ],
     });
 

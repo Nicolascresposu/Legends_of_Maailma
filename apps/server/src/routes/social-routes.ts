@@ -1,5 +1,5 @@
 import express from 'express';
-import { STARTER_DECK } from '@maailma/card-definitions';
+import { getScenarioDefinition, starterDeckFor } from '@maailma/card-definitions';
 import type { Logger } from '../logger.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
@@ -160,7 +160,7 @@ export function createSocialRouter(
  * Creates the match for an accepted challenge.
  *
  * Each player brings their own active deck; a player without one falls back to
- * the starter deck so a challenge is never blocked on deck building.
+ * their class's starter deck so a challenge is never blocked on deck building.
  */
 async function acceptChallenge(
   request: express.Request,
@@ -183,13 +183,22 @@ async function acceptChallenge(
   // format the deck was built for. A deck holding a rotated card is refused
   // here rather than quietly played, and a deck referencing an unreleased card
   // — one an admin tool may have put there — is refused in either format.
-  // The starter deck is always playable.
-  const challengerCards = challengerDeck?.cardIds ?? [...STARTER_DECK];
-  const opponentCards = opponentDeck?.cardIds ?? [...STARTER_DECK];
+  // A player without a deck plays the scenario's hero for their side, with
+  // that hero's class starter deck — which the starter grant makes playable.
+  const scenario = getScenarioDefinition(challenge.scenarioId);
+  const challengerHero = challengerDeck?.heroId ?? scenario.sideA.heroDefinitionId;
+  const opponentHero = opponentDeck?.heroId ?? scenario.sideB.heroDefinitionId;
+  const challengerCards = challengerDeck?.cardIds ?? starterDeckFor(challengerHero);
+  const opponentCards = opponentDeck?.cardIds ?? starterDeckFor(opponentHero);
   const challengerFormat = challengerDeck?.format ?? 'STANDARD';
   const opponentFormat = opponentDeck?.format ?? 'STANDARD';
   try {
-    await collections.assertPlayable(challenge.challengerId, challengerCards, challengerFormat);
+    await collections.assertPlayable(
+      challenge.challengerId,
+      challengerCards,
+      challengerFormat,
+      challengerHero,
+    );
   } catch (error) {
     if (error instanceof DeckNotPlayableError) {
       throw new AccountError(
@@ -200,7 +209,7 @@ async function acceptChallenge(
     }
     throw error;
   }
-  await collections.assertPlayable(opponentId, opponentCards, opponentFormat);
+  await collections.assertPlayable(opponentId, opponentCards, opponentFormat, opponentHero);
 
   const engine = manager.create({
     scenarioId: challenge.scenarioId,
@@ -208,13 +217,13 @@ async function acceptChallenge(
       {
         playerId: challenge.challengerId,
         deck: challengerCards,
-        ...(challengerDeck ? { heroDefinitionId: challengerDeck.heroId } : {}),
+        heroDefinitionId: challengerHero,
         controller: 'HUMAN',
       },
       {
         playerId: opponentId,
         deck: opponentCards,
-        ...(opponentDeck ? { heroDefinitionId: opponentDeck.heroId } : {}),
+        heroDefinitionId: opponentHero,
         controller: 'HUMAN',
       },
     ],

@@ -321,14 +321,18 @@ func _on_collection_completed(
 ## Checks a card list without saving, so a builder can show readiness live.
 ##
 ## The format is part of the question: the same thirty cards can be an illegal
-## Standard deck and a legal Wild one, and the server decides which.
-func assess(card_ids: Array, format: String = "STANDARD") -> void:
+## Standard deck and a legal Wild one, and the server decides which. So is the
+## hero, whose class decides which class cards the list may hold.
+func assess(card_ids: Array, format: String = "STANDARD", hero_id: String = "") -> void:
 	await _await_tree()
+	var body := {"cardIds": card_ids, "format": format}
+	if hero_id != "":
+		body["heroId"] = hero_id
 	var error := _assess_request.request(
 		http_base + "/api/collection/assess",
 		_headers(),
 		HTTPClient.METHOD_POST,
-		JSON.stringify({"cardIds": card_ids, "format": format})
+		JSON.stringify(body)
 	)
 	if error != OK:
 		request_failed.emit("Could not check that deck.")

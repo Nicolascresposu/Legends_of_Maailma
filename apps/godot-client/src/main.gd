@@ -390,7 +390,9 @@ func _create_match(scenario_id: String) -> void:
 		_set_status("Enter a Player ID first.", true)
 		return
 	_set_status("Creating match…")
-	var deck := active_deck_cards if not active_deck_cards.is_empty() else _starter_deck()
+	# Without an active deck, no deck is sent and the server deals the starter
+	# deck of the chosen hero's class.
+	var deck := active_deck_cards
 	var hero := active_deck_hero if active_deck_hero != "" else _selected_hero_id()
 	client.create_match(scenario_id, player_id, hero, deck)
 
@@ -439,20 +441,6 @@ func _copy_match_id() -> void:
 
 func _selected_hero_id() -> String:
 	return "striker" if hero_selector.selected == 1 else "healer"
-
-## The starter deck the server validates against (30 cards: 15 × 2).
-func _starter_deck() -> Array:
-	var ids := [
-		"wolf", "brown_bear", "hawk", "giant_rat", "hunting_spider",
-		"elf_archer", "dwarf_defender", "human_mercenary", "field_medic",
-		"apprentice_mage", "maintenance_anima", "mercy_4", "healing_potion",
-		"firebolt", "arcane_battery",
-	]
-	var deck: Array = []
-	for id in ids:
-		deck.append(id)
-		deck.append(id)
-	return deck
 
 # --- Server callbacks -------------------------------------------------------
 

@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { getHeroDefinition, getScenarioDefinition } from '@maailma/card-definitions';
+import {
+  getHeroDefinition,
+  getScenarioDefinition,
+  starterDeckFor,
+} from '@maailma/card-definitions';
 import { BasicAIController, GameEngine, validateDeck } from '@maailma/game-engine';
 import type { GameAction, GameEvent, MatchSetup } from '@maailma/game-model';
 import type { CreateMatchRequest } from '@maailma/protocol';
@@ -18,16 +22,24 @@ export class MatchManager {
 
   create(request: CreateMatchRequest): GameEngine {
     const scenario = getScenarioDefinition(request.scenarioId);
-    for (const player of request.players) {
-      const validation = validateDeck(player.deck);
+    const sides = [scenario.sideA, scenario.sideB] as const;
+    // Each player's hero is the one they chose, or else the scenario's for
+    // their side. A deck is always judged as that hero's class, and a player
+    // who brought no deck plays the starter deck of that class.
+    const players = request.players.map((player, index) => {
+      const heroId = player.heroDefinitionId ?? sides[index]!.heroDefinitionId;
+      const classId = getHeroDefinition(heroId).classId;
+      const deck = player.deck ? [...player.deck] : starterDeckFor(heroId);
+      const validation = validateDeck(deck, { classId });
       if (!validation.valid) throw new Error(validation.errors.join('; '));
-    }
+      return { ...structuredClone(player), deck };
+    }) as unknown as MatchSetup['players'];
     const matchId = randomUUID();
     const setup: MatchSetup = {
       matchId,
       scenario: structuredClone(scenario),
       seed: request.seed ?? randomUUID(),
-      players: structuredClone(request.players),
+      players,
     };
     const engine = new GameEngine(setup);
     this.matches.save(engine);
@@ -45,7 +57,17 @@ export class MatchManager {
     if (!side) throw new Error('Player is not part of the match');
     if (engine.state.actionLog.length > 0)
       throw new Error('Heroes cannot change after play begins');
-    getHeroDefinition(heroDefinitionId);
+    const hero = getHeroDefinition(heroDefinitionId);
+    const setupDeck = engine.setup.players.find((player) => player.playerId === playerId)?.deck;
+    // The deck was judged as the old hero's class when the match was made; a
+    // new hero must be one that could legally play it too, or switching hero
+    // would be a way round the class rule.
+    if (setupDeck) {
+      const validation = validateDeck(setupDeck, { classId: hero.classId });
+      if (!validation.valid) {
+        throw new Error(`${hero.name} cannot play this deck: ${validation.errors.join('; ')}`);
+      }
+    }
     side.hero.definitionId = heroDefinitionId;
     side.hero.currentHealth = side.hero.maxHealth;
     side.hero.powerUsedThisTurn = false;

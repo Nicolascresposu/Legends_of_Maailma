@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, CRAFTING_VALUES } from '@maailma/card-definitions';
+import { CARD_DEFINITIONS, CRAFTING_VALUES, type EarnedRarity } from '@maailma/card-definitions';
 import type { Rarity } from '@maailma/game-model';
 import { hashPassword } from '../apps/server/src/auth/passwords.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
@@ -69,7 +69,7 @@ describe('crafting costs', () => {
     const user = await makeUser('cost');
     await economy.grantFragments(user, 1000);
 
-    const expected: Array<[Rarity, string]> = [
+    const expected: Array<[EarnedRarity, string]> = [
       ['COMMON', cardOfRarity('COMMON')],
       ['RARE', cardOfRarity('RARE')],
       ['EPIC', EPIC],
@@ -164,7 +164,7 @@ describe('disenchanting', () => {
   it('returns the published value for every rarity', async () => {
     const user = await makeUser('dust');
     await economy.grantFragments(user, 2000);
-    const cases: Array<[Rarity, string]> = [
+    const cases: Array<[EarnedRarity, string]> = [
       ['COMMON', cardOfRarity('COMMON')],
       ['RARE', cardOfRarity('RARE')],
       ['EPIC', EPIC],

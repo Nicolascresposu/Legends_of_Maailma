@@ -2,13 +2,15 @@ import type { CollectionEntry, PrismaClient } from '@prisma/client';
 import {
   CARD_DEFINITIONS,
   EXPANSION_DEFINITIONS,
-  STARTER_DECK,
+  STARTER_COLLECTION,
   canCraftExpansion,
   canDisenchantExpansion,
   canTradeExpansion,
   craftCost,
   disenchantValue,
   getCardDefinition,
+  HERO_DEFINITIONS,
+  isBasicRarity,
   isExpansionStandardLegal,
 } from '@maailma/card-definitions';
 import { cardCopyLimit, validateDeck } from '@maailma/game-engine';
@@ -34,7 +36,12 @@ export interface CollectionCard {
   /** Which expansion it belongs to, for filtering and policy display. */
   expansionId: string;
   rarity: Rarity;
-  /** What the player may do with it right now, under current policy. */
+  /** The card's class, or null for a neutral card any deck may hold. */
+  classId: string | null;
+  /**
+   * What the player may do with it right now, under current policy. A Basic
+   * card is never craftable or disenchantable, whatever its expansion allows.
+   */
   craftable: boolean;
   disenchantable: boolean;
   tradeable: boolean;
@@ -76,6 +83,12 @@ export interface DeckReadiness {
    * the player built it wrong.
    */
   illegalInFormat: Array<{ cardId: string; copies: number }>;
+  /**
+   * The class the deck was judged as — its hero's — or null when no hero was
+   * given, in which case class was not checked. Cards of another class are
+   * named in `ruleErrors`.
+   */
+  classId: string | null;
 }
 
 /**
@@ -115,11 +128,12 @@ export class CollectionService {
     return await this.livePolicies();
   }
 
-  /** The cards granted to a new account, derived from the starter deck. */
+  /**
+   * The cards granted to a new account: enough for every class's starter
+   * deck, so whichever hero a new player picks, their first deck is playable.
+   */
   static starterGrant(): Map<string, number> {
-    const counts = new Map<string, number>();
-    for (const cardId of STARTER_DECK) counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
-    return counts;
+    return new Map(STARTER_COLLECTION);
   }
 
   /** Gives a new player their starting cards. Safe to call more than once. */
@@ -225,8 +239,9 @@ export class CollectionService {
             copyLimit: copyLimit(card.id),
             expansionId: card.expansionId,
             rarity: card.rarity,
-            craftable: canCraftExpansion(expansion),
-            disenchantable: canDisenchantExpansion(expansion),
+            classId: card.classId ?? null,
+            craftable: !isBasicRarity(card.rarity) && canCraftExpansion(expansion),
+            disenchantable: !isBasicRarity(card.rarity) && canDisenchantExpansion(expansion),
             tradeable: canTradeExpansion(expansion),
             standardLegal: isExpansionStandardLegal(expansion),
             craftCost: craftCost(card.rarity, card.id),
@@ -264,11 +279,20 @@ export class CollectionService {
     owned: Map<string, number>,
     policies: LivePolicies,
     format: DeckFormat = 'STANDARD',
+    heroId?: string,
   ): DeckReadiness {
+    // A stored deck can outlive its hero; that is reported like any other rule
+    // problem rather than failing the whole listing.
+    const classId = heroId === undefined ? undefined : HERO_DEFINITIONS[heroId]?.classId;
     const rules = validateDeck(cardIds, {
+      ...(classId === undefined ? {} : { classId }),
       format,
       isLegalInFormat: (cardId, deckFormat) => isCardLegalIn(policies, cardId, deckFormat),
     });
+    if (heroId !== undefined && classId === undefined) {
+      rules.errors.unshift(`Unknown hero: ${heroId}`);
+      rules.valid = false;
+    }
     const required = new Map<string, number>();
     for (const cardId of cardIds) required.set(cardId, (required.get(cardId) ?? 0) + 1);
 
@@ -290,6 +314,7 @@ export class CollectionService {
       missing,
       format,
       illegalInFormat,
+      classId: classId ?? null,
     };
   }
 
@@ -297,9 +322,10 @@ export class CollectionService {
     userId: string,
     cardIds: readonly string[],
     format: DeckFormat = 'STANDARD',
+    heroId?: string,
   ): Promise<DeckReadiness> {
     const [owned, policies] = await Promise.all([this.ownedCounts(userId), this.livePolicies()]);
-    return this.assess(cardIds, owned, policies, format);
+    return this.assess(cardIds, owned, policies, format, heroId);
   }
 
   /** Throws when a deck may not be played, with a reason worth showing. */
@@ -307,8 +333,9 @@ export class CollectionService {
     userId: string,
     cardIds: readonly string[],
     format: DeckFormat = 'STANDARD',
+    heroId?: string,
   ): Promise<void> {
-    const readiness = await this.assessForUser(userId, cardIds, format);
+    const readiness = await this.assessForUser(userId, cardIds, format, heroId);
     if (readiness.playable) return;
     const reasons = [...readiness.ruleErrors];
     for (const entry of readiness.missing) {

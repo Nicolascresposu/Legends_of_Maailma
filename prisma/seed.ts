@@ -15,7 +15,12 @@
  * development convenience and has no place in a deployed database.
  */
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, EXPANSION_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
+import {
+  CARD_DEFINITIONS,
+  EXPANSION_DEFINITIONS,
+  STARTER_COLLECTION,
+  starterDeckFor,
+} from '@maailma/card-definitions';
 import { hashPassword } from '../apps/server/src/auth/passwords.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
@@ -59,20 +64,25 @@ const BEYOND_STARTER = Object.values(CARD_DEFINITIONS)
   .filter(
     (card) =>
       card.collectible &&
-      !STARTER_DECK.includes(card.id) &&
+      !STARTER_COLLECTION.has(card.id) &&
       EXPANSION_DEFINITIONS[card.expansionId]?.policy.released === true,
   )
   .map((card) => card.id);
 
-/** A legal 30-card deck using only starter cards. */
-const STARTER_30 = [...STARTER_DECK];
+/**
+ * A neutral card beyond the starter grant, so a deck for either class can hold
+ * it: a class card would make the deck illegal for the wrong reason.
+ */
+const NEUTRAL_BEYOND_STARTER = BEYOND_STARTER.find(
+  (cardId) => CARD_DEFINITIONS[cardId]!.classId === undefined,
+);
 
 /**
  * A deck that is legal by the rules but uses a card the player may not own,
  * so the readiness marker has something to report.
  */
-function deckWithLegendary(legendaryId: string): string[] {
-  return [...STARTER_DECK.slice(0, 29), legendaryId];
+function deckWithLegendary(heroId: string, legendaryId: string): string[] {
+  return [...starterDeckFor(heroId).slice(0, 29), legendaryId];
 }
 
 const PLANS: SeedPlan[] = [
@@ -85,9 +95,15 @@ const PLANS: SeedPlan[] = [
     fragments: 5000,
     admin: true,
     decks: [
-      { name: 'Starter', heroId: 'healer', cardIds: STARTER_30, active: true },
-      ...(BEYOND_STARTER[0]
-        ? [{ name: 'Legendary', heroId: 'striker', cardIds: deckWithLegendary(BEYOND_STARTER[0]) }]
+      { name: 'Starter', heroId: 'healer', cardIds: starterDeckFor('healer'), active: true },
+      ...(NEUTRAL_BEYOND_STARTER
+        ? [
+            {
+              name: 'Legendary',
+              heroId: 'striker',
+              cardIds: deckWithLegendary('striker', NEUTRAL_BEYOND_STARTER),
+            },
+          ]
         : []),
     ],
   },
@@ -98,9 +114,15 @@ const PLANS: SeedPlan[] = [
     // A modest balance, so the "not enough Fragments" path has a subject.
     fragments: 120,
     decks: [
-      { name: 'Starter', heroId: 'striker', cardIds: STARTER_30, active: true },
-      ...(BEYOND_STARTER[0]
-        ? [{ name: 'Wishlist', heroId: 'healer', cardIds: deckWithLegendary(BEYOND_STARTER[0]) }]
+      { name: 'Starter', heroId: 'striker', cardIds: starterDeckFor('striker'), active: true },
+      ...(NEUTRAL_BEYOND_STARTER
+        ? [
+            {
+              name: 'Wishlist',
+              heroId: 'healer',
+              cardIds: deckWithLegendary('healer', NEUTRAL_BEYOND_STARTER),
+            },
+          ]
         : []),
     ],
   },
@@ -108,7 +130,9 @@ const PLANS: SeedPlan[] = [
     handle: 'carol',
     displayName: 'Carol',
     // An unfinished deck, to exercise the "not 30 cards" branch.
-    decks: [{ name: 'Half Built', heroId: 'healer', cardIds: STARTER_DECK.slice(0, 12) }],
+    decks: [
+      { name: 'Half Built', heroId: 'healer', cardIds: starterDeckFor('healer').slice(0, 12) },
+    ],
   },
 ];
 

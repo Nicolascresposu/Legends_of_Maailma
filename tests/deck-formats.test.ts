@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
-import { CARD_DEFINITIONS, EXPANSION_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
+import { CARD_DEFINITIONS, EXPANSION_DEFINITIONS, starterDeckFor } from '@maailma/card-definitions';
 import { validateDeck } from '@maailma/game-engine';
 import type { DeckFormat, ExpansionDefinition } from '@maailma/game-model';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
@@ -20,8 +20,8 @@ function snapshot(overrides: Record<string, Partial<ExpansionDefinition['policy'
   return Object.fromEntries(entries) as LivePolicies;
 }
 
-/** Cards from the starter deck, which all belong to released expansions. */
-const STARTER_30 = [...STARTER_DECK];
+/** A starter deck, whose cards all belong to released expansions. */
+const STARTER_30 = starterDeckFor('healer');
 
 function ownAll(cardIds: readonly string[]): Map<string, number> {
   const owned = new Map<string, number>();

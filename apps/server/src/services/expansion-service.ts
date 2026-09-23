@@ -8,6 +8,7 @@ import {
   canTradeExpansion,
   getCardDefinition,
   hasDuplicateProtection,
+  isBasicRarity,
   isExpansionStandardLegal,
   isExpansionWildLegal,
   validateExpansionPolicy,
@@ -37,6 +38,8 @@ export const ECONOMY_ERRORS = {
   CARD_NOT_CRAFTABLE: 'CARD_NOT_CRAFTABLE',
   CARD_NOT_DISENCHANTABLE: 'CARD_NOT_DISENCHANTABLE',
   CARD_NOT_TRADEABLE: 'CARD_NOT_TRADEABLE',
+  /** Basic cards are free to everyone, so they are never crafted or disenchanted. */
+  BASIC_CARD: 'BASIC_CARD',
   EXPANSION_NOT_AVAILABLE_IN_PACKS: 'EXPANSION_NOT_AVAILABLE_IN_PACKS',
   INSUFFICIENT_FRAGMENTS: 'INSUFFICIENT_FRAGMENTS',
   INSUFFICIENT_CARD_QUANTITY: 'INSUFFICIENT_CARD_QUANTITY',
@@ -240,6 +243,10 @@ export function isCardLegalIn(policies: LivePolicies, cardId: string, format: De
 export function assertCraftable(policies: LivePolicies, cardId: string): void {
   const expansion = expansionOf(policies, cardId);
   assertReleased(expansion, cardId);
+  // A rule of the card, not of its expansion: no policy makes a Basic card
+  // craftable, so it has its own code rather than borrowing the policy one —
+  // "not available for this expansion right now" would be untrue.
+  assertNotBasic(cardId, 'crafted');
   if (!canCraftExpansion(expansion)) {
     throw new EconomyError(
       ECONOMY_ERRORS.CARD_NOT_CRAFTABLE,
@@ -252,6 +259,7 @@ export function assertCraftable(policies: LivePolicies, cardId: string): void {
 export function assertDisenchantable(policies: LivePolicies, cardId: string): void {
   const expansion = expansionOf(policies, cardId);
   assertReleased(expansion, cardId);
+  assertNotBasic(cardId, 'disenchanted');
   if (!canDisenchantExpansion(expansion)) {
     throw new EconomyError(
       ECONOMY_ERRORS.CARD_NOT_DISENCHANTABLE,
@@ -301,6 +309,17 @@ function assertReleased(expansion: ExpansionDefinition, cardId: string): void {
   // Reported as "not found" so that an unreleased card's existence cannot be
   // probed through the error it produces.
   throw new EconomyError(ECONOMY_ERRORS.EXPANSION_NOT_RELEASED, `Unknown card: ${cardId}`, 404);
+}
+
+/** Basic cards are free to everyone, so the economy never prices them. */
+function assertNotBasic(cardId: string, verb: string): void {
+  const card = getCardDefinition(cardId);
+  if (isBasicRarity(card.rarity)) {
+    throw new EconomyError(
+      ECONOMY_ERRORS.BASIC_CARD,
+      `${card.name} is a Basic card and cannot be ${verb}`,
+    );
+  }
 }
 
 function assertCollectible(cardId: string): void {

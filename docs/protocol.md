@@ -9,9 +9,12 @@ The default server address is `http://localhost:3000`; live matches use
 - `GET /api/cards` — the card registry, filtered to released expansions. Each card carries a
   `description` (rules only) and an optional `flavour` (story only), both in a light markup:
   `**bold**`, `*italic*`, `\*` for a literal asterisk, and newlines as line breaks. Every keyword
-  a card has is printed in bold in its description.
+  a card has is printed in bold in its description. A class card also carries its `classId`; a
+  neutral card has none.
 - `GET /api/scenarios`
-- `POST /api/matches` — create an authoritative engine from a scenario, seed, and two 30-card decks.
+- `POST /api/matches` — create an authoritative engine from a scenario, seed, and two players.
+  Each player's hero defaults to the scenario's for their side, and each deck is judged as that
+  hero's class. A player sent without a `deck` plays the starter deck of their hero's class.
 - `GET /api/matches/:matchId` — current authoritative state (development endpoint).
 - `GET /api/matches/:matchId/legal-actions/:playerId` — legal intentions for one side.
 - `POST /api/matches/:matchId/actions` — submit an intention (development/test endpoint).
@@ -37,7 +40,8 @@ Join before submitting actions:
 { "type": "JOIN_MATCH", "matchId": "...", "playerId": "a" }
 ```
 
-Hero selection is accepted until the first action:
+Hero selection is accepted until the first action, and only for a hero whose class may play the
+player's deck:
 
 ```json
 {
@@ -71,7 +75,14 @@ types either: the same endpoints would serve a web client unchanged.
 
 Economy failures return a structured `code` alongside their message — `CARD_NOT_CRAFTABLE`,
 `EXPANSION_NOT_RELEASED`, `INSUFFICIENT_FRAGMENTS`, `TRADE_REVISION_CHANGED` and so on — so a
-client can word the refusal itself rather than relaying a sentence composed on the server.
+client can word the refusal itself rather than relaying a sentence composed on the server. A
+Basic card refused a craft or a disenchant says `BASIC_CARD`, not the policy codes: no expansion
+policy is involved, and none could change the answer.
+
+`POST /api/collection/assess` takes an optional `heroId` alongside `cardIds` and `format`. With
+one, the list is judged as that hero's class and any card of another class is named in
+`ruleErrors`; the verdict's `classId` says which class it was judged as. Every collection entry
+carries its card's `classId`, `null` for a neutral card.
 
 Every economy mutation accepts an optional client-chosen `requestId`. A retry after a lost response
 replays the original outcome instead of executing a second time.

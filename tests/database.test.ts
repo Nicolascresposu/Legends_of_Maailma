@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { PrismaClient } from '@prisma/client';
-import { STARTER_DECK } from '@maailma/card-definitions';
+import { starterDeckFor } from '@maailma/card-definitions';
 import { createApp } from '../apps/server/src/app.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { LobbyHub } from '../apps/server/src/lobby.js';
@@ -199,7 +199,11 @@ describe('decks', () => {
     const ok = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
-      body: JSON.stringify({ name: 'Starter', heroId: 'healer', cardIds: STARTER_DECK }),
+      body: JSON.stringify({
+        name: 'Starter',
+        heroId: 'healer',
+        cardIds: starterDeckFor('healer'),
+      }),
     });
     expect(ok.status).toBe(201);
     const saved = (await ok.json()) as { deck: { id: string; isActive: boolean } };
@@ -231,7 +235,7 @@ describe('decks', () => {
     const badHero = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
-      body: JSON.stringify({ name: 'NoHero', heroId: 'nobody', cardIds: STARTER_DECK }),
+      body: JSON.stringify({ name: 'NoHero', heroId: 'nobody', cardIds: starterDeckFor('healer') }),
     });
     expect(badHero.status).toBe(400);
     expect(((await badHero.json()) as { code: string }).code).toBe('INVALID_HERO');
@@ -243,7 +247,11 @@ describe('decks', () => {
     const created = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(owner.body.token!),
-      body: JSON.stringify({ name: 'Private', heroId: 'striker', cardIds: STARTER_DECK }),
+      body: JSON.stringify({
+        name: 'Private',
+        heroId: 'striker',
+        cardIds: starterDeckFor('striker'),
+      }),
     });
     const deckId = ((await created.json()) as { deck: { id: string } }).deck.id;
 
@@ -262,12 +270,16 @@ describe('decks', () => {
     const first = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
-      body: JSON.stringify({ name: 'First', heroId: 'healer', cardIds: STARTER_DECK }),
+      body: JSON.stringify({ name: 'First', heroId: 'healer', cardIds: starterDeckFor('healer') }),
     });
     const second = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
-      body: JSON.stringify({ name: 'Second', heroId: 'striker', cardIds: STARTER_DECK }),
+      body: JSON.stringify({
+        name: 'Second',
+        heroId: 'striker',
+        cardIds: starterDeckFor('striker'),
+      }),
     });
     const secondId = ((await second.json()) as { deck: { id: string } }).deck.id;
     void first;

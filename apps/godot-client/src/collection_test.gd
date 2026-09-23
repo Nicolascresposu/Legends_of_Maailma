@@ -69,6 +69,21 @@ func _init() -> void:
 	_check("readiness reported", screen._readiness_label.text != "")
 	print("  readiness: ", screen._readiness_label.text)
 	_check("a full owned deck is playable", screen._readiness_label.text.contains("Ready"))
+	_check("autofill keeps to the deck's class",
+		not screen.draft.has("firebolt") and not screen.draft.has("apprentice_mage"))
+
+	# The hero decides the class: the same Priest cards are illegal for a Wizard.
+	screen._hero_picker.select(1)
+	screen._hero_picker.item_selected.emit(1)
+	for i in range(150):
+		await process_frame
+	print("  as a Wizard deck: ", screen._readiness_label.text)
+	_check("another class's cards are named by the server",
+		screen._readiness_label.text.contains("is a Priest card"))
+	screen._hero_picker.select(0)
+	screen._hero_picker.item_selected.emit(0)
+	for i in range(150):
+		await process_frame
 
 	# Add a card the player does not own and confirm the server says so.
 	var missing_id := ""

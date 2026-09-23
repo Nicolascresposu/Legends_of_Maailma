@@ -16,6 +16,14 @@ signal server_changed(http_base: String)
 
 const CARD_TILE := Vector2(190, 104)
 
+## Each hero's class, which decides the class cards a deck may hold.
+##
+## Mirrors the server's hero definitions, as the hero picker below already
+## does; the server still judges every deck, so a stale entry here could only
+## mislabel a button, never admit an illegal deck.
+const HERO_CLASSES := {"healer": "PRIEST", "striker": "WIZARD"}
+const CLASS_NAMES := {"PRIEST": "Priest", "WIZARD": "Wizard"}
+
 var accounts: AccountClient
 var library: CardLibrary
 
@@ -247,7 +255,11 @@ func _build_main() -> HBoxContainer:
 	_hero_picker.add_item("The Mender", 0)
 	_hero_picker.add_item("The Striker", 1)
 	_hero_picker.item_selected.connect(
-		func(index: int) -> void: selected_hero = "striker" if index == 1 else "healer"
+		func(index: int) -> void:
+			selected_hero = "striker" if index == 1 else "healer"
+			# The hero decides the deck's class, so which cards may be added —
+			# and whether the draft is still legal — changes with it.
+			_render_draft()
 	)
 	name_row.add_child(_hero_picker)
 
@@ -428,10 +440,13 @@ func _collection_row(entry: Dictionary) -> Control:
 	var stats := ""
 	if kind == "CREATURE":
 		stats = "  %d/%d" % [library.base_attack(card_id), library.base_health(card_id)]
-	label.text = "%s   %d Taika%s" % [library.card_name(card_id), library.cost(card_id), stats]
+	label.text = "%s   %d Taika%s   %s" % [
+		library.card_name(card_id), library.cost(card_id), stats, _card_marks(entry),
+	]
 	if owned == 0:
 		label.modulate = Color(0.70, 0.70, 0.74)
 	row.add_child(label)
+	var fits := _fits_deck_class(entry)
 
 	var owned_label := Label.new()
 	owned_label.text = "owned %d/%d" % [owned, limit]
@@ -447,8 +462,15 @@ func _collection_row(entry: Dictionary) -> Control:
 	add.text = "+"
 	add.tooltip_text = library.tooltip(card_id)
 	# A card may be added up to its copy limit even when unowned: the deck is
-	# saved either way, and readiness explains what is missing.
-	add.disabled = in_deck >= limit
+	# saved either way, and readiness explains what is missing. Another class's
+	# card is different — no amount of collecting makes it legal here.
+	add.disabled = in_deck >= limit or not fits
+	if not fits:
+		add.tooltip_text = "%s is a %s card; this is a %s deck." % [
+			library.card_name(card_id),
+			_class_name(str(entry.get("classId", ""))),
+			_class_name(_deck_class()),
+		]
 	add.pressed.connect(_add_card.bind(card_id, limit))
 	row.add_child(add)
 
@@ -461,10 +483,16 @@ func _collection_row(entry: Dictionary) -> Control:
 	# Crafting and disenchanting are offered only where the server says the
 	# expansion currently allows them. This is presentation: the server refuses
 	# the request anyway, and a policy may change between drawing and clicking.
+	# A Basic card is refused for a reason of its own, so it says so.
+	var is_basic := str(entry.get("rarity", "")) == "BASIC"
 	var craft := Button.new()
 	craft.text = "Craft %d" % int(entry.get("craftCost", 0))
 	craft.tooltip_text = "Spend Fragments to make one copy"
-	if not bool(entry.get("craftable", false)):
+	if is_basic:
+		craft.text = "Craft"
+		craft.disabled = true
+		craft.tooltip_text = "Basic cards are free to everyone and cannot be crafted"
+	elif not bool(entry.get("craftable", false)):
 		craft.disabled = true
 		craft.tooltip_text = "Crafting is not available for this expansion right now"
 	elif fragments < int(entry.get("craftCost", 0)):
@@ -476,7 +504,11 @@ func _collection_row(entry: Dictionary) -> Control:
 	var dust := Button.new()
 	dust.text = "+%d" % int(entry.get("disenchantValue", 0))
 	dust.tooltip_text = "Disenchant one copy for Fragments"
-	if not bool(entry.get("disenchantable", false)):
+	if is_basic:
+		dust.text = "+0"
+		dust.disabled = true
+		dust.tooltip_text = "Basic cards are free to everyone and cannot be disenchanted"
+	elif not bool(entry.get("disenchantable", false)):
 		dust.disabled = true
 		dust.tooltip_text = "Disenchanting is not available for this expansion right now"
 	elif owned <= 0:
@@ -485,6 +517,38 @@ func _collection_row(entry: Dictionary) -> Control:
 	dust.pressed.connect(func() -> void: accounts.disenchant_card(card_id, 1))
 	row.add_child(dust)
 	return panel
+
+## "[Wizard · Common]": a card's class, if it has one, and its rarity.
+func _card_marks(entry: Dictionary) -> String:
+	var parts: Array[String] = []
+	var class_id := str(entry.get("classId", ""))
+	if class_id != "" and class_id != "<null>":
+		parts.append(_class_name(class_id))
+	var rarity := str(entry.get("rarity", ""))
+	if rarity != "":
+		parts.append(rarity.capitalize())
+	return "[%s]" % " · ".join(parts) if not parts.is_empty() else ""
+
+## The class of the deck being edited: its hero's.
+func _deck_class() -> String:
+	return str(HERO_CLASSES.get(selected_hero, ""))
+
+## Whether the deck being edited may hold this card: neutral cards always,
+## class cards only in their own class's deck.
+func _fits_deck_class(entry: Dictionary) -> bool:
+	var class_id: Variant = entry.get("classId", null)
+	if class_id == null or str(class_id) == "":
+		return true
+	return str(class_id) == _deck_class()
+
+func _class_name(class_id: String) -> String:
+	return str(CLASS_NAMES.get(class_id, class_id.capitalize()))
+
+func _entry_for(card_id: String) -> Dictionary:
+	for entry in collection:
+		if typeof(entry) == TYPE_DICTIONARY and str(entry.get("cardId", "")) == card_id:
+			return entry
+	return {}
 
 func _add_card(card_id: String, limit: int) -> void:
 	var current := int(draft.get(card_id, 0))
@@ -527,6 +591,11 @@ func _render_draft() -> void:
 		if owned < count:
 			label.text += "   (own %d)" % owned
 			label.add_theme_color_override("font_color", Color(0.93, 0.62, 0.40))
+		# A card left over from before the hero changed, of the other class.
+		var entry := _entry_for(str(card_id))
+		if not entry.is_empty() and not _fits_deck_class(entry):
+			label.text += "   (%s card)" % _class_name(str(entry.get("classId", "")))
+			label.add_theme_color_override("font_color", Color(0.88, 0.42, 0.45))
 		row.add_child(label)
 		var minus := Button.new()
 		minus.text = "−"
@@ -541,12 +610,13 @@ func _render_draft() -> void:
 	_render_collection()
 	_request_readiness()
 
-## Asks the server for the authoritative verdict, in the chosen format.
+## Asks the server for the authoritative verdict, in the chosen format and as
+## the chosen hero's class.
 func _request_readiness() -> void:
 	if draft.is_empty():
 		_readiness_label.text = "Add cards to build a deck."
 		return
-	accounts.assess(draft_card_ids(), selected_format)
+	accounts.assess(draft_card_ids(), selected_format, selected_hero)
 
 func _owned_count(card_id: String) -> int:
 	for entry in collection:
@@ -605,6 +675,10 @@ func _readiness_text(readiness: Dictionary) -> String:
 func _autofill() -> void:
 	for entry in collection:
 		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		# Only cards this deck's class may hold: filling with the other class's
+		# cards would build a deck the server is certain to refuse.
+		if not _fits_deck_class(entry):
 			continue
 		var card_id := str(entry.get("cardId", ""))
 		var owned := int(entry.get("owned", 0))
@@ -783,6 +857,8 @@ func _on_economy_refused(code: String, message: String) -> void:
 			explanation = "Crafting is not available for that expansion right now."
 		"CARD_NOT_DISENCHANTABLE":
 			explanation = "Disenchanting is not available for that expansion right now."
+		"BASIC_CARD":
+			explanation = "Basic cards are free to everyone, so they cannot be crafted or disenchanted."
 		"EXPANSION_NOT_RELEASED":
 			explanation = "That card is not available."
 		"EXPANSION_NOT_AVAILABLE_IN_PACKS":

@@ -1,5 +1,6 @@
 import {
   CARD_DEFINITIONS,
+  isBasicRarity,
   type PackDefinition,
   type RarityWeights,
 } from '@maailma/card-definitions';
@@ -49,7 +50,11 @@ export function packPool(
   pack: PackDefinition,
   cards: readonly CardDefinition[] = Object.values(CARD_DEFINITIONS),
 ): CardDefinition[] {
-  return cards.filter((card) => card.collectible && card.expansionId === pack.expansionId);
+  // Basic cards are given to everyone, so a pack slot spent on one is wasted.
+  return cards.filter(
+    (card) =>
+      card.collectible && card.expansionId === pack.expansionId && !isBasicRarity(card.rarity),
+  );
 }
 
 /**

@@ -6,7 +6,12 @@ import {
   replayMatch,
   validateDeck,
 } from '@maailma/game-engine';
-import { SCENARIO_DEFINITIONS, STARTER_DECK } from '@maailma/card-definitions';
+import { SCENARIO_DEFINITIONS, starterDeckFor } from '@maailma/card-definitions';
+
+// Side A is The Mender (Priest) and side B The Striker (Wizard) in every
+// scenario used here, so each side plays its own class's starter deck.
+const PRIEST_STARTER = starterDeckFor('healer');
+const WIZARD_STARTER = starterDeckFor('striker');
 import type { MatchSetup } from '@maailma/game-model';
 
 function setup(seed: number | string): MatchSetup {
@@ -14,8 +19,8 @@ function setup(seed: number | string): MatchSetup {
     scenario: structuredClone(SCENARIO_DEFINITIONS.STANDARD_PVP!),
     seed,
     players: [
-      { playerId: 'a', deck: [...STARTER_DECK] },
-      { playerId: 'b', deck: [...STARTER_DECK] },
+      { playerId: 'a', deck: [...PRIEST_STARTER] },
+      { playerId: 'b', deck: [...WIZARD_STARTER] },
     ],
   };
 }
@@ -55,8 +60,8 @@ describe('determinism and replay', () => {
 
 describe('deck and controller foundations', () => {
   it('accepts the 30-card starter deck and enforces Legendary copy limits', () => {
-    expect(validateDeck(STARTER_DECK).valid).toBe(true);
-    const invalid = [...STARTER_DECK];
+    expect(validateDeck(PRIEST_STARTER).valid).toBe(true);
+    const invalid = [...PRIEST_STARTER];
     invalid[0] = 'lio_varga';
     invalid[1] = 'lio_varga';
     expect(validateDeck(invalid).errors.some((error) => error.includes('1-copy'))).toBe(true);
@@ -67,8 +72,8 @@ describe('deck and controller foundations', () => {
       ...setup(7),
       scenario: structuredClone(SCENARIO_DEFINITIONS.BANDIT_AMBUSH!),
       players: [
-        { playerId: 'human', deck: [...STARTER_DECK], controller: 'HUMAN' },
-        { playerId: 'ai', deck: [...STARTER_DECK], controller: 'AI' },
+        { playerId: 'human', deck: [...PRIEST_STARTER], controller: 'HUMAN' },
+        { playerId: 'ai', deck: [...WIZARD_STARTER], controller: 'AI' },
       ],
     });
     engine.dispatch({ type: 'END_TURN', actorId: 'human' });
@@ -83,8 +88,8 @@ describe('deck and controller foundations', () => {
       ...setup(9),
       scenario: structuredClone(SCENARIO_DEFINITIONS.BANDIT_AMBUSH!),
       players: [
-        { playerId: 'human', deck: [...STARTER_DECK] },
-        { playerId: 'bandits', deck: [...STARTER_DECK], controller: 'AI' },
+        { playerId: 'human', deck: [...PRIEST_STARTER] },
+        { playerId: 'bandits', deck: [...WIZARD_STARTER], controller: 'AI' },
       ],
     });
     expect(engine.state.sides.human!.battlefield.config.width).toBe(2);

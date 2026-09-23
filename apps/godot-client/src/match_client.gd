@@ -82,14 +82,22 @@ func create_match(scenario_id: String, player: String, hero_id: String, deck: Ar
 		await get_tree().process_frame
 	player_id = player
 	var opponent_is_ai := scenario_id != "STANDARD_PVP"
+	var creator := {"playerId": player, "heroDefinitionId": hero_id, "controller": "HUMAN"}
+	# An empty deck is left out rather than sent: the server then deals the
+	# starter deck of the hero's class, which is the only deck it can know is
+	# legal for that hero.
+	if not deck.is_empty():
+		creator["deck"] = deck
 	var body := {
 		"scenarioId": scenario_id,
 		"players": [
-			{"playerId": player, "heroDefinitionId": hero_id, "deck": deck, "controller": "HUMAN"},
+			creator,
+			# The opponent always plays its own class's starter deck. Handing it
+			# the creator's deck would be refused whenever the two heroes are of
+			# different classes.
 			{
 				"playerId": "bandits" if opponent_is_ai else "player-b",
 				"heroDefinitionId": "striker",
-				"deck": deck,
 				"controller": "AI" if opponent_is_ai else "HUMAN",
 			},
 		],

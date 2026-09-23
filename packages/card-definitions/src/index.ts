@@ -13,9 +13,11 @@ import type {
   WeaponTag,
 } from '@maailma/game-model';
 import { WEAPON_RANGES } from '@maailma/game-model';
+import { CLASS_DEFINITIONS, cardFitsClass, isKnownClass } from './classes.js';
 import { validateCardDescription } from './descriptions.js';
 import { isKnownExpansion } from './expansions.js';
 
+export * from './classes.js';
 export * from './descriptions.js';
 export * from './expansions.js';
 export * from './economy.js';
@@ -49,6 +51,12 @@ const cards: CardDefinition[] = [
     3,
     4,
     ['BEAST'],
+    [],
+    [],
+    'CORE',
+    // The one Basic card for now, so the collection and crafting screens have
+    // something to show the rule with. Real Basic sets come later.
+    'BASIC',
   ),
   creature(
     'hawk',
@@ -116,33 +124,39 @@ const cards: CardDefinition[] = [
     2,
     ['HUMAN', 'SOLDIER'],
   ),
-  creature(
-    'field_medic',
-    'Field Medic',
-    {
-      description: '**Arrival:** Restore 3 Health to your Hero.',
-      flavour: 'Bandages first. Questions never.',
-    },
-    3,
-    2,
-    3,
-    ['HUMAN'],
-    ['ARRIVAL'],
-    [{ trigger: 'ARRIVAL', effect: { type: 'HEAL', amount: 3, target: 'OWNER_HERO' } }],
+  inClass(
+    'PRIEST',
+    creature(
+      'field_medic',
+      'Field Medic',
+      {
+        description: '**Arrival:** Restore 3 Health to your Hero.',
+        flavour: 'Bandages first. Questions never.',
+      },
+      3,
+      2,
+      3,
+      ['HUMAN'],
+      ['ARRIVAL'],
+      [{ trigger: 'ARRIVAL', effect: { type: 'HEAL', amount: 3, target: 'OWNER_HERO' } }],
+    ),
   ),
-  creature(
-    'apprentice_mage',
-    'Apprentice Mage',
-    {
-      description: '**Arrival:** Deal 1 damage to an enemy character.',
-      flavour: 'The spell works. The aim is still being taught.',
-    },
-    3,
-    2,
-    2,
-    ['HUMAN', 'MAGE'],
-    ['ARRIVAL'],
-    [{ trigger: 'ARRIVAL', effect: { type: 'DEAL_DAMAGE', amount: 1, target: 'PLAY_TARGET' } }],
+  inClass(
+    'WIZARD',
+    creature(
+      'apprentice_mage',
+      'Apprentice Mage',
+      {
+        description: '**Arrival:** Deal 1 damage to an enemy character.',
+        flavour: 'The spell works. The aim is still being taught.',
+      },
+      3,
+      2,
+      2,
+      ['HUMAN', 'MAGE'],
+      ['ARRIVAL'],
+      [{ trigger: 'ARRIVAL', effect: { type: 'DEAL_DAMAGE', amount: 1, target: 'PLAY_TARGET' } }],
+    ),
   ),
   creature(
     'maintenance_anima',
@@ -246,6 +260,7 @@ const cards: CardDefinition[] = [
     expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
+    classId: 'PRIEST',
     description: 'Restore 4 Health to a friendly character.',
     flavour: 'Tastes of pine tar and regret.',
     targetMode: 'FRIENDLY_CHARACTER',
@@ -260,6 +275,7 @@ const cards: CardDefinition[] = [
     expansionId: 'CORE',
     rarity: 'COMMON',
     collectible: true,
+    classId: 'WIZARD',
     description: 'Deal 3 damage to an enemy character.',
     flavour: 'Taika drawn in anger burns brightest.',
     targetMode: 'ENEMY_CHARACTER',
@@ -453,6 +469,11 @@ const cards: CardDefinition[] = [
   ),
 ];
 
+/** Makes a card a class card. Wraps the builders rather than widening them. */
+function inClass<T extends CardDefinition>(classId: string, card: T): T {
+  return { ...card, classId };
+}
+
 function creature(
   id: string,
   name: string,
@@ -560,6 +581,18 @@ function validateCardExpansion(card: CardDefinition): string[] {
   return [];
 }
 
+/**
+ * Rejects a class card whose class nothing defines.
+ *
+ * A card naming an unknown class could never be put in any deck — no hero
+ * belongs to that class — so it would be dead weight in every collection.
+ */
+function validateCardClass(card: CardDefinition): string[] {
+  if (card.classId === undefined) return [];
+  const where = card.id || '(unnamed card)';
+  return isKnownClass(card.classId) ? [] : [`${where}: unknown class "${card.classId}"`];
+}
+
 // A malformed registry is a programming error, so it fails at import rather
 // than midway through somebody's match.
 const definitionErrors = [
@@ -568,6 +601,7 @@ const definitionErrors = [
     .flatMap(validateWeaponDefinition),
   ...cards.flatMap(validateCardExpansion),
   ...cards.flatMap(validateCardDescription),
+  ...cards.flatMap(validateCardClass),
 ];
 if (definitionErrors.length > 0) {
   throw new Error(`Invalid card definitions: ${definitionErrors.join('; ')}`);
@@ -581,6 +615,7 @@ export const HERO_DEFINITIONS: Readonly<Record<string, HeroDefinition>> = Object
   healer: {
     id: 'healer',
     name: 'The Mender',
+    classId: 'PRIEST',
     health: 30,
     power: {
       id: 'mend',
@@ -594,6 +629,7 @@ export const HERO_DEFINITIONS: Readonly<Record<string, HeroDefinition>> = Object
   striker: {
     id: 'striker',
     name: 'The Striker',
+    classId: 'WIZARD',
     health: 30,
     power: {
       id: 'strike',
@@ -644,23 +680,86 @@ export const SCENARIO_DEFINITIONS: Readonly<Record<string, ScenarioDefinition>> 
   },
 });
 
-export const STARTER_DECK: string[] = [
-  ...Array(2).fill('wolf'),
-  ...Array(2).fill('brown_bear'),
-  ...Array(2).fill('hawk'),
-  ...Array(2).fill('giant_rat'),
-  ...Array(2).fill('hunting_spider'),
-  ...Array(2).fill('elf_archer'),
-  ...Array(2).fill('dwarf_defender'),
-  ...Array(2).fill('human_mercenary'),
-  ...Array(2).fill('field_medic'),
-  ...Array(2).fill('apprentice_mage'),
-  ...Array(2).fill('maintenance_anima'),
-  ...Array(2).fill('mercy_4'),
-  ...Array(2).fill('healing_potion'),
-  ...Array(2).fill('firebolt'),
-  ...Array(2).fill('arcane_battery'),
+/** Two of each, which is how every starter deck is built. */
+const pairs = (...cardIds: string[]): string[] => cardIds.flatMap((cardId) => [cardId, cardId]);
+
+/** The neutral core every class's starter deck shares: 26 cards. */
+const STARTER_NEUTRALS = pairs(
+  'wolf',
+  'brown_bear',
+  'hawk',
+  'giant_rat',
+  'hunting_spider',
+  'elf_archer',
+  'dwarf_defender',
+  'human_mercenary',
+  'maintenance_anima',
+  'mercy_4',
+  'arcane_battery',
+  'iron_sword',
+  'hunting_bow',
+);
+
+/**
+ * One starter deck per class, keyed by class id: the shared neutrals plus
+ * that class's own cards.
+ *
+ * Per class because a single deck cannot serve both: a deck may hold only its
+ * own class's cards, so a deck with Firebolt and Healing Potion in it would be
+ * legal for no hero at all.
+ */
+export const STARTER_DECKS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  WIZARD: Object.freeze([...STARTER_NEUTRALS, ...pairs('apprentice_mage', 'firebolt')]),
+  PRIEST: Object.freeze([...STARTER_NEUTRALS, ...pairs('field_medic', 'healing_potion')]),
+});
+
+/**
+ * Every card a new account is given: enough copies to build any class's
+ * starter deck, so each is playable from the first login.
+ */
+export const STARTER_COLLECTION: ReadonlyMap<string, number> = (() => {
+  const counts = new Map<string, number>();
+  for (const deck of Object.values(STARTER_DECKS)) {
+    const inDeck = new Map<string, number>();
+    for (const cardId of deck) inDeck.set(cardId, (inDeck.get(cardId) ?? 0) + 1);
+    for (const [cardId, copies] of inDeck) {
+      counts.set(cardId, Math.max(counts.get(cardId) ?? 0, copies));
+    }
+  }
+  return counts;
+})();
+
+// Heroes, classes and starter decks refer to one another by id, so a typo in
+// any of them is caught here rather than when someone picks that hero.
+const classErrors = [
+  ...Object.values(HERO_DEFINITIONS)
+    .filter((hero) => !isKnownClass(hero.classId))
+    .map((hero) => `hero ${hero.id}: unknown class "${hero.classId}"`),
+  ...Object.keys(CLASS_DEFINITIONS)
+    .filter((classId) => !STARTER_DECKS[classId])
+    .map((classId) => `class ${classId}: has no starter deck`),
+  ...Object.entries(STARTER_DECKS).flatMap(([classId, deck]) =>
+    deck
+      .filter((cardId) => {
+        const card = CARD_DEFINITIONS[cardId];
+        return !card || !cardFitsClass(card, classId);
+      })
+      .map((cardId) => `${classId} starter deck: ${cardId} cannot be played in this class`),
+  ),
 ];
+if (classErrors.length > 0) {
+  throw new Error(`Invalid class definitions: ${classErrors.join('; ')}`);
+}
+
+/** The class a hero belongs to, and so the class of any deck built for it. */
+export function heroClassId(heroId: string): string {
+  return getHeroDefinition(heroId).classId;
+}
+
+/** The starter deck for a hero's class. */
+export function starterDeckFor(heroId: string): string[] {
+  return [...STARTER_DECKS[heroClassId(heroId)]!];
+}
 
 export function getCardDefinition(id: string): CardDefinition {
   const definition = CARD_DEFINITIONS[id];

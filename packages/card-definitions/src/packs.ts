@@ -1,5 +1,6 @@
 import type { Rarity } from '@maailma/game-model';
 import { RARITIES } from '@maailma/game-model';
+import { isBasicRarity } from './economy.js';
 import { isKnownExpansion } from './expansions.js';
 
 /**
@@ -93,6 +94,8 @@ export function validatePackDefinition(definition: PackDefinition): string[] {
     for (const [rarity, weight] of weights) {
       if (!RARITIES.includes(rarity))
         errors.push(`${where}: slot ${index} names unknown rarity ${rarity}`);
+      else if (isBasicRarity(rarity))
+        errors.push(`${where}: slot ${index} names ${rarity}, and Basic cards never come in packs`);
       if (!Number.isFinite(weight) || weight <= 0) {
         errors.push(`${where}: slot ${index} weight for ${rarity} must be positive`);
       }
