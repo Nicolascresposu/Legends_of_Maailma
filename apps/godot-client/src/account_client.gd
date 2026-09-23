@@ -49,6 +49,10 @@ signal match_started(match_id: String, player_id: String, waiting: bool)
 ## Starting or joining a match was refused — most often because the chosen
 ## deck is not ready, which the server explains in `message`.
 signal match_refused(code: String, message: String)
+## An admin API call finished. `tag` is whatever the caller passed, so each
+## part of the admin panel can pick out its own replies; `payload` is the
+## reply body, or {code, message} when `ok` is false.
+signal admin_response(tag: String, ok: bool, payload: Dictionary)
 
 ## Resolved from the command line, the environment, or a saved address.
 var http_base := ClientConfig.http_base()
@@ -75,6 +79,7 @@ var _friends_request: HTTPRequest
 var _friend_requests_request: HTTPRequest
 var _friend_mutate_request: HTTPRequest
 var _play_request: HTTPRequest
+var _admin_request: HTTPRequest
 
 func _ready() -> void:
 	_ensure_requests()
@@ -152,6 +157,10 @@ func _ensure_requests() -> void:
 		_play_request = HTTPRequest.new()
 		_play_request.request_completed.connect(_on_play_completed)
 		add_child(_play_request)
+	if _admin_request == null:
+		_admin_request = HTTPRequest.new()
+		_admin_request.request_completed.connect(_on_admin_completed)
+		add_child(_admin_request)
 
 ## True only once the server has confirmed who the token belongs to.
 ##
@@ -160,6 +169,11 @@ func _ensure_requests() -> void:
 ## to a session that may yet be rejected.
 func is_signed_in() -> bool:
 	return token != "" and not user.is_empty()
+
+## Whether the signed-in account may use the admin API. The server decides on
+## every call regardless; this only chooses whether to offer the admin UI.
+func is_admin() -> bool:
+	return is_signed_in() and bool(user.get("isAdmin", false))
 
 ## True while a saved token is set but not yet confirmed.
 func is_restoring() -> bool:
@@ -239,6 +253,11 @@ func _on_auth_completed(
 	if response_code != 200 and response_code != 201:
 		sign_in_failed.emit(str(payload.get("message", "Sign-in failed")))
 		return
+	adopt_session(payload)
+
+## Becomes the account a session belongs to: a sign-in, a registration, or an
+## admin signing in as a player. `payload` is {token, user, expiresAt}.
+func adopt_session(payload: Dictionary) -> void:
 	token = str(payload.get("token", ""))
 	var who: Variant = payload.get("user", {})
 	user = who if typeof(who) == TYPE_DICTIONARY else {}
@@ -931,3 +950,50 @@ func _on_play_completed(
 		str(payload.get("playerId", "")),
 		bool(payload.get("waitingForOpponent", false))
 	)
+
+# --- Admin -------------------------------------------------------------------
+
+## Admin calls waiting their turn: {method, path, body, tag}. Queued rather
+## than dropped, so a panel can fire several without losing any.
+var _admin_queue: Array = []
+var _admin_in_flight := false
+var _admin_tag := ""
+
+## Calls the admin API: `path` is relative to /api/admin. The reply arrives
+## as `admin_response(tag, ok, payload)`.
+func admin(method: int, path: String, body: Variant = null, tag: String = "") -> void:
+	await _await_tree()
+	_admin_queue.append({"method": method, "path": path, "body": body, "tag": tag})
+	_pump_admin()
+
+func _pump_admin() -> void:
+	if _admin_in_flight or _admin_queue.is_empty():
+		return
+	var next: Dictionary = _admin_queue.pop_front()
+	_admin_tag = str(next["tag"])
+	var has_body: bool = next["body"] != null
+	var error := _admin_request.request(
+		http_base + "/api/admin" + str(next["path"]),
+		_headers(has_body),
+		int(next["method"]),
+		JSON.stringify(next["body"]) if has_body else ""
+	)
+	if error != OK:
+		admin_response.emit(_admin_tag, false, {"code": "UNREACHABLE", "message": "Could not reach the server."})
+		call_deferred("_pump_admin")
+		return
+	_admin_in_flight = true
+
+func _on_admin_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	_admin_in_flight = false
+	var tag := _admin_tag
+	if result != HTTPRequest.RESULT_SUCCESS:
+		admin_response.emit(tag, false, {"code": "UNREACHABLE", "message": "Could not reach the server."})
+	else:
+		var text := body.get_string_from_utf8()
+		var parsed: Variant = JSON.parse_string(text) if text != "" else {}
+		var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+		admin_response.emit(tag, response_code >= 200 and response_code < 300, payload)
+	call_deferred("_pump_admin")

@@ -228,6 +228,27 @@ export function createAdminRouter(admin: AdminService, logger: Logger): express.
     '/matches/:matchId',
     read((request) => admin.match(String(request.params.matchId))),
   );
+  router.post(
+    '/matches/:matchId/hand',
+    change('ADD_CARD_TO_HAND', (request) =>
+      admin.addCardToHand(
+        String(request.params.matchId),
+        body(request).playerId,
+        body(request).cardId,
+      ),
+    ),
+  );
+  router.post(
+    '/matches/:matchId/stats',
+    change('SET_STATS', (request) =>
+      admin.setStats(
+        String(request.params.matchId),
+        body(request).entityId,
+        body(request).attack,
+        body(request).health,
+      ),
+    ),
+  );
   router.delete(
     '/matches/:matchId',
     change('END_MATCH', (request) => admin.endMatch(String(request.params.matchId))),

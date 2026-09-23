@@ -392,3 +392,145 @@ describe('registry', () => {
     expect(expansionIds).toContain('MACHINES_OF_KONA');
   });
 });
+
+describe('editing a live match', () => {
+  async function debugMatch() {
+    const target = await register(`edit${Math.floor(Math.random() * 1e6)}`);
+    const created = await call('POST', '/matches', {
+      userId: target.id,
+      scenarioId: 'BANDIT_AMBUSH',
+      heroId: 'healer',
+    });
+    const matchId = (created.body.match as { matchId: string }).matchId;
+    return { target, matchId, engine: manager.get(matchId)! };
+  }
+
+  it("puts any card into either player's hand, and tells the players", async () => {
+    const { target, matchId, engine } = await debugMatch();
+    const heard: string[] = [];
+    manager.onChange((id, events) => {
+      if (id === matchId) heard.push(...events.map((event) => event.type));
+    });
+    const before = engine.state.sides[target.id]!.hand.length;
+
+    const mine = await call('POST', `/matches/${matchId}/hand`, {
+      playerId: target.id,
+      cardId: 'darek_voln',
+    });
+    expect(mine.status).toBe(200);
+    const hand = engine.state.sides[target.id]!.hand;
+    expect(hand).toHaveLength(before + 1);
+    expect(hand.at(-1)!.definitionId).toBe('darek_voln');
+    // The opponent's hand too — here, the AI's — and unreleased cards as well.
+    const theirs = await call('POST', `/matches/${matchId}/hand`, {
+      playerId: 'ai',
+      cardId: 'kona_forgeheart',
+    });
+    expect(theirs.status).toBe(200);
+    expect(engine.state.sides.ai!.hand.at(-1)!.definitionId).toBe('kona_forgeheart');
+
+    expect(heard).toEqual(['ADMIN_EDIT', 'ADMIN_EDIT']);
+    expect(engine.state.debugEdits).toBe(2);
+    // Edits are not actions: the log stays a record of play alone.
+    expect(engine.state.actionLog).toHaveLength(0);
+  });
+
+  it('refuses an unknown card, an unknown player and a full hand', async () => {
+    const { target, matchId, engine } = await debugMatch();
+    const unknown = await call('POST', `/matches/${matchId}/hand`, {
+      playerId: target.id,
+      cardId: 'nope',
+    });
+    expect(unknown.body.code).toBe('UNKNOWN_CARD');
+    const nobody = await call('POST', `/matches/${matchId}/hand`, {
+      playerId: 'nobody',
+      cardId: 'wolf',
+    });
+    expect(nobody.body.code).toBe('UNKNOWN_PLAYER');
+    while (engine.state.sides[target.id]!.hand.length < 10) {
+      await call('POST', `/matches/${matchId}/hand`, { playerId: target.id, cardId: 'wolf' });
+    }
+    const full = await call('POST', `/matches/${matchId}/hand`, {
+      playerId: target.id,
+      cardId: 'wolf',
+    });
+    expect(full.status).toBe(409);
+    expect(full.body.code).toBe('HAND_FULL');
+  });
+
+  it("sets a Creature's Attack and Health, and one set to 0 dies", async () => {
+    const { matchId, engine } = await debugMatch();
+    // The ambush starts with a Mercenary on the AI's board.
+    const creatureId = Object.keys(engine.state.sides.ai!.creatures)[0]!;
+    const set = await call('POST', `/matches/${matchId}/stats`, {
+      entityId: creatureId,
+      attack: 9,
+      health: 12,
+    });
+    expect(set.status).toBe(200);
+    const creature = engine.state.sides.ai!.creatures[creatureId]!;
+    expect(creature).toMatchObject({ currentAttack: 9, currentHealth: 12, maxHealth: 12 });
+
+    const killed = await call('POST', `/matches/${matchId}/stats`, {
+      entityId: creatureId,
+      health: 0,
+    });
+    const types = (killed.body.events as Array<{ type: string }>).map((event) => event.type);
+    expect(types).toEqual(['ADMIN_EDIT', 'CREATURE_DIED']);
+    expect(engine.state.sides.ai!.creatures[creatureId]).toBeUndefined();
+  });
+
+  it("sets a Hero's Health, and its Attack through its Weapon", async () => {
+    const { target, matchId, engine } = await debugMatch();
+    const hero = `${target.id}:hero`;
+    await call('POST', `/matches/${matchId}/stats`, { entityId: hero, health: 45 });
+    expect(engine.state.sides[target.id]!.hero).toMatchObject({ currentHealth: 45, maxHealth: 45 });
+
+    // The player has no Weapon; the ambushing AI starts with one.
+    const unarmed = await call('POST', `/matches/${matchId}/stats`, { entityId: hero, attack: 3 });
+    expect(unarmed.body.code).toBe('NO_WEAPON');
+    await call('POST', `/matches/${matchId}/stats`, { entityId: 'ai:hero', attack: 7 });
+    expect(engine.state.sides.ai!.hero.equippedWeapon!.currentAttack).toBe(7);
+
+    // A Hero set to 0 loses the match.
+    const lethal = await call('POST', `/matches/${matchId}/stats`, {
+      entityId: 'ai:hero',
+      health: 0,
+    });
+    expect((lethal.body.events as Array<{ type: string }>).map((event) => event.type)).toContain(
+      'MATCH_ENDED',
+    );
+    expect(engine.state.winnerId).toBe(target.id);
+    const afterwards = await call('POST', `/matches/${matchId}/stats`, {
+      entityId: hero,
+      health: 1,
+    });
+    expect(afterwards.body.code).toBe('MATCH_FINISHED');
+  });
+
+  it('refuses a negative stat or nothing to set', async () => {
+    const { target, matchId } = await debugMatch();
+    const hero = `${target.id}:hero`;
+    expect(
+      (await call('POST', `/matches/${matchId}/stats`, { entityId: hero, health: -1 })).body.code,
+    ).toBe('INVALID_STAT');
+    expect((await call('POST', `/matches/${matchId}/stats`, { entityId: hero })).body.code).toBe(
+      'INVALID_STAT',
+    );
+    expect(
+      (await call('POST', `/matches/${matchId}/stats`, { entityId: 'nobody', health: 1 })).body
+        .code,
+    ).toBe('UNKNOWN_ENTITY');
+  });
+
+  it('is not reachable by a player, even in their own match', async () => {
+    const { matchId } = await debugMatch();
+    const result = await call(
+      'POST',
+      `/matches/${matchId}/hand`,
+      { playerId: player.id, cardId: 'wolf' },
+      player,
+    );
+    expect(result.status).toBe(404);
+  });
+});

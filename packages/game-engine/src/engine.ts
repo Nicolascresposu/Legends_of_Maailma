@@ -5,6 +5,7 @@ import type {
   CreatureDefinition,
   CreatureInstance,
   DamageContext,
+  DebugEdit,
   Effect,
   EffectTarget,
   EntityId,
@@ -107,6 +108,110 @@ export class GameEngine {
       }
       throw error;
     }
+  }
+
+  /**
+   * Applies an administrator's edit to the live match, outside the rules.
+   *
+   * Resolved the way an action is — the change, then everything it sets off:
+   * a Creature set to 0 Health dies and its Last Breath fires, a Hero set to 0
+   * loses the match. What sets it apart is that it is never logged as an
+   * action, so an edited match can no longer be replayed from its log;
+   * `debugEdits` counts the edits so that is visible on the state itself.
+   */
+  applyDebugEdit(edit: DebugEdit): ActionResult {
+    this.currentEvents = [];
+    this.queue = [];
+    this.lethalContext.clear();
+    try {
+      rule(this.state.phase === 'PLAYING', 'MATCH_FINISHED', 'The match is over');
+      if (edit.type === 'ADD_CARD_TO_HAND') this.debugAddCard(edit.playerId, edit.definitionId);
+      else if (edit.type === 'SET_STATS') this.debugSetStats(edit);
+      else throw new GameRuleError('UNKNOWN_EDIT', 'Unknown edit');
+      this.checkDeaths();
+      this.checkMatchEnd();
+      this.drainQueue();
+      this.state.debugEdits = (this.state.debugEdits ?? 0) + 1;
+      this.state.rngState = this.rng.state;
+      return { ok: true, events: this.currentEvents };
+    } catch (error) {
+      if (error instanceof GameRuleError) {
+        return { ok: false, events: [], error: { code: error.code, message: error.message } };
+      }
+      throw error;
+    }
+  }
+
+  private debugAddCard(playerId: PlayerId, definitionId: string): void {
+    const side = this.state.sides[playerId];
+    rule(Boolean(side), 'UNKNOWN_PLAYER', 'No such player in this match');
+    let known = true;
+    try {
+      getCardDefinition(definitionId);
+    } catch {
+      known = false;
+    }
+    rule(known, 'UNKNOWN_CARD', `Unknown card: ${definitionId}`);
+    rule(side!.hand.length < 10, 'HAND_FULL', 'That hand already holds 10 cards');
+    const card = { instanceId: this.nextId('card'), definitionId };
+    side!.hand.push(card);
+    this.enqueueEvent({
+      type: 'ADMIN_EDIT',
+      actorId: playerId,
+      sourceId: card.instanceId,
+      cardDefinitionId: definitionId,
+      reason: 'ADD_CARD_TO_HAND',
+    });
+  }
+
+  /**
+   * Sets a Hero's or Creature's Attack and Health outright.
+   *
+   * Health above the current maximum raises the maximum with it, so the value
+   * set is the value shown, and a later heal does not snap it back. A Hero
+   * attacks only through a Weapon, so a Hero's Attack is its Weapon's.
+   */
+  private debugSetStats(edit: Extract<DebugEdit, { type: 'SET_STATS' }>): void {
+    const stat = (value: number | undefined, name: string) => {
+      if (value === undefined) return undefined;
+      rule(Number.isInteger(value) && value >= 0, 'INVALID_STAT', `${name} must be 0 or more`);
+      return value;
+    };
+    const attack = stat(edit.attack, 'Attack');
+    const health = stat(edit.health, 'Health');
+    rule(attack !== undefined || health !== undefined, 'INVALID_STAT', 'Nothing to set');
+
+    const heroOwner = this.state.playerOrder.find((id) => heroEntityId(id) === edit.entityId);
+    if (heroOwner) {
+      const hero = this.side(heroOwner).hero;
+      if (attack !== undefined) {
+        rule(
+          hero.equippedWeapon !== null,
+          'NO_WEAPON',
+          'A Hero attacks only with a Weapon; equip one to set its Attack',
+        );
+        hero.equippedWeapon!.currentAttack = attack;
+      }
+      if (health !== undefined) {
+        hero.currentHealth = health;
+        hero.maxHealth = Math.max(hero.maxHealth, health);
+      }
+    } else {
+      const creature = this.findCreature(edit.entityId);
+      rule(Boolean(creature), 'UNKNOWN_ENTITY', 'No Hero or Creature with that id');
+      if (attack !== undefined) creature!.currentAttack = attack;
+      if (health !== undefined) {
+        creature!.currentHealth = health;
+        creature!.maxHealth = Math.max(creature!.maxHealth, health);
+      }
+    }
+    this.enqueueEvent({
+      type: 'ADMIN_EDIT',
+      actorId: this.ownerOf(edit.entityId)!,
+      targetId: edit.entityId,
+      ...(health !== undefined ? { amount: health } : {}),
+      reason: 'SET_STATS',
+    });
   }
 
   getLegalActions(playerId: PlayerId): GameAction[] {

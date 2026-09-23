@@ -37,6 +37,8 @@ func _init() -> void:
 		if main.accounts.is_signed_in():
 			break
 	_check("registered and signed in", main.accounts.is_signed_in())
+	_check("a player is not offered the admin UI",
+		not main.admin_toggle.visible and not screen._admin_button.visible)
 	if not main.accounts.is_signed_in():
 		print("  auth status: ", screen._auth_status.text)
 		_finish()

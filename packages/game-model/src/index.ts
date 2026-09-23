@@ -415,7 +415,25 @@ export interface MatchState {
   nextInstanceId: number;
   nextEventSequence: number;
   actionLog: GameAction[];
+  /**
+   * How many admin edits this match has had. Absent until the first. An edited
+   * match cannot be replayed from its action log — edits are not actions — so
+   * this marks it as a test match rather than a record of play.
+   */
+  debugEdits?: number;
 }
+
+/**
+ * A change an administrator makes to a live match, outside the rules.
+ *
+ * For testing only: nothing a player sends can be one. Edits are applied by
+ * `GameEngine.applyDebugEdit`, never logged as actions, and their knock-on
+ * effects — a Creature set to 0 Health dies, its Last Breath fires — resolve
+ * as they would in play.
+ */
+export type DebugEdit =
+  | { type: 'ADD_CARD_TO_HAND'; playerId: PlayerId; definitionId: string }
+  | { type: 'SET_STATS'; entityId: EntityId; attack?: number; health?: number };
 
 export type TargetMode =
   | 'NONE'
@@ -516,6 +534,7 @@ export type GameEventType =
   | 'STATUS_APPLIED'
   | 'STATUS_REMOVED'
   | 'TAIKA_CHANGED'
+  | 'ADMIN_EDIT'
   | 'MATCH_ENDED';
 
 /**

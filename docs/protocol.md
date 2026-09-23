@@ -96,7 +96,10 @@ and one who needs a deck is told `DECK_REQUIRED`. Challenges work the same way â
 a `deckId` when sending and the recipient when accepting, with no fallback deck.
 
 `/api/admin` is the admin debug API, listed in the README. It is reachable only by an account
-with `isAdmin` set; everyone else gets a 404, whatever the route.
+with `isAdmin` set; everyone else gets a 404, whatever the route. An admin edit to a live match
+reaches its players over the match socket like an action's result would â€” `GAME_EVENTS` carrying
+an `ADMIN_EDIT` event (`reason` is `ADD_CARD_TO_HAND` or `SET_STATS`), then `MATCH_STATE` and
+`LEGAL_ACTIONS`. Edited matches carry `debugEdits` on their state and cannot be replayed.
 
 Every economy mutation accepts an optional client-chosen `requestId`. A retry after a lost response
 replays the original outcome instead of executing a second time.

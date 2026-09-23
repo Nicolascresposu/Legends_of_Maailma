@@ -5,7 +5,7 @@ import {
   starterDeckFor,
 } from '@maailma/card-definitions';
 import { BasicAIController, GameEngine, validateDeck } from '@maailma/game-engine';
-import type { GameAction, GameEvent, MatchSetup } from '@maailma/game-model';
+import type { DebugEdit, GameAction, GameEvent, MatchSetup } from '@maailma/game-model';
 import type { CreateMatchPlayer, CreateMatchRequest } from '@maailma/protocol';
 import { InMemoryMatchRepository, type MatchRepository } from './match-repository.js';
 
@@ -26,10 +26,14 @@ export const OPEN_SEAT_ID = 'open-seat';
 /** The seat an AI opponent plays from in a player-versus-environment match. */
 export const AI_PLAYER_ID = 'ai';
 
+/** Told when a match changes other than through a player's own action. */
+export type MatchChangeListener = (matchId: string, events: GameEvent[]) => void;
+
 export class MatchManager {
   private readonly ai = new BasicAIController();
   /** Matches still waiting for an opponent, by match id. */
   private readonly openSeats = new Set<string>();
+  private readonly listeners: MatchChangeListener[] = [];
 
   constructor(private readonly matches: MatchRepository = new InMemoryMatchRepository()) {}
 
@@ -100,6 +104,30 @@ export class MatchManager {
 
   get(matchId: string): GameEngine | undefined {
     return this.matches.get(matchId);
+  }
+
+  /**
+   * Registers for changes nobody in the match asked for — an admin edit — so
+   * the transport can tell connected players, who would otherwise never learn
+   * of them.
+   */
+  onChange(listener: MatchChangeListener): void {
+    this.listeners.push(listener);
+  }
+
+  /**
+   * Applies an admin edit to a live match and tells whoever is watching.
+   * Throws on a refusal, with the engine's code, so callers can relay it.
+   */
+  debugEdit(matchId: string, edit: DebugEdit): GameEvent[] {
+    const engine = this.matches.get(matchId);
+    if (!engine) throw new MatchEditError('MATCH_NOT_FOUND', 'Match not found', 404);
+    const result = engine.applyDebugEdit(edit);
+    if (!result.ok) {
+      throw new MatchEditError(result.error!.code, result.error!.message);
+    }
+    for (const listener of this.listeners) listener(matchId, result.events);
+    return result.events;
   }
 
   /** Every live match. For operator tooling; players reach matches by id. */
@@ -204,5 +232,17 @@ export class MatchManager {
       events.push(...aiResult.events);
     }
     return { ok: true, events };
+  }
+}
+
+/** An admin edit the engine refused, with its code. */
+export class MatchEditError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status = 409,
+  ) {
+    super(message);
+    this.name = 'MatchEditError';
   }
 }

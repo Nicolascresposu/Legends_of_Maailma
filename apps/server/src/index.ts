@@ -46,6 +46,29 @@ const server = createServer(
 );
 const sockets = new Map<string, Set<WebSocket>>();
 const sessions = new Map<WebSocket, { matchId: string; playerId: string; log: Logger }>();
+
+// An admin edit changes a match without anyone in it acting, so nothing else
+// would tell the players: push the result exactly as an action's would be.
+manager.onChange((matchId, events) => {
+  const engine = manager.get(matchId);
+  if (!engine) return;
+  broadcast(matchId, { type: 'GAME_EVENTS', events });
+  broadcast(matchId, { type: 'MATCH_STATE', state: engine.state });
+  if (engine.state.phase === 'FINISHED') {
+    broadcast(matchId, {
+      type: 'MATCH_ENDED',
+      ...(engine.state.winnerId ? { winnerId: engine.state.winnerId } : {}),
+    });
+    return;
+  }
+  for (const playerId of engine.state.playerOrder) {
+    sendToPlayer(matchId, playerId, {
+      type: 'LEGAL_ACTIONS',
+      playerId,
+      actions: manager.legalActions(matchId, playerId),
+    });
+  }
+});
 // Two socket endpoints share one HTTP server, so neither may attach its own
 // `upgrade` listener: whichever ran first would destroy sockets meant for the
 // other. Both are created detached and fed by the single router below.

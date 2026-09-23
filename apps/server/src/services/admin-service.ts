@@ -10,7 +10,8 @@ import {
   starterDeckFor,
 } from '@maailma/card-definitions';
 import { cardCopyLimit } from '@maailma/game-engine';
-import { AI_PLAYER_ID, type MatchManager } from '../match-manager.js';
+import { AI_PLAYER_ID, MatchEditError, type MatchManager } from '../match-manager.js';
+import type { DebugEdit } from '@maailma/game-model';
 import { AccountError, type AccountService } from './account-service.js';
 import type { CollectionService } from './collection-service.js';
 import type { DeckService } from './deck-service.js';
@@ -397,6 +398,44 @@ export class AdminService {
         ]),
       ),
     };
+  }
+
+  /** Puts any card into either player's hand. */
+  addCardToHand(matchId: string, playerId: unknown, cardId: unknown) {
+    return this.edit(matchId, {
+      type: 'ADD_CARD_TO_HAND',
+      playerId: String(playerId ?? ''),
+      definitionId: String(cardId ?? ''),
+    });
+  }
+
+  /**
+   * Sets a Hero's or Creature's Attack and/or Health. `entityId` is a Creature
+   * instance id or `<playerId>:hero`; a Hero's Attack is its Weapon's.
+   */
+  setStats(matchId: string, entityId: unknown, attack: unknown, health: unknown) {
+    const number = (value: unknown) =>
+      value === undefined || value === null || value === '' ? undefined : Number(value);
+    const edit: DebugEdit = { type: 'SET_STATS', entityId: String(entityId ?? '') };
+    const a = number(attack);
+    const h = number(health);
+    if (a !== undefined) edit.attack = a;
+    if (h !== undefined) edit.health = h;
+    return this.edit(matchId, edit);
+  }
+
+  /** Applies an edit; the new state has already been pushed to the players. */
+  private edit(matchId: string, edit: DebugEdit) {
+    try {
+      const events = this.services.manager.debugEdit(matchId, edit);
+      const engine = this.requireMatch(matchId);
+      return { events, summary: matchSummary(engine), debugEdits: engine.state.debugEdits ?? 0 };
+    } catch (error) {
+      if (error instanceof MatchEditError) {
+        throw new AccountError(error.code, error.message, error.status);
+      }
+      throw error;
+    }
   }
 
   endMatch(matchId: string): void {

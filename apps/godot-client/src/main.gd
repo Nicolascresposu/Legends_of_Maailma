@@ -44,6 +44,18 @@ var _pending_entry: Dictionary = {}
 ## say it is waiting rather than show a nameless opponent.
 const OPEN_SEAT_ID := "open-seat"
 
+## The admin UI: a panel for accounts and matches, and an edit bar in the match
+## view. Offered only to admins, and only while switched on — the toggle lets
+## an admin see the client exactly as a player does.
+const AdminScreen := preload("res://src/admin_screen.gd")
+const AdminMatchTools := preload("res://src/admin_match_tools.gd")
+const ADMIN_UI_PATH := "user://admin_ui.cfg"
+var admin_screen: Control
+var admin_toggle: Button
+var admin_bar: PanelContainer
+var admin_match_tools: Node
+var admin_ui_enabled := true
+
 var state: Dictionary = {}
 var legal_actions: Array = []
 var player_id := "player-a"
@@ -127,6 +139,28 @@ func _ready() -> void:
 	add_child(trade_screen)
 	trade_screen.setup(accounts, library)
 	trade_screen.closed.connect(_show_collection_view)
+	collection_screen.admin_requested.connect(_show_admin_view)
+
+	admin_screen = AdminScreen.new()
+	admin_screen.visible = false
+	admin_screen.setup(accounts, library)
+	add_child(admin_screen)
+	admin_screen.closed.connect(_show_collection_view)
+	admin_screen.play_requested.connect(_play_admin_match)
+
+	# A corner switch between the admin UI and the one every player sees.
+	admin_ui_enabled = _load_admin_ui_enabled()
+	admin_toggle = Button.new()
+	admin_toggle.toggle_mode = true
+	admin_toggle.tooltip_text = "Switch between the admin UI and the normal player UI."
+	admin_toggle.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	admin_toggle.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	admin_toggle.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	admin_toggle.position -= Vector2(10, 10)
+	admin_toggle.toggled.connect(_on_admin_toggled)
+	add_child(admin_toggle)
+	_apply_admin_ui()
+
 	# Added last, so it draws over the board it asks about.
 	deck_picker = DeckPicker.new()
 	add_child(deck_picker)
@@ -168,6 +202,21 @@ func _build_interface() -> void:
 
 	root.add_child(_build_connection_bar())
 	root.add_child(_build_status_bar())
+
+	# Admin edits for the match being played. Hidden unless the admin UI is on.
+	admin_bar = PanelContainer.new()
+	var admin_style := StyleBoxFlat.new()
+	admin_style.bg_color = Color(0.20, 0.16, 0.08)
+	admin_style.border_color = Color(0.85, 0.74, 0.44)
+	admin_style.set_border_width_all(1)
+	admin_style.set_corner_radius_all(4)
+	admin_style.set_content_margin_all(6)
+	admin_bar.add_theme_stylebox_override("panel", admin_style)
+	admin_bar.visible = false
+	root.add_child(admin_bar)
+	admin_match_tools = AdminMatchTools.new()
+	admin_match_tools.setup(accounts, library)
+	admin_bar.add_child(admin_match_tools)
 
 	var game_row := HBoxContainer.new()
 	game_row.add_theme_constant_override("separation", 12)
@@ -340,18 +389,73 @@ func _on_server_changed(base: String) -> void:
 func _show_collection_view() -> void:
 	if deck_picker != null:
 		deck_picker.close()
+	if admin_screen != null:
+		admin_screen.visible = false
 	collection_screen.visible = true
 	trade_screen.visible = false
 	game_root.visible = false
 	_cancel_drag()
 
 func _show_trade_view() -> void:
+	admin_screen.visible = false
 	collection_screen.visible = false
 	trade_screen.visible = true
 	game_root.visible = false
 	_cancel_drag()
 
+## The admin panel. Only reachable with the admin UI on, as an admin.
+func _show_admin_view() -> void:
+	if not (accounts.is_admin() and admin_ui_enabled):
+		return
+	deck_picker.close()
+	collection_screen.visible = false
+	trade_screen.visible = false
+	game_root.visible = false
+	admin_screen.visible = true
+	admin_screen.opened()
+	_cancel_drag()
+
+## Opens a match the admin panel started or picked, as the signed-in player.
+func _play_admin_match(match_id: String) -> void:
+	_show_match_view()
+	match_input.text = match_id
+	player_id = str(accounts.user.get("id", player_id))
+	client.join(match_id, player_id, "", false)
+
+func _on_admin_toggled(enabled: bool) -> void:
+	admin_ui_enabled = enabled
+	var config := ConfigFile.new()
+	config.set_value("admin", "ui_enabled", enabled)
+	config.save(ADMIN_UI_PATH)
+	_apply_admin_ui()
+
+func _load_admin_ui_enabled() -> bool:
+	var config := ConfigFile.new()
+	if config.load(ADMIN_UI_PATH) != OK:
+		return true
+	return bool(config.get_value("admin", "ui_enabled", true))
+
+## Shows or hides every piece of the admin UI to match who is signed in and
+## whether the toggle is on. Safe to call at any time.
+func _apply_admin_ui() -> void:
+	if admin_toggle == null:
+		return
+	var is_admin := accounts.is_admin()
+	var on := is_admin and admin_ui_enabled
+	admin_toggle.visible = is_admin
+	admin_toggle.set_pressed_no_signal(admin_ui_enabled)
+	admin_toggle.text = "Admin UI: on" if admin_ui_enabled else "Admin UI: off"
+	collection_screen.set_admin_available(on)
+	var in_match := not state.is_empty() and client.match_id != ""
+	admin_bar.visible = on and in_match
+	if admin_bar.visible:
+		admin_match_tools.show_match(client.match_id, state, player_id)
+	# Switching off, or signing in as someone who is not an admin, closes the panel.
+	if admin_screen.visible and not on:
+		_show_collection_view()
+
 func _show_match_view() -> void:
+	admin_screen.visible = false
 	collection_screen.visible = false
 	trade_screen.visible = false
 	game_root.visible = true
@@ -365,6 +469,7 @@ func _on_signed_in(who: Dictionary) -> void:
 	player_id = str(who.get("id", player_id))
 	player_input.text = str(who.get("displayName", player_id))
 	player_input.editable = false
+	_apply_admin_ui()
 	_set_status("Signed in as %s." % str(who.get("displayName", "")))
 
 func _on_account_signed_out() -> void:
@@ -373,6 +478,7 @@ func _on_account_signed_out() -> void:
 		_show_collection_view()
 	player_input.editable = true
 	_pending_entry = {}
+	_apply_admin_ui()
 	if deck_picker != null:
 		deck_picker.close()
 
@@ -519,6 +625,7 @@ func _on_match_state(new_state: Dictionary) -> void:
 	state = new_state
 	_clear_selection()
 	_render_state()
+	_apply_admin_ui()
 
 func _on_legal_actions(target_player: String, actions: Array) -> void:
 	if target_player != player_id:

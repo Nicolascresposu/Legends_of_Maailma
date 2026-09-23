@@ -159,6 +159,9 @@ Client scripts:
 - `src/pvp_test.gd` — two clients: one opens a PvP match, the other takes the open seat with a
   deck of its own, and both end up in the same live match.
 - `src/test_session.gd` — test support: a fresh account with a ready deck, for tests that play.
+- `src/admin_ui_test.gd` — signs in as an admin, flips the admin UI switch, works on an account in
+  the panel, and edits a debug match from the match view. Signs in as the seeded admin unless given
+  `--admin-email=` and `--admin-password=`; `--screenshot-dir=` saves what it saw.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 - `src/config_test.gd` — checks address parsing and override precedence.
 
@@ -173,6 +176,7 @@ godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/trade_test.gd
 godot --headless --path apps/godot-client --script src/pvp_test.gd
+godot --path apps/godot-client --script src/admin_ui_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
 godot --headless --path apps/godot-client --script src/config_test.gd
 ```
@@ -384,6 +388,8 @@ POST   /api/admin/trades/:tradeId/cancel
 GET    /api/admin/matches                          every live match
 POST   /api/admin/matches                          { userId, scenarioId, heroId?, cardIds? }
 GET    /api/admin/matches/:id                      state, setup, and each side's legal actions
+POST   /api/admin/matches/:id/hand                 { playerId, cardId } — any card into any hand
+POST   /api/admin/matches/:id/stats                { entityId, attack?, health? } — a Hero or Creature
 DELETE /api/admin/matches/:id                      end it
 ```
 
@@ -400,6 +406,30 @@ Two rules hold for everything it does:
 
 A debug match is played under the account's own id, so a client signed in as that player (a
 session from `POST /users/:id/sessions` does it) can join it by id.
+
+Live matches can be edited: any card, unreleased included, into either player's hand, and any
+Hero's or Creature's Attack and Health set outright. A Hero attacks only with a Weapon, so a Hero's
+Attack is its Weapon's. An edit resolves like play would — a Creature set to 0 Health dies and its
+Last Breath fires, a Hero set to 0 loses — and is pushed to everyone in the match at once, with an
+`ADMIN_EDIT` event the match log shows as `[Admin] …`. Edits are not actions and never enter the
+action log, so an edited match cannot be replayed; `debugEdits` on the match state counts them.
+
+### Admin UI
+
+An admin sees an **Admin UI** switch in the bottom-right corner of the client. Off, the client is
+exactly what a player sees. On, it adds:
+
+- an **Admin** button on the collection screen, opening a panel with two tabs. **Accounts**
+  searches players and works on one: Fragments, card counts, a playset of everything, a reset to
+  starter cards, starter decks, packs, friendships, admin rights, signing in as them or out
+  everywhere, a debug match, and the recent ledger. **Matches** lists live matches, shows one in
+  full, ends it, and edits it.
+- a gold edit bar above the board in the match view, for the match being played: add a card to
+  either hand, or set a Hero's or Creature's Attack and Health.
+
+The switch is remembered between runs. **Sign in as** makes the client that player, admin rights
+and all — or none — so the panel disappears for a player who is not an admin; sign out to be
+yourself again.
 
 ## Logging
 
@@ -506,7 +536,7 @@ replays the original outcome instead of spending twice.
 
 Accounts, decks, collections, Fragments and trades are PostgreSQL-backed. Active matches still use
 `MatchRepository`, implemented in memory so a Redis-backed store can replace it later. Expansion
-policies and accounts are reachable through the admin API, which has no panel of its own yet. Progression, complex boss
+policies and accounts are managed through the admin API and the client's admin panel. Progression, complex boss
 scripting, dynamic battlefield resizing, Locations, and production matchmaking remain outside this
 milestone, as do an auction house, real-money purchases and Fragment transfers between players.
 

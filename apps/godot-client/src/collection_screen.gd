@@ -10,6 +10,8 @@ class_name CollectionScreen
 signal play_requested()
 ## The player wants to trade cards with a friend.
 signal trade_requested()
+## An admin wants the admin panel.
+signal admin_requested()
 signal closed()
 ## The player pointed the client at a different server.
 signal server_changed(http_base: String)
@@ -63,6 +65,7 @@ var _fragments_label: Label
 var _format_picker: OptionButton
 var _pack_row: HBoxContainer
 var _economy_status: Label
+var _admin_button: Button
 
 func setup(account_client: AccountClient, card_library: CardLibrary) -> void:
 	accounts = account_client
@@ -208,6 +211,12 @@ func _build_main() -> HBoxContainer:
 	trade.tooltip_text = "Trade cards with your friends."
 	trade.pressed.connect(func() -> void: trade_requested.emit())
 	header.add_child(trade)
+	_admin_button = Button.new()
+	_admin_button.text = "Admin"
+	_admin_button.tooltip_text = "Accounts and live matches, for testing."
+	_admin_button.visible = false
+	_admin_button.pressed.connect(func() -> void: admin_requested.emit())
+	header.add_child(_admin_button)
 	var sign_out := Button.new()
 	sign_out.text = "Sign out"
 	sign_out.pressed.connect(func() -> void: accounts.sign_out())
@@ -918,3 +927,9 @@ func _on_pack_opened(pack: Dictionary) -> void:
 	]
 	_economy_status.remove_theme_color_override("font_color")
 	accounts.fetch_collection()
+
+## Offers the admin panel or hides it; the main scene decides, from who is
+## signed in and whether the admin UI is switched on.
+func set_admin_available(available: bool) -> void:
+	if _admin_button != null:
+		_admin_button.visible = available

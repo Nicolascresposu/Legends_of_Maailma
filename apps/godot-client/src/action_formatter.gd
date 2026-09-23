@@ -198,6 +198,14 @@ static func event_line(event: Dictionary, state: Dictionary, library: CardLibrar
 		"HERO_ATTACK_RESOLVED":
 			# Silent: see SILENT_EVENTS.
 			return ""
+		"ADMIN_EDIT":
+			# Said plainly, so a tester reading the log knows what was not play.
+			if str(event.get("reason", "")) == "ADD_CARD_TO_HAND":
+				return "[Admin] %s is put into %s's hand." % [
+					library.card_name(str(event.get("cardDefinitionId", ""))),
+					str(event.get("actorId", "")),
+				]
+			return "[Admin] %s's stats are set." % target
 		"STATUS_APPLIED":
 			return "%s gains a status." % target
 		"STATUS_REMOVED":
