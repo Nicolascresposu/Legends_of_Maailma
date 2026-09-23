@@ -6,7 +6,7 @@ import {
 } from '@maailma/card-definitions';
 import { BasicAIController, GameEngine, validateDeck } from '@maailma/game-engine';
 import type { GameAction, GameEvent, MatchSetup } from '@maailma/game-model';
-import type { CreateMatchRequest } from '@maailma/protocol';
+import type { CreateMatchPlayer, CreateMatchRequest } from '@maailma/protocol';
 import { InMemoryMatchRepository, type MatchRepository } from './match-repository.js';
 
 export interface ManagedActionResult {
@@ -15,18 +15,102 @@ export interface ManagedActionResult {
   error?: { code: string; message: string };
 }
 
+/**
+ * The player id that holds a PvP match's second seat until someone takes it.
+ *
+ * A placeholder rather than an absent side, because the engine is built with
+ * both sides present; it is never joinable and never gets to act.
+ */
+export const OPEN_SEAT_ID = 'open-seat';
+
 export class MatchManager {
   private readonly ai = new BasicAIController();
+  /** Matches still waiting for an opponent, by match id. */
+  private readonly openSeats = new Set<string>();
 
   constructor(private readonly matches: MatchRepository = new InMemoryMatchRepository()) {}
 
   create(request: CreateMatchRequest): GameEngine {
-    const scenario = getScenarioDefinition(request.scenarioId);
+    const engine = this.build(request.scenarioId, request.seed ?? randomUUID(), request.players);
+    this.matches.save(engine);
+    return engine;
+  }
+
+  /**
+   * Creates a PvP match whose second seat is left open for whoever takes it.
+   *
+   * The creator brings their own deck; the opponent brings theirs when they
+   * take the seat, through `claimSeat`. Until then nobody may act, so the
+   * creator cannot get a turn in before an opponent has even arrived.
+   */
+  createWithOpenSeat(request: {
+    scenarioId: string;
+    seed?: number | string;
+    creator: CreateMatchPlayer;
+  }): GameEngine {
+    const engine = this.create({
+      scenarioId: request.scenarioId,
+      ...(request.seed === undefined ? {} : { seed: request.seed }),
+      players: [request.creator, { playerId: OPEN_SEAT_ID, controller: 'HUMAN' }],
+    });
+    this.openSeats.add(engine.state.matchId);
+    return engine;
+  }
+
+  /** Whether a match is still waiting for someone to take its open seat. */
+  hasOpenSeat(matchId: string): boolean {
+    return this.openSeats.has(matchId);
+  }
+
+  /**
+   * Seats a player, with their own deck, in a match's open seat.
+   *
+   * The match is rebuilt from its setup rather than patched: the open seat's
+   * placeholder deck was already shuffled and dealt, and a fresh engine from
+   * the same seed is the one way to deal the real deck as fairly as the first.
+   * Nothing has happened yet — no one could act while the seat was open — so
+   * there is nothing a rebuild could lose.
+   */
+  claimSeat(matchId: string, player: CreateMatchPlayer): GameEngine {
+    const engine = this.matches.get(matchId);
+    if (!engine) throw new Error('Match not found');
+    if (!this.openSeats.has(matchId)) throw new Error('That match has no open seat');
+    if (engine.state.sides[player.playerId]) throw new Error('You are already in this match');
+    const players = engine.setup.players.map((existing) =>
+      existing.playerId === OPEN_SEAT_ID ? player : existing,
+    ) as unknown as CreateMatchRequest['players'];
+    const rebuilt = this.build(engine.setup.scenario.id, engine.setup.seed, players, matchId);
+    this.matches.save(rebuilt);
+    this.openSeats.delete(matchId);
+    return rebuilt;
+  }
+
+  /**
+   * What a player may do now: nothing at all while the match waits for an
+   * opponent, since the match has not really begun.
+   */
+  legalActions(matchId: string, playerId: string): GameAction[] {
+    const engine = this.matches.get(matchId);
+    if (!engine || this.openSeats.has(matchId)) return [];
+    return engine.getLegalActions(playerId);
+  }
+
+  get(matchId: string): GameEngine | undefined {
+    return this.matches.get(matchId);
+  }
+
+  private build(
+    scenarioId: string,
+    seed: number | string,
+    requested: CreateMatchRequest['players'],
+    matchId: string = randomUUID(),
+  ): GameEngine {
+    const scenario = getScenarioDefinition(scenarioId);
     const sides = [scenario.sideA, scenario.sideB] as const;
     // Each player's hero is the one they chose, or else the scenario's for
     // their side. A deck is always judged as that hero's class, and a player
     // who brought no deck plays the starter deck of that class.
-    const players = request.players.map((player, index) => {
+    const players = requested.map((player, index) => {
       const heroId = player.heroDefinitionId ?? sides[index]!.heroDefinitionId;
       const classId = getHeroDefinition(heroId).classId;
       const deck = player.deck ? [...player.deck] : starterDeckFor(heroId);
@@ -34,20 +118,13 @@ export class MatchManager {
       if (!validation.valid) throw new Error(validation.errors.join('; '));
       return { ...structuredClone(player), deck };
     }) as unknown as MatchSetup['players'];
-    const matchId = randomUUID();
     const setup: MatchSetup = {
       matchId,
       scenario: structuredClone(scenario),
-      seed: request.seed ?? randomUUID(),
+      seed,
       players,
     };
-    const engine = new GameEngine(setup);
-    this.matches.save(engine);
-    return engine;
-  }
-
-  get(matchId: string): GameEngine | undefined {
-    return this.matches.get(matchId);
+    return new GameEngine(setup);
   }
 
   selectHero(matchId: string, playerId: string, heroDefinitionId: string): void {
@@ -82,6 +159,15 @@ export class MatchManager {
         ok: false,
         events: [],
         error: { code: 'MATCH_NOT_FOUND', message: 'Match not found' },
+      };
+    if (this.openSeats.has(matchId))
+      return {
+        ok: false,
+        events: [],
+        error: {
+          code: 'WAITING_FOR_OPPONENT',
+          message: 'The match begins once an opponent takes the open seat',
+        },
       };
     const result = engine.dispatch(action);
     if (!result.ok) return result;

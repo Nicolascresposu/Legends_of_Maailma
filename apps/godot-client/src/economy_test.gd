@@ -16,6 +16,9 @@ var failures: Array[String] = []
 
 func _init() -> void:
 	await process_frame
+	# A brand-new account every run: a session saved by an earlier run would
+	# otherwise be resumed, and it is not new — it may already own decks.
+	SessionStore.clear()
 	main = (load("res://main.tscn") as PackedScene).instantiate()
 	get_root().add_child(main)
 	await process_frame

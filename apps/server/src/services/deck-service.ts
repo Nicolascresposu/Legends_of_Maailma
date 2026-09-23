@@ -147,6 +147,25 @@ export class DeckService {
     return deck;
   }
 
+  /**
+   * The deck a player chose to enter a match with, provided it may be played.
+   *
+   * Every way into a match — starting one, taking an open seat, sending or
+   * accepting a challenge — goes through here, so "you need a ready deck to
+   * play" is one rule rather than several that could drift. There is no
+   * fallback: a player without a playable deck does not play.
+   */
+  async requirePlayable(userId: string, deckId: unknown): Promise<Deck> {
+    if (typeof deckId !== 'string' || deckId.trim() === '') {
+      throw new AccountError('DECK_REQUIRED', 'Choose one of your decks to play with');
+    }
+    const deck = await this.get(userId, deckId);
+    if (this.collections) {
+      await this.collections.assertPlayable(userId, deck.cardIds, deck.format, deck.heroId);
+    }
+    return deck;
+  }
+
   async activeDeck(userId: string): Promise<Deck | undefined> {
     const deck = await this.prisma.deck.findFirst({ where: { userId, isActive: true } });
     return deck ?? undefined;

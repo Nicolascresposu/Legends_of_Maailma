@@ -8,17 +8,29 @@ extends SceneTree
 ##
 ## Needs a real (non-headless) run: hit-testing depends on laid-out rects.
 
+const TestSession := preload("res://src/test_session.gd")
+
 var main: Control
 var failures: Array[String] = []
 
 func _init() -> void:
 	await process_frame
+	# A fresh account every run: a restored session would rename the player
+	# partway through startup.
+	SessionStore.clear()
 	main = (load("res://main.tscn") as PackedScene).instantiate()
 	get_root().add_child(main)
 	await process_frame
 	await process_frame
 
-	main._create_match("BANDIT_AMBUSH")
+	# A match is entered with one of the player's own ready decks.
+	var deck_id: String = await TestSession.sign_in_with_ready_deck(self, main)
+	if deck_id == "":
+		_check("signed in with a ready deck", false)
+		_finish()
+		return
+	main._show_match_view()
+	main.start_match_with_deck("BANDIT_AMBUSH", deck_id)
 	for i in range(300):
 		await process_frame
 		if not main.state.is_empty() and not main.legal_actions.is_empty():
@@ -148,6 +160,9 @@ func _init() -> void:
 			_check("selection cleared after committing",
 				main.selected_card == "" and main.selected_entity == "")
 
+	_finish()
+
+func _finish() -> void:
 	print("\n%d failure(s)" % failures.size())
 	for f in failures:
 		print("  FAIL: ", f)

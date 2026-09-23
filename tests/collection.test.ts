@@ -268,6 +268,53 @@ describe('deck readiness', () => {
 });
 
 describe('ownership at match start', () => {
+  /** Saves a starter deck for a player and returns its id. */
+  async function saveStarterDeck(token: string): Promise<string> {
+    const saved = await fetch(`${base}/api/decks`, {
+      method: 'POST',
+      headers: authed(token),
+      body: JSON.stringify({ name: 'Starter', heroId: 'healer', cardIds: PRIEST_STARTER }),
+    });
+    return ((await saved.json()) as { deck: { id: string } }).deck.id;
+  }
+
+  async function saveDeck(token: string, name: string, cardIds: string[]): Promise<string> {
+    const saved = await fetch(`${base}/api/decks`, {
+      method: 'POST',
+      headers: authed(token),
+      body: JSON.stringify({ name, heroId: 'healer', cardIds }),
+    });
+    return ((await saved.json()) as { deck: { id: string } }).deck.id;
+  }
+
+  async function challenge(
+    challenger: { token: string },
+    opponent: { user: { id: string } },
+    deckId?: string,
+  ): Promise<Response> {
+    return await fetch(`${base}/api/social/challenges`, {
+      method: 'POST',
+      headers: authed(challenger.token),
+      body: JSON.stringify({
+        opponentId: opponent.user.id,
+        scenarioId: 'STANDARD_PVP',
+        ...(deckId ? { deckId } : {}),
+      }),
+    });
+  }
+
+  async function accept(
+    opponent: { token: string },
+    challengeId: string,
+    deckId?: string,
+  ): Promise<Response> {
+    return await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
+      method: 'POST',
+      headers: authed(opponent.token),
+      body: JSON.stringify(deckId ? { deckId } : {}),
+    });
+  }
+
   async function befriend(
     a: { token: string },
     b: { token: string; user: { displayName: string } },
@@ -290,25 +337,14 @@ describe('ownership at match start', () => {
     const opponent = await register('blkb');
     await befriend(challenger, opponent);
 
-    // The opponent's active deck uses a card they do not own.
+    // The opponent chooses a deck that uses a card they do not own.
     const cardIds = [...PRIEST_STARTER.slice(0, 28), UNOWNED[0]!, UNOWNED[0]!];
-    await fetch(`${base}/api/decks`, {
-      method: 'POST',
-      headers: authed(opponent.token),
-      body: JSON.stringify({ name: 'Blocked', heroId: 'healer', cardIds }),
-    });
+    const blocked = await saveDeck(opponent.token, 'Blocked', cardIds);
 
-    const sent = await fetch(`${base}/api/social/challenges`, {
-      method: 'POST',
-      headers: authed(challenger.token),
-      body: JSON.stringify({ opponentId: opponent.user.id, scenarioId: 'STANDARD_PVP' }),
-    });
+    const sent = await challenge(challenger, opponent, await saveStarterDeck(challenger.token));
     const challengeId = ((await sent.json()) as { challenge: { id: string } }).challenge.id;
 
-    const accepted = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
-      method: 'POST',
-      headers: authed(opponent.token),
-    });
+    const accepted = await accept(opponent, challengeId, blocked);
     expect(accepted.status).toBe(409);
     const body = (await accepted.json()) as { code: string; message: string };
     expect(body.code).toBe('DECK_NOT_PLAYABLE');
@@ -322,46 +358,78 @@ describe('ownership at match start', () => {
     await befriend(challenger, opponent);
 
     const cardIds = [...PRIEST_STARTER.slice(0, 29), UNOWNED[0]!];
-    await fetch(`${base}/api/decks`, {
-      method: 'POST',
-      headers: authed(opponent.token),
-      body: JSON.stringify({ name: 'AlmostReady', heroId: 'healer', cardIds }),
-    });
+    const almostReady = await saveDeck(opponent.token, 'AlmostReady', cardIds);
     // Grant exactly the missing copy.
     await collections.grant(opponent.user.id, UNOWNED[0]!, 1);
 
-    const sent = await fetch(`${base}/api/social/challenges`, {
-      method: 'POST',
-      headers: authed(challenger.token),
-      body: JSON.stringify({ opponentId: opponent.user.id, scenarioId: 'STANDARD_PVP' }),
-    });
+    const sent = await challenge(challenger, opponent, await saveStarterDeck(challenger.token));
     const challengeId = ((await sent.json()) as { challenge: { id: string } }).challenge.id;
 
-    const accepted = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
-      method: 'POST',
-      headers: authed(opponent.token),
-    });
+    const accepted = await accept(opponent, challengeId, almostReady);
     expect(accepted.status).toBe(200);
     const result = (await accepted.json()) as { matchId: string };
     expect(result.matchId).toBeTypeOf('string');
   });
 
-  it('lets a player with no saved deck play the starter deck', async () => {
+  it('refuses to send a challenge without a chosen deck', async () => {
     const challenger = await register('nodecka');
     const opponent = await register('nodeckb');
     await befriend(challenger, opponent);
 
-    const sent = await fetch(`${base}/api/social/challenges`, {
+    const sent = await challenge(challenger, opponent);
+    expect(sent.status).toBe(400);
+    expect(((await sent.json()) as { code: string }).code).toBe('DECK_REQUIRED');
+  });
+
+  it('refuses to send a challenge with a deck that cannot be played', async () => {
+    const challenger = await register('baddecka');
+    const opponent = await register('baddeckb');
+    await befriend(challenger, opponent);
+
+    const unfinished = await saveDeck(challenger.token, 'Unfinished', PRIEST_STARTER.slice(0, 12));
+    const sent = await challenge(challenger, opponent, unfinished);
+    expect(sent.status).toBe(409);
+    expect(((await sent.json()) as { code: string }).code).toBe('DECK_NOT_PLAYABLE');
+  });
+
+  it('refuses to accept a challenge without choosing a deck', async () => {
+    const challenger = await register('noacca');
+    const opponent = await register('noaccb');
+    await befriend(challenger, opponent);
+
+    const sent = await challenge(challenger, opponent, await saveStarterDeck(challenger.token));
+    const challengeId = ((await sent.json()) as { challenge: { id: string } }).challenge.id;
+    // No fallback: a player with no deck chosen does not play.
+    const accepted = await accept(opponent, challengeId);
+    expect(accepted.status).toBe(400);
+    expect(((await accepted.json()) as { code: string }).code).toBe('DECK_REQUIRED');
+  });
+
+  it("plays each side's chosen deck and hero", async () => {
+    const challenger = await register('chosena');
+    const opponent = await register('chosenb');
+    await befriend(challenger, opponent);
+
+    const wizardDeck = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(challenger.token),
-      body: JSON.stringify({ opponentId: opponent.user.id, scenarioId: 'STANDARD_PVP' }),
+      body: JSON.stringify({
+        name: 'Wizard',
+        heroId: 'striker',
+        cardIds: starterDeckFor('striker'),
+      }),
     });
+    const wizardId = ((await wizardDeck.json()) as { deck: { id: string } }).deck.id;
+    const sent = await challenge(challenger, opponent, wizardId);
     const challengeId = ((await sent.json()) as { challenge: { id: string } }).challenge.id;
-    const accepted = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
-      method: 'POST',
-      headers: authed(opponent.token),
-    });
+
+    const accepted = await accept(opponent, challengeId, await saveStarterDeck(opponent.token));
     expect(accepted.status).toBe(200);
+    const result = (await accepted.json()) as {
+      state: { sides: Record<string, { hero: { definitionId: string } }> };
+    };
+    expect(result.state.sides[challenger.user.id]!.hero.definitionId).toBe('striker');
+    expect(result.state.sides[opponent.user.id]!.hero.definitionId).toBe('healer');
   });
 });
 

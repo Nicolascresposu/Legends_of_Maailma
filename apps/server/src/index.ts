@@ -5,7 +5,7 @@ import type { ServerMessage } from '@maailma/protocol';
 import { isClientMessage } from '@maailma/protocol';
 import { createApp } from './app.js';
 import { createLoggerFromEnv, errorFields, type Logger } from './logger.js';
-import { MatchManager } from './match-manager.js';
+import { MatchManager, OPEN_SEAT_ID } from './match-manager.js';
 import { LobbyHub } from './lobby.js';
 import { databaseReachable, prisma } from './db/prisma.js';
 import { AccountService } from './services/account-service.js';
@@ -125,7 +125,8 @@ websocketServer.on('connection', (socket) => {
       log.debug('Message received', { messageType: message.type });
       if (message.type === 'JOIN_MATCH') {
         const engine = manager.get(message.matchId);
-        if (!engine || !engine.state.sides[message.playerId]) {
+        // The open seat's placeholder is not a player anyone can be.
+        if (!engine || !engine.state.sides[message.playerId] || message.playerId === OPEN_SEAT_ID) {
           log.warn('Join rejected', { matchId: message.matchId, playerId: message.playerId });
           return send(socket, {
             type: 'ERROR',
@@ -152,12 +153,18 @@ websocketServer.on('connection', (socket) => {
           if (room.size === 0) sockets.delete(message.matchId);
           sessionLog.info('Player left match', { room: room.size });
         });
-        send(socket, { type: 'MATCH_STATE', state: engine.state });
-        send(socket, {
-          type: 'LEGAL_ACTIONS',
-          playerId: message.playerId,
-          actions: engine.getLegalActions(message.playerId),
-        });
+        // Everyone in the room hears about a join, not only the joiner: an
+        // opponent taking an open seat rebuilds the match, and the creator —
+        // already waiting in the room — must see the seat filled and learn
+        // that they may now act.
+        broadcast(message.matchId, { type: 'MATCH_STATE', state: engine.state });
+        for (const playerId of engine.state.playerOrder) {
+          sendToPlayer(message.matchId, playerId, {
+            type: 'LEGAL_ACTIONS',
+            playerId,
+            actions: manager.legalActions(message.matchId, playerId),
+          });
+        }
         return;
       }
       const session = sessions.get(socket);
@@ -254,7 +261,7 @@ websocketServer.on('connection', (socket) => {
           sendToPlayer(message.matchId, playerId, {
             type: 'LEGAL_ACTIONS',
             playerId,
-            actions: engine.getLegalActions(playerId),
+            actions: manager.legalActions(message.matchId, playerId),
           });
         }
       }

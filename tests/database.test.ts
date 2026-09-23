@@ -297,17 +297,37 @@ describe('decks', () => {
 });
 
 describe('friends and challenges', () => {
+  /** Saves a playable starter deck and returns its id: challenges need one. */
+  async function saveStarterDeck(token: string): Promise<string> {
+    const saved = await fetch(`${base}/api/decks`, {
+      method: 'POST',
+      headers: authed(token),
+      body: JSON.stringify({
+        name: 'Starter',
+        heroId: 'healer',
+        cardIds: starterDeckFor('healer'),
+      }),
+    });
+    return ((await saved.json()) as { deck: { id: string } }).deck.id;
+  }
+
   it('completes a request, accept, challenge and match creation', async () => {
     const a = await register('cha');
     const b = await register('chb');
     const tokenA = a.body.token!;
     const tokenB = b.body.token!;
+    const deckA = await saveStarterDeck(tokenA);
+    const deckB = await saveStarterDeck(tokenB);
 
     // A challenge before friendship is refused.
     const early = await fetch(`${base}/api/social/challenges`, {
       method: 'POST',
       headers: authed(tokenA),
-      body: JSON.stringify({ opponentId: b.body.user!.id, scenarioId: 'STANDARD_PVP' }),
+      body: JSON.stringify({
+        opponentId: b.body.user!.id,
+        scenarioId: 'STANDARD_PVP',
+        deckId: deckA,
+      }),
     });
     expect(early.status).toBe(403);
 
@@ -342,7 +362,11 @@ describe('friends and challenges', () => {
     const challenge = await fetch(`${base}/api/social/challenges`, {
       method: 'POST',
       headers: authed(tokenA),
-      body: JSON.stringify({ opponentId: b.body.user!.id, scenarioId: 'STANDARD_PVP' }),
+      body: JSON.stringify({
+        opponentId: b.body.user!.id,
+        scenarioId: 'STANDARD_PVP',
+        deckId: deckA,
+      }),
     });
     expect(challenge.status).toBe(201);
     const challengeId = ((await challenge.json()) as { challenge: { id: string } }).challenge.id;
@@ -355,6 +379,7 @@ describe('friends and challenges', () => {
     const accepted = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
       method: 'POST',
       headers: authed(tokenB),
+      body: JSON.stringify({ deckId: deckB }),
     });
     expect(accepted.status).toBe(200);
     const result = (await accepted.json()) as {
@@ -371,6 +396,7 @@ describe('friends and challenges', () => {
     const again = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
       method: 'POST',
       headers: authed(tokenB),
+      body: JSON.stringify({ deckId: deckB }),
     });
     expect(again.status).toBe(409);
   });

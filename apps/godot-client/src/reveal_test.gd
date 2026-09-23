@@ -7,6 +7,8 @@ extends SceneTree
 ##
 ## Needs a real (non-headless) run: hover hit-testing depends on laid-out rects.
 
+const TestSession := preload("res://src/test_session.gd")
+
 var main: Control
 var failures: Array[String] = []
 
@@ -21,9 +23,11 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 
+	# A match is entered with one of the player's own ready decks.
+	var deck_id: String = await TestSession.sign_in_with_ready_deck(self, main)
+	_check("signed in with a ready deck", deck_id != "")
 	main._show_match_view()
-	main.player_id = "player-a"
-	main._create_match("BANDIT_AMBUSH")
+	main.start_match_with_deck("BANDIT_AMBUSH", deck_id)
 	for i in range(600):
 		await process_frame
 		if not main.state.is_empty() and not main.legal_actions.is_empty():

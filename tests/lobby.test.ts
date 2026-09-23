@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
+import { starterDeckFor } from '@maailma/card-definitions';
 import { createApp } from '../apps/server/src/app.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { LobbyHub } from '../apps/server/src/lobby.js';
@@ -102,6 +103,16 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/** Saves a playable starter deck and returns its id: challenges need one. */
+async function saveStarterDeck(token: string): Promise<string> {
+  const saved = await fetch(`${base}/api/decks`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name: 'Starter', heroId: 'healer', cardIds: starterDeckFor('healer') }),
+  });
+  return ((await saved.json()) as { deck: { id: string } }).deck.id;
+}
+
 async function register(tag: string) {
   const response = await fetch(`${base}/api/auth/register`, {
     method: 'POST',
@@ -189,7 +200,11 @@ describe('lobby socket', () => {
     const sent = await fetch(`${base}/api/social/challenges`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${challenger.token}` },
-      body: JSON.stringify({ opponentId: opponent.user.id, scenarioId: 'STANDARD_PVP' }),
+      body: JSON.stringify({
+        opponentId: opponent.user.id,
+        scenarioId: 'STANDARD_PVP',
+        deckId: await saveStarterDeck(challenger.token),
+      }),
     });
     expect(sent.status).toBe(201);
 
@@ -222,7 +237,11 @@ describe('lobby socket', () => {
     const sent = await fetch(`${base}/api/social/challenges`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${challenger.token}` },
-      body: JSON.stringify({ opponentId: opponent.user.id, scenarioId: 'STANDARD_PVP' }),
+      body: JSON.stringify({
+        opponentId: opponent.user.id,
+        scenarioId: 'STANDARD_PVP',
+        deckId: await saveStarterDeck(challenger.token),
+      }),
     });
     const challengeId = ((await sent.json()) as { challenge: { id: string } }).challenge.id;
 
@@ -230,7 +249,8 @@ describe('lobby socket', () => {
     const announced = nextMessage(challengerSocket, 'CHALLENGE_ACCEPTED');
     const accepted = await fetch(`${base}/api/social/challenges/${challengeId}/accept`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${opponent.token}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${opponent.token}` },
+      body: JSON.stringify({ deckId: await saveStarterDeck(opponent.token) }),
     });
     const result = (await accepted.json()) as { matchId: string };
     const push = await announced;

@@ -1,9 +1,7 @@
 import express from 'express';
-import { getScenarioDefinition, starterDeckFor } from '@maailma/card-definitions';
 import type { Logger } from '../logger.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
-import type { CollectionService } from '../services/collection-service.js';
 import { DeckNotPlayableError } from '../services/collection-service.js';
 import type { SocialService } from '../services/social-service.js';
 import type { MatchManager } from '../match-manager.js';
@@ -20,7 +18,6 @@ import { requireUser, respondAccountError } from './auth-routes.js';
 export function createSocialRouter(
   social: SocialService,
   decks: DeckService,
-  collections: CollectionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -91,14 +88,20 @@ export function createSocialRouter(
   });
 
   router.post('/challenges', (request, response, next) => {
-    const body = request.body as { opponentId?: string; scenarioId?: string; deckId?: string };
-    social
-      .createChallenge({
-        challengerId: request.user!.id,
-        opponentId: String(body?.opponentId ?? ''),
-        scenarioId: String(body?.scenarioId ?? 'STANDARD_PVP'),
-        ...(body?.deckId ? { deckId: body.deckId } : {}),
-      })
+    const body = request.body as { opponentId?: string; scenarioId?: string; deckId?: unknown };
+    // A challenge names the deck its sender will play, and only a playable
+    // deck may be named: sending a challenge you could not play is refused
+    // here, not discovered by your friend when they accept.
+    decks
+      .requirePlayable(request.user!.id, body?.deckId)
+      .then((deck) =>
+        social.createChallenge({
+          challengerId: request.user!.id,
+          opponentId: String(body?.opponentId ?? ''),
+          scenarioId: String(body?.scenarioId ?? 'STANDARD_PVP'),
+          deckId: deck.id,
+        }),
+      )
       .then((challenge) => {
         logger.info('Challenge sent', {
           requestId: request.requestId,
@@ -121,7 +124,7 @@ export function createSocialRouter(
   });
 
   router.post('/challenges/:challengeId/accept', (request, response, next) => {
-    acceptChallenge(request, social, decks, collections, manager, lobby, logger)
+    acceptChallenge(request, social, decks, manager, lobby, logger)
       .then((payload) => response.json(payload))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
@@ -159,14 +162,14 @@ export function createSocialRouter(
 /**
  * Creates the match for an accepted challenge.
  *
- * Each player brings their own active deck; a player without one falls back to
- * their class's starter deck so a challenge is never blocked on deck building.
+ * Each player brings a deck of their own choosing — the challenger's named when
+ * the challenge was sent, the accepting player's named on accepting — and both
+ * must be playable, or the match is not created.
  */
 async function acceptChallenge(
   request: express.Request,
   social: SocialService,
   decks: DeckService,
-  collections: CollectionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -174,56 +177,44 @@ async function acceptChallenge(
   const opponentId = request.user!.id;
   const challenge = await social.loadAnswerable(opponentId, String(request.params.challengeId));
 
-  const challengerDeck = await decks.activeDeck(challenge.challengerId);
-  const opponentDeck = await decks.activeDeck(opponentId);
-
-  // Ownership and format are both enforced here rather than at save time: a
-  // deck may be built toward cards a player has not unlocked, but it cannot be
-  // played until every copy it uses is owned and every card is legal in the
-  // format the deck was built for. A deck holding a rotated card is refused
-  // here rather than quietly played, and a deck referencing an unreleased card
-  // — one an admin tool may have put there — is refused in either format.
-  // A player without a deck plays the scenario's hero for their side, with
-  // that hero's class starter deck — which the starter grant makes playable.
-  const scenario = getScenarioDefinition(challenge.scenarioId);
-  const challengerHero = challengerDeck?.heroId ?? scenario.sideA.heroDefinitionId;
-  const opponentHero = opponentDeck?.heroId ?? scenario.sideB.heroDefinitionId;
-  const challengerCards = challengerDeck?.cardIds ?? starterDeckFor(challengerHero);
-  const opponentCards = opponentDeck?.cardIds ?? starterDeckFor(opponentHero);
-  const challengerFormat = challengerDeck?.format ?? 'STANDARD';
-  const opponentFormat = opponentDeck?.format ?? 'STANDARD';
+  // Each side plays a deck it chose: the challenger named theirs when sending,
+  // and the accepting player names theirs now. Both are judged again here —
+  // ownership, format and class can all have changed since the challenge was
+  // sent — and there is no fallback deck: a player with no playable deck
+  // cannot accept.
+  const body = request.body as { deckId?: unknown };
+  const opponentDeck = await decks.requirePlayable(opponentId, body?.deckId);
+  let challengerDeck;
   try {
-    await collections.assertPlayable(
-      challenge.challengerId,
-      challengerCards,
-      challengerFormat,
-      challengerHero,
-    );
+    challengerDeck = await decks.requirePlayable(challenge.challengerId, challenge.deckId);
   } catch (error) {
-    if (error instanceof DeckNotPlayableError) {
+    // Worded for the player accepting: it is their opponent's deck at fault,
+    // and nothing they can change.
+    if (error instanceof DeckNotPlayableError || error instanceof AccountError) {
+      const reasons =
+        error instanceof DeckNotPlayableError ? error.reasons.join('; ') : error.message;
       throw new AccountError(
         'CHALLENGER_DECK_NOT_PLAYABLE',
-        `Your opponent's deck is not ready: ${error.reasons.join('; ')}`,
+        `Your opponent's deck is not ready: ${reasons}`,
         409,
       );
     }
     throw error;
   }
-  await collections.assertPlayable(opponentId, opponentCards, opponentFormat, opponentHero);
 
   const engine = manager.create({
     scenarioId: challenge.scenarioId,
     players: [
       {
         playerId: challenge.challengerId,
-        deck: challengerCards,
-        heroDefinitionId: challengerHero,
+        deck: challengerDeck.cardIds,
+        heroDefinitionId: challengerDeck.heroId,
         controller: 'HUMAN',
       },
       {
         playerId: opponentId,
-        deck: opponentCards,
-        heroDefinitionId: opponentHero,
+        deck: opponentDeck.cardIds,
+        heroDefinitionId: opponentDeck.heroId,
         controller: 'HUMAN',
       },
     ],

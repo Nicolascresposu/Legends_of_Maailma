@@ -24,6 +24,7 @@ import { createEconomyRouter } from './routes/economy-routes.js';
 import { createPackRouter } from './routes/pack-routes.js';
 import { createTradeRouter } from './routes/trade-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
+import { createPlayRouter } from './routes/play-routes.js';
 
 /**
  * Database-backed features. Omitted, the server runs exactly as it did before
@@ -123,7 +124,9 @@ export function createApp(
     const engine = manager.get(request.params.matchId);
     if (!engine)
       return response.status(404).json({ code: 'MATCH_NOT_FOUND', message: 'Match not found' });
-    return response.json({ actions: engine.getLegalActions(request.params.playerId) });
+    return response.json({
+      actions: manager.legalActions(request.params.matchId, request.params.playerId),
+    });
   });
 
   app.post('/api/matches/:matchId/actions', (request, response) => {
@@ -168,16 +171,10 @@ export function createApp(
     app.use('/api/economy', createEconomyRouter(services.economy, logger));
     app.use('/api/packs', createPackRouter(services.packs, logger));
     app.use('/api/trades', createTradeRouter(services.trades, logger));
+    app.use('/api/play', createPlayRouter(services.decks, manager, logger));
     app.use(
       '/api/social',
-      createSocialRouter(
-        services.social,
-        services.decks,
-        services.collections,
-        manager,
-        services.lobby,
-        logger,
-      ),
+      createSocialRouter(services.social, services.decks, manager, services.lobby, logger),
     );
   }
 

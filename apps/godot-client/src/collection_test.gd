@@ -12,6 +12,9 @@ var failures: Array[String] = []
 
 func _init() -> void:
 	await process_frame
+	# A brand-new account every run: a session saved by an earlier run would
+	# otherwise be resumed, and it is not new — it may already own decks.
+	SessionStore.clear()
 	main = (load("res://main.tscn") as PackedScene).instantiate()
 	get_root().add_child(main)
 	await process_frame
@@ -58,6 +61,20 @@ func _init() -> void:
 	_check("unowned cards are still listed", unowned > 0)
 	print("  owned kinds: %d, unowned kinds: %d" % [owned, unowned])
 	_check("the screen rendered a row per card", screen._card_list.get_child_count() == screen.collection.size())
+
+	# A new account has no deck yet, so it cannot play: starting a match only
+	# offers the deck picker, and the picker has nothing it will accept.
+	main._create_match("BANDIT_AMBUSH")
+	for i in range(180):
+		await process_frame
+		if main.deck_picker._loaded:
+			break
+	_check("starting a match asks for a deck", main.deck_picker.is_open())
+	_check("an account with no ready deck has nothing to play",
+		main.deck_picker.playable_deck_ids().is_empty())
+	_check("no deck, no match", not main.deck_picker.pick("any-deck") and main.state.is_empty())
+	main.deck_picker.close()
+	main._show_collection_view()
 
 	# Build a deck from owned cards only.
 	screen._autofill()

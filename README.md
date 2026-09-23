@@ -17,8 +17,15 @@ npm run dev
 ```
 
 The server listens on `http://localhost:3000`. Open `apps/godot-client/project.godot` in Godot,
-run it, then choose either **Create PvP** or **Create Bandit Ambush**. For PvP, copy the shown
-match ID into a second client and join as `player-b`.
+run it, sign in (or register), and build a deck in the collection. Then open the match view and
+choose **Create PvP** or **Create Bandit Ambush**, and pick the deck to play. For PvP, copy the
+shown match ID into a second signed-in client and press **Join**: it is asked for a deck too.
+
+Every match is played with one of the player's own decks, and only a ready one — owned in full,
+legal in its format, and of its hero's class. You play as the deck's hero. There is no fallback
+deck: a player with no ready deck cannot start a match, take an open seat, or send or accept a
+challenge. A PvP match waits with its second seat open until someone takes it, and nobody may act
+until then.
 
 The client does not reproduce game rules: every command is validated and resolved by the server,
 and the client only ever offers actions the server has already declared legal.
@@ -38,8 +45,8 @@ whatever the current selection offers and remains usable as a fallback.
 The client opens on the collection screen: sign in or create an account, browse every collectible
 card with the copies you own, and build decks. Cards you do not own stay visible but dimmed, and
 the deck panel shows the server's verdict live — card count, and any card you lack copies of.
-A deck that is not ready can still be saved; it simply cannot be made active. Matches then use
-your active deck rather than a hardcoded starter list.
+A deck that is not ready can still be saved; it simply cannot be made active or played. The
+active deck is the one the deck picker lists first.
 
 Card names, costs, keywords, descriptions and flavour are fetched once from `/api/cards`, so the board shows
 real names rather than definition ids. The match log narrates the server's events, and the client
@@ -149,6 +156,9 @@ Client scripts:
   refusal is explained rather than merely relayed.
 - `src/trade_test.gd` — two accounts become friends and complete a trade, with one acceptance
   invalidated along the way by an edited offer.
+- `src/pvp_test.gd` — two clients: one opens a PvP match, the other takes the open seat with a
+  deck of its own, and both end up in the same live match.
+- `src/test_session.gd` — test support: a fresh account with a ready deck, for tests that play.
 - `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
 - `src/config_test.gd` — checks address parsing and override precedence.
 
@@ -162,6 +172,7 @@ godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/trade_test.gd
+godot --headless --path apps/godot-client --script src/pvp_test.gd
 godot --headless --path apps/godot-client --script src/session_test.gd
 godot --headless --path apps/godot-client --script src/config_test.gd
 ```
@@ -240,15 +251,18 @@ POST   /api/decks              save a deck (legality reported, not enforced)
 GET    /api/decks/:id          one deck
 PUT    /api/decks/:id          replace a deck
 DELETE /api/decks/:id          remove a deck
-POST   /api/decks/:id/active   choose the deck matches use
+POST   /api/decks/:id/active   mark a deck as your usual one
+
+POST /api/play                 start a match with one of your decks: { scenarioId, deckId }
+POST /api/play/:id/join        take a PvP match's open seat: { deckId }
 
 GET  /api/social/friends                            accepted friends
 GET  /api/social/friends/requests                   requests awaiting you
 POST /api/social/friends/requests                   ask by display name
 POST /api/social/friends/requests/:id/respond       accept or decline
 GET  /api/social/challenges                         incoming and outgoing
-POST /api/social/challenges                         challenge a friend
-POST /api/social/challenges/:id/accept              creates the match
+POST /api/social/challenges                         challenge a friend: { opponentId, scenarioId, deckId }
+POST /api/social/challenges/:id/accept              creates the match: { deckId }
 POST /api/social/challenges/:id/decline
 POST /api/social/challenges/:id/cancel
 ```
@@ -315,8 +329,11 @@ are enforced on save. Every deck the API returns carries a `readiness` marker in
 ```
 
 Rule problems and ownership problems are reported separately, so a client can say precisely why a
-deck is not ready. Ownership is enforced when a match starts: accepting a challenge with an
-unplayable deck is refused with `DECK_NOT_PLAYABLE` and the reasons.
+deck is not ready. Readiness is enforced whenever a player enters a match: starting one, taking
+an open seat, sending a challenge or accepting one with an unplayable deck is refused with
+`DECK_NOT_PLAYABLE` and the reasons, and doing any of them without naming a deck with
+`DECK_REQUIRED`. The challenger's deck is judged again on acceptance, since it may have stopped
+being playable since the challenge was sent.
 
 Authenticated requests carry `Authorization: Bearer <token>`. Tokens are opaque: only a SHA-256
 digest is stored, so a database leak yields no usable sessions, and logging out revokes instantly.

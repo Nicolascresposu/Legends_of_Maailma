@@ -43,6 +43,12 @@ signal friend_requests_loaded(requests: Array)
 ## A friend request was sent or answered; the lists should be re-read.
 signal friendship_changed()
 signal friendship_refused(code: String, message: String)
+## The server created a match, or seated this player in one, with the deck
+## they chose. `waiting` is true while a PvP match still needs an opponent.
+signal match_started(match_id: String, player_id: String, waiting: bool)
+## Starting or joining a match was refused — most often because the chosen
+## deck is not ready, which the server explains in `message`.
+signal match_refused(code: String, message: String)
 
 ## Resolved from the command line, the environment, or a saved address.
 var http_base := ClientConfig.http_base()
@@ -68,6 +74,7 @@ var _trade_history_request: HTTPRequest
 var _friends_request: HTTPRequest
 var _friend_requests_request: HTTPRequest
 var _friend_mutate_request: HTTPRequest
+var _play_request: HTTPRequest
 
 func _ready() -> void:
 	_ensure_requests()
@@ -141,6 +148,10 @@ func _ensure_requests() -> void:
 		_friend_mutate_request = HTTPRequest.new()
 		_friend_mutate_request.request_completed.connect(_on_friendship_mutated)
 		add_child(_friend_mutate_request)
+	if _play_request == null:
+		_play_request = HTTPRequest.new()
+		_play_request.request_completed.connect(_on_play_completed)
+		add_child(_play_request)
 
 ## True only once the server has confirmed who the token belongs to.
 ##
@@ -859,3 +870,64 @@ func _on_friendship_mutated(
 		)
 		return
 	friendship_changed.emit()
+
+# --- Playing -----------------------------------------------------------------
+
+## Starts a match in a scenario, playing one of this player's own decks.
+##
+## Against an AI the match begins at once; a PvP match waits with its second
+## seat open for another player to join.
+func start_match(scenario_id: String, deck_id: String) -> void:
+	await _await_tree()
+	if _busy(_play_request):
+		match_refused.emit("BUSY", "Already starting a match.")
+		return
+	var error := _play_request.request(
+		http_base + "/api/play",
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"scenarioId": scenario_id, "deckId": deck_id})
+	)
+	if error != OK:
+		match_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+## Takes the open seat in someone's match with one of this player's decks.
+##
+## `deck_id` may be left empty to ask first: a player already seated there is
+## simply let back in, and a player who needs a deck is told `DECK_REQUIRED`.
+func join_open_match(match_id: String, deck_id: String = "") -> void:
+	await _await_tree()
+	if _busy(_play_request):
+		match_refused.emit("BUSY", "Already joining a match.")
+		return
+	var body := {}
+	if deck_id != "":
+		body["deckId"] = deck_id
+	var error := _play_request.request(
+		http_base + "/api/play/%s/join" % match_id.uri_encode(),
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify(body)
+	)
+	if error != OK:
+		match_refused.emit("UNREACHABLE", "Could not reach the server.")
+
+func _on_play_completed(
+	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
+) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		match_refused.emit("UNREACHABLE", "Could not reach the server.")
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var payload: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	if response_code != 200 and response_code != 201:
+		match_refused.emit(
+			str(payload.get("code", "MATCH_REFUSED")),
+			str(payload.get("message", "The match could not be started."))
+		)
+		return
+	match_started.emit(
+		str(payload.get("matchId", "")),
+		str(payload.get("playerId", "")),
+		bool(payload.get("waitingForOpponent", false))
+	)

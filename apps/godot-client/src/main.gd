@@ -33,11 +33,16 @@ var library := CardLibrary.new()
 var collection_screen: CollectionScreen
 var trade_screen: TradeScreen
 var game_root: Control
-## The active deck fetched for the signed-in player, empty when playing
-## anonymously. Falls back to the starter list so the client still works
-## without an account.
-var active_deck_cards: Array = []
-var active_deck_hero := ""
+## Chooses the deck every match is entered with.
+const DeckPicker := preload("res://src/deck_picker.gd")
+var deck_picker: Control
+## What the player was doing when the picker opened, so the chosen deck goes
+## to the right request: {"kind": "create", "scenario": id} or
+## {"kind": "join", "match_id": id}.
+var _pending_entry: Dictionary = {}
+## The open seat's placeholder, as the server names it, so a waiting match can
+## say it is waiting rather than show a nameless opponent.
+const OPEN_SEAT_ID := "open-seat"
 
 var state: Dictionary = {}
 var legal_actions: Array = []
@@ -72,7 +77,6 @@ var turn_banner: Label
 var match_input: LineEdit
 var player_input: LineEdit
 var server_input: LineEdit
-var hero_selector: OptionButton
 var board_container: VBoxContainer
 var hand_container: HBoxContainer
 var action_container: VBoxContainer
@@ -94,7 +98,6 @@ func _ready() -> void:
 	client.game_events_received.connect(_on_game_events)
 	client.match_ended.connect(_on_match_ended)
 	client.server_error.connect(_on_server_error)
-	client.match_created.connect(_on_match_created)
 	client.cards_received.connect(func(payload: Variant) -> void: library.ingest(payload))
 	client.request_failed.connect(func(detail: String) -> void: _set_status(detail, true))
 	library.loaded.connect(_on_library_loaded)
@@ -104,11 +107,13 @@ func _ready() -> void:
 	accounts.signed_in.connect(_on_signed_in)
 	accounts.signed_out.connect(_on_account_signed_out)
 	accounts.decks_loaded.connect(_on_decks_loaded)
+	accounts.match_started.connect(_on_match_started)
+	accounts.match_refused.connect(_on_match_refused)
 
 	_build_interface()
 
-	# Accounts are optional: the collection screen opens first, but the match
-	# view is still reachable without signing in.
+	# The collection screen opens first. The match view can be opened without
+	# signing in, but a match is only ever entered signed in, with a ready deck.
 	collection_screen = CollectionScreen.new()
 	add_child(collection_screen)
 	collection_screen.setup(accounts, library)
@@ -122,6 +127,17 @@ func _ready() -> void:
 	add_child(trade_screen)
 	trade_screen.setup(accounts, library)
 	trade_screen.closed.connect(_show_collection_view)
+	# Added last, so it draws over the board it asks about.
+	deck_picker = DeckPicker.new()
+	add_child(deck_picker)
+	deck_picker.setup(library)
+	deck_picker.picked.connect(_on_deck_picked)
+	deck_picker.cancelled.connect(func() -> void:
+		_pending_entry = {}
+		_set_status("No match started."))
+	deck_picker.build_requested.connect(func() -> void:
+		_pending_entry = {}
+		_show_collection_view())
 	_show_collection_view()
 	print("[maailma] server: %s (%s)" % [ClientConfig.http_base(), ClientConfig.source()])
 
@@ -215,12 +231,6 @@ func _build_connection_bar() -> Control:
 	player_input.placeholder_text = "Player ID"
 	player_input.custom_minimum_size.x = 110
 	bar.add_child(player_input)
-
-	hero_selector = OptionButton.new()
-	hero_selector.add_item("The Mender (heal)", 0)
-	hero_selector.add_item("The Striker (burn)", 1)
-	hero_selector.tooltip_text = "Chosen when you create or first join a match."
-	bar.add_child(hero_selector)
 
 	match_input = LineEdit.new()
 	match_input.placeholder_text = "Match ID — paste to join an existing match"
@@ -328,6 +338,8 @@ func _on_server_changed(base: String) -> void:
 	_set_status("Server set to %s." % base)
 
 func _show_collection_view() -> void:
+	if deck_picker != null:
+		deck_picker.close()
 	collection_screen.visible = true
 	trade_screen.visible = false
 	game_root.visible = false
@@ -343,7 +355,8 @@ func _show_match_view() -> void:
 	collection_screen.visible = false
 	trade_screen.visible = false
 	game_root.visible = true
-	# Play with whatever the player has selected as active.
+	# Fresh readiness for the deck picker: a deck may have become playable, or
+	# stopped being, since it was last read.
 	if accounts.is_signed_in():
 		accounts.fetch_decks()
 
@@ -359,58 +372,99 @@ func _on_account_signed_out() -> void:
 	if trade_screen.visible:
 		_show_collection_view()
 	player_input.editable = true
-	active_deck_cards = []
-	active_deck_hero = ""
+	_pending_entry = {}
+	if deck_picker != null:
+		deck_picker.close()
 
 func _on_decks_loaded(list: Array) -> void:
-	# Remember the active deck so matches use it instead of the starter list.
-	active_deck_cards = []
-	active_deck_hero = ""
-	for deck in list:
-		if typeof(deck) != TYPE_DICTIONARY:
-			continue
-		if not bool(deck.get("isActive", false)):
-			continue
-		var readiness: Variant = deck.get("readiness", {})
-		var playable := typeof(readiness) != TYPE_DICTIONARY 			or bool((readiness as Dictionary).get("playable", true))
-		if not playable:
-			_set_status("Your active deck is not ready; using the starter deck.", true)
-			return
-		var cards: Variant = deck.get("cardIds", [])
-		if typeof(cards) == TYPE_ARRAY:
-			active_deck_cards = (cards as Array).duplicate()
-		active_deck_hero = str(deck.get("heroId", ""))
-		return
+	deck_picker.set_decks(list)
 
 # --- Connection actions -----------------------------------------------------
 
+## Every match is played with one of the player's own decks, so starting one
+## means signing in and picking a ready deck first. There is no default deck.
 func _create_match(scenario_id: String) -> void:
 	_apply_inputs()
-	if player_id.is_empty():
-		_set_status("Enter a Player ID first.", true)
+	if not _require_account():
 		return
-	_set_status("Creating match…")
-	# Without an active deck, no deck is sent and the server deals the starter
-	# deck of the chosen hero's class.
-	var deck := active_deck_cards
-	var hero := active_deck_hero if active_deck_hero != "" else _selected_hero_id()
-	client.create_match(scenario_id, player_id, hero, deck)
+	_pending_entry = {"kind": "create", "scenario": scenario_id}
+	deck_picker.open("Choose a deck to play")
+	accounts.fetch_decks()
 
-func _on_match_created(new_match_id: String) -> void:
-	match_input.text = new_match_id
-	_append_log("[b]Match created.[/b] ID copied to the field — paste it into a second client for PvP.")
-	# A brand-new match is the one moment hero selection is accepted.
-	client.join(new_match_id, player_id, _selected_hero_id(), true)
-
+## Joins a match by id. Asked first without a deck: a player already seated
+## there is let straight back in, and only a player taking the open seat is
+## asked to choose one.
 func _join_match() -> void:
 	_apply_inputs()
 	var target := match_input.text.strip_edges()
-	if target.is_empty() or player_id.is_empty():
-		_set_status("Match ID and Player ID are both required.", true)
+	if target.is_empty():
+		_set_status("Paste a match ID to join.", true)
 		return
-	# Joining an existing match must not re-select a Hero: the server rejects
-	# hero changes once the first action has been logged.
-	client.join(target, player_id, _selected_hero_id(), false)
+	if not _require_account():
+		return
+	_pending_entry = {"kind": "join", "match_id": target}
+	_set_status("Joining match…")
+	accounts.join_open_match(target)
+
+## Starts a match with a chosen deck, without the picker. The picker calls this
+## once a deck is chosen, and tests call it directly.
+func start_match_with_deck(scenario_id: String, deck_id: String) -> void:
+	_pending_entry = {"kind": "create", "scenario": scenario_id}
+	_set_status("Starting match…")
+	accounts.start_match(scenario_id, deck_id)
+
+func join_match_with_deck(match_id: String, deck_id: String) -> void:
+	_pending_entry = {"kind": "join", "match_id": match_id}
+	_set_status("Joining match…")
+	accounts.join_open_match(match_id, deck_id)
+
+func _require_account() -> bool:
+	if accounts.is_signed_in():
+		return true
+	_set_status("Sign in and build a deck to play: open the Collection.", true)
+	return false
+
+func _on_deck_picked(deck_id: String) -> void:
+	match str(_pending_entry.get("kind", "")):
+		"create":
+			start_match_with_deck(str(_pending_entry.get("scenario", "")), deck_id)
+		"join":
+			join_match_with_deck(str(_pending_entry.get("match_id", "")), deck_id)
+
+func _on_match_started(match_id: String, seated_as: String, waiting: bool) -> void:
+	_pending_entry = {}
+	player_id = seated_as
+	match_input.text = match_id
+	if waiting:
+		_append_log("[b]Match created.[/b] Waiting for an opponent — copy the match ID and send it to them.")
+		_set_status("Waiting for an opponent to join.")
+	else:
+		_append_log("[b]Match joined.[/b]")
+	# The hero comes from the deck, so there is none to select here.
+	client.join(match_id, player_id, "", false)
+
+func _on_match_refused(code: String, message: String) -> void:
+	# Taking an open seat needs a deck; that is the prompt, not a failure.
+	if code == "DECK_REQUIRED" and str(_pending_entry.get("kind", "")) == "join":
+		deck_picker.open("Choose a deck to join with")
+		accounts.fetch_decks()
+		return
+	_pending_entry = {}
+	var explanation := message
+	match code:
+		"DECK_REQUIRED":
+			explanation = "Choose one of your decks to play with."
+		"DECK_NOT_PLAYABLE":
+			explanation = "That deck is not ready to play. " + message
+		"DECK_NOT_FOUND":
+			explanation = "That deck no longer exists."
+		"SEAT_TAKEN":
+			explanation = "That match already has two players."
+		"MATCH_NOT_FOUND":
+			explanation = "No match with that ID."
+		"UNAUTHENTICATED":
+			explanation = "Sign in to play."
+	_set_status(explanation, true)
 
 func _apply_inputs() -> void:
 	_apply_server_address(server_input.text)
@@ -438,9 +492,6 @@ func _copy_match_id() -> void:
 		return
 	DisplayServer.clipboard_set(value)
 	_set_status("Match ID copied to the clipboard.")
-
-func _selected_hero_id() -> String:
-	return "striker" if hero_selector.selected == 1 else "healer"
 
 # --- Server callbacks -------------------------------------------------------
 
@@ -530,6 +581,8 @@ func _render_state() -> void:
 		_num(state.get("turn", 0)),
 		"Your turn" if is_my_turn else "Opponent's turn (%s)" % active,
 	]
+	if opponent_id == OPEN_SEAT_ID:
+		turn_banner.text = "Waiting for an opponent to join — share the match ID"
 	turn_banner.add_theme_color_override(
 		"font_color", COLOR_READY if is_my_turn else Color(0.85, 0.72, 0.42)
 	)

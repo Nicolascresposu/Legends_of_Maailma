@@ -37,8 +37,12 @@ The terms the code, the docs and the card text use, and use only in these senses
 - **Basic** — a rarity for cards every player is given for free. Basic cards are never crafted,
   disenchanted, traded or found in packs, and print no rarity gem. Every other rarity — Common, Rare,
   Epic, Legendary — is earned, prints a rarity gem, and is priced by the economy.
-- **Starter deck** — the deck of a class a player can always fall back on: one per class, made of
-  neutral cards and that class's cards. A new account is given enough copies to build every one.
+- **Starter deck** — one per class, made of neutral cards and that class's cards. A new account is
+  given enough copies to build every one. It is not a fallback: a player still builds and picks a
+  deck of their own to play. Only the anonymous development endpoint deals it to a player sent
+  without a deck.
+- **Deck picking** — every match is entered with one of the player's own ready decks, chosen at
+  the moment of entering, and the player plays as that deck's hero.
 - **Card type** — Creature, Action, Artifact or Weapon.
 
 ## Battlefield and combat

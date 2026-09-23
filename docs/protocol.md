@@ -12,9 +12,10 @@ The default server address is `http://localhost:3000`; live matches use
   a card has is printed in bold in its description. A class card also carries its `classId`; a
   neutral card has none.
 - `GET /api/scenarios`
-- `POST /api/matches` — create an authoritative engine from a scenario, seed, and two players.
-  Each player's hero defaults to the scenario's for their side, and each deck is judged as that
-  hero's class. A player sent without a `deck` plays the starter deck of their hero's class.
+- `POST /api/matches` — development and test endpoint: create an authoritative engine from a
+  scenario, seed, and two players, without accounts. Each player's hero defaults to the scenario's
+  for their side, and each deck is judged as that hero's class. A player sent without a `deck`
+  plays the starter deck of their hero's class. Players use `/api/play` instead.
 - `GET /api/matches/:matchId` — current authoritative state (development endpoint).
 - `GET /api/matches/:matchId/legal-actions/:playerId` — legal intentions for one side.
 - `POST /api/matches/:matchId/actions` — submit an intention (development/test endpoint).
@@ -83,6 +84,16 @@ codes: no expansion policy is involved, and none could change the answer.
 one, the list is judged as that hero's class and any card of another class is named in
 `ruleErrors`; the verdict's `classId` says which class it was judged as. Every collection entry
 carries its card's `classId`, `null` for a neutral card.
+
+Players enter matches through `POST /api/play` (`{ scenarioId, deckId }`) and
+`POST /api/play/:matchId/join` (`{ deckId }`), always with one of their own decks, which must be
+ready; they play as that deck's hero. A scenario whose second side is AI-controlled starts at once.
+Any other starts with its second seat open: until a player takes it, the match reports no legal
+actions and refuses every action with `WAITING_FOR_OPPONENT`. Taking the seat rebuilds the match
+from its seed with the real deck, and the join is broadcast so the waiting creator sees it.
+Joining without a `deckId` is how a client asks first: a player already seated is let back in,
+and one who needs a deck is told `DECK_REQUIRED`. Challenges work the same way — the sender names
+a `deckId` when sending and the recipient when accepting, with no fallback deck.
 
 Every economy mutation accepts an optional client-chosen `requestId`. A retry after a lost response
 replays the original outcome instead of executing a second time.
