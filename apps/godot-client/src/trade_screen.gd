@@ -488,6 +488,8 @@ func _explain(code: String, message: String) -> String:
 	match code:
 		"CARD_NOT_TRADEABLE":
 			return "Those cards cannot be traded right now."
+		"BASIC_CARD":
+			return "Basic cards are free to everyone, so they cannot be traded."
 		"EXPANSION_NOT_RELEASED":
 			return "That card is not available."
 		"TRADE_REVISION_CHANGED":
@@ -780,7 +782,10 @@ func _card_row(entry: Dictionary) -> Control:
 	var add := Button.new()
 	add.text = "+"
 	add.tooltip_text = library.tooltip(card_id)
-	if not tradeable:
+	if str(entry.get("rarity", "")) == "BASIC":
+		add.disabled = true
+		add.tooltip_text = "Basic cards are free to everyone and cannot be traded"
+	elif not tradeable:
 		add.disabled = true
 		add.tooltip_text = "This expansion cannot be traded right now"
 	elif offering >= owned:

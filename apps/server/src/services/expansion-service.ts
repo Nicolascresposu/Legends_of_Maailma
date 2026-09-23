@@ -38,7 +38,7 @@ export const ECONOMY_ERRORS = {
   CARD_NOT_CRAFTABLE: 'CARD_NOT_CRAFTABLE',
   CARD_NOT_DISENCHANTABLE: 'CARD_NOT_DISENCHANTABLE',
   CARD_NOT_TRADEABLE: 'CARD_NOT_TRADEABLE',
-  /** Basic cards are free to everyone, so they are never crafted or disenchanted. */
+  /** Basic cards are free to everyone, so they are never crafted, disenchanted or traded. */
   BASIC_CARD: 'BASIC_CARD',
   EXPANSION_NOT_AVAILABLE_IN_PACKS: 'EXPANSION_NOT_AVAILABLE_IN_PACKS',
   INSUFFICIENT_FRAGMENTS: 'INSUFFICIENT_FRAGMENTS',
@@ -271,6 +271,9 @@ export function assertDisenchantable(policies: LivePolicies, cardId: string): vo
 export function assertTradeable(policies: LivePolicies, cardId: string): void {
   const expansion = expansionOf(policies, cardId);
   assertReleased(expansion, cardId);
+  // Everyone already has every Basic card, so trading one gives nobody
+  // anything — and checked on execution as well as on offer, like the policy.
+  assertNotBasic(cardId, 'traded');
   if (!canTradeExpansion(expansion)) {
     throw new EconomyError(
       ECONOMY_ERRORS.CARD_NOT_TRADEABLE,

@@ -19,6 +19,7 @@ import { hashPassword } from '../apps/server/src/auth/passwords.js';
 import { MatchManager } from '../apps/server/src/match-manager.js';
 import { CollectionService } from '../apps/server/src/services/collection-service.js';
 import { EconomyService } from '../apps/server/src/services/economy-service.js';
+import { TradeService } from '../apps/server/src/services/trade-service.js';
 import { ExpansionService } from '../apps/server/src/services/expansion-service.js';
 
 const BASIC_CARD = 'brown_bear';
@@ -291,6 +292,26 @@ describe('Basic cards in the live economy', () => {
       extra: 1,
       reason: 'BASIC_CARD',
     });
+  });
+
+  it('refuses a Basic card in a trade offer', async () => {
+    const trades = new TradeService(prisma, expansions);
+    const a = await makeUser('btradea');
+    const b = await makeUser('btradeb');
+    await collections.grantStarter(a);
+    const trade = await trades.create(a, b);
+    await expect(
+      trades.updateOffer(a, trade.id, [{ cardId: BASIC_CARD, quantity: 1 }]),
+    ).rejects.toMatchObject({
+      code: 'BASIC_CARD',
+      message: 'Brown Bear is a Basic card and cannot be traded',
+    });
+    // An ordinary card from the same expansion can still be offered.
+    const offered = await trades.updateOffer(a, trade.id, [{ cardId: 'wolf', quantity: 1 }]);
+    expect(offered.revision).toBeGreaterThan(trade.revision);
+    const listed = await collections.browse(a);
+    expect(listed.find((card) => card.cardId === BASIC_CARD)!.tradeable).toBe(false);
+    expect(listed.find((card) => card.cardId === 'wolf')!.tradeable).toBe(true);
   });
 
   it("reports another class's cards in a deck's readiness", async () => {

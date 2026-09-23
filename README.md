@@ -397,8 +397,8 @@ Fragments are the single crafting currency, held as an integer on the account:
 | Epic      |   100 |         20 |
 | Legendary |   300 |        100 |
 
-Basic cards have no row: every player is given them, so they are never crafted, disenchanted or
-found in packs. The Brown Bear is the one Basic card for now, there to exercise the rule.
+Basic cards have no row: every player is given them, so they are never crafted, disenchanted,
+traded or found in packs. The Brown Bear is the one Basic card for now, there to exercise the rule.
 
 Duplicate protection reads **current ownership and nothing else**. There is no record of what a
 player has ever owned, and deliberately never will be: a card traded away or disenchanted becomes

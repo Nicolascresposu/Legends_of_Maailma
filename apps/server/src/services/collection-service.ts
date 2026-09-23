@@ -40,7 +40,8 @@ export interface CollectionCard {
   classId: string | null;
   /**
    * What the player may do with it right now, under current policy. A Basic
-   * card is never craftable or disenchantable, whatever its expansion allows.
+   * card is never craftable, disenchantable or tradeable, whatever its
+   * expansion allows.
    */
   craftable: boolean;
   disenchantable: boolean;
@@ -242,7 +243,7 @@ export class CollectionService {
             classId: card.classId ?? null,
             craftable: !isBasicRarity(card.rarity) && canCraftExpansion(expansion),
             disenchantable: !isBasicRarity(card.rarity) && canDisenchantExpansion(expansion),
-            tradeable: canTradeExpansion(expansion),
+            tradeable: !isBasicRarity(card.rarity) && canTradeExpansion(expansion),
             standardLegal: isExpansionStandardLegal(expansion),
             craftCost: craftCost(card.rarity, card.id),
             disenchantValue: disenchantValue(card.rarity, card.id),

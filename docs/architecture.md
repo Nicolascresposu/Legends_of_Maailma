@@ -35,7 +35,7 @@ The terms the code, the docs and the card text use, and use only in these senses
   cards, never another class's cards. The class is not stored separately: it is always read from
   the hero, so the two cannot disagree.
 - **Basic** — a rarity for cards every player is given for free. Basic cards are never crafted,
-  disenchanted or found in packs, and print no rarity gem. Every other rarity — Common, Rare,
+  disenchanted, traded or found in packs, and print no rarity gem. Every other rarity — Common, Rare,
   Epic, Legendary — is earned, prints a rarity gem, and is priced by the economy.
 - **Starter deck** — the deck of a class a player can always fall back on: one per class, made of
   neutral cards and that class's cards. A new account is given enough copies to build every one.

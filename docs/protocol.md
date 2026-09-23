@@ -76,8 +76,8 @@ types either: the same endpoints would serve a web client unchanged.
 Economy failures return a structured `code` alongside their message — `CARD_NOT_CRAFTABLE`,
 `EXPANSION_NOT_RELEASED`, `INSUFFICIENT_FRAGMENTS`, `TRADE_REVISION_CHANGED` and so on — so a
 client can word the refusal itself rather than relaying a sentence composed on the server. A
-Basic card refused a craft or a disenchant says `BASIC_CARD`, not the policy codes: no expansion
-policy is involved, and none could change the answer.
+Basic card refused a craft, a disenchant or a place in a trade says `BASIC_CARD`, not the policy
+codes: no expansion policy is involved, and none could change the answer.
 
 `POST /api/collection/assess` takes an optional `heroId` alongside `cardIds` and `format`. With
 one, the list is judged as that hero's class and any card of another class is named in
