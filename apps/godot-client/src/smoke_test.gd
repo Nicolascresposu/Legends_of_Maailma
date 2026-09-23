@@ -27,12 +27,18 @@ func _init() -> void:
 	client.connection_changed.connect(func(s: int, d: String) -> void: print("  [conn] ", d))
 
 	print("== Maailma client smoke test ==")
+	# The address under test comes from `--server`, the environment or a saved
+	# setting, so the derivation checks use fixed addresses of their own and
+	# then put the resolved one back rather than assuming the default port.
+	var resolved := client.http_base
+	client.http_base = "http://127.0.0.1:3000"
 	_check("websocket url derives from http base",
 		client.websocket_url() == "ws://127.0.0.1:3000/matches")
 	client.http_base = "https://example.test:8443"
 	_check("https base yields wss",
 		client.websocket_url() == "wss://example.test:8443/matches")
-	client.http_base = "http://127.0.0.1:3000"
+	client.http_base = resolved
+	print("  server ", resolved)
 
 	# Let the client enter the tree before issuing HTTP requests.
 	await process_frame
@@ -60,9 +66,13 @@ func _on_state(new_state: Dictionary) -> void:
 func _on_events(events: Array) -> void:
 	# Every event must render without crashing and without leaking raw ids.
 	for event in events:
+		var kind := str(event.get("type", "?"))
 		var line := ActionFormatter.event_line(event, state, library)
-		if line.strip_edges() == "":
-			_fail("empty event line for " + str(event.get("type", "?")))
+		# Silent events format to "" on purpose; any other empty line is a gap.
+		if line.strip_edges() == "" and not ActionFormatter.is_silent(kind):
+			_fail("empty event line for " + kind)
+		elif line.strip_edges() != "" and ActionFormatter.is_silent(kind):
+			_fail("a silent event was narrated: " + kind)
 
 func _on_actions(player: String, list: Array) -> void:
 	if finished or player != "player-a":

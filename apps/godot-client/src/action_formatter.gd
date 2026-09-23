@@ -116,6 +116,16 @@ static func label_for(action: Dictionary, state: Dictionary, player_id: String, 
 			return "End Turn"
 	return JSON.stringify(action)
 
+## Events that are bookkeeping, not news: a resolved marker whose damage lines
+## already told the story. They format to "" and the feed skips them.
+##
+## Listed rather than left implicit so an empty line can be told apart from a
+## missing one — any other event that formats to "" is a gap in this file.
+const SILENT_EVENTS := ["HERO_ATTACK_RESOLVED"]
+
+static func is_silent(kind: String) -> bool:
+	return SILENT_EVENTS.has(kind)
+
 ## Human-readable one-liners for the event feed.
 static func event_line(event: Dictionary, state: Dictionary, library: CardLibrary) -> String:
 	var kind := str(event.get("type", ""))
@@ -186,6 +196,7 @@ static func event_line(event: Dictionary, state: Dictionary, library: CardLibrar
 				library.card_name(str(event.get("cardDefinitionId", ""))),
 			]
 		"HERO_ATTACK_RESOLVED":
+			# Silent: see SILENT_EVENTS.
 			return ""
 		"STATUS_APPLIED":
 			return "%s gains a status." % target

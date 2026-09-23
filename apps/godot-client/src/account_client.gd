@@ -328,6 +328,19 @@ func assess(card_ids: Array, format: String = "STANDARD", hero_id: String = "") 
 	var body := {"cardIds": card_ids, "format": format}
 	if hero_id != "":
 		body["heroId"] = hero_id
+	# A deck builder asks after every edit. Only the latest list matters, so an
+	# ask made mid-flight replaces any still waiting and is sent once the
+	# current one returns — rather than being dropped, which left the verdict
+	# on screen describing an earlier version of the deck.
+	if _busy(_assess_request):
+		_assess_waiting = body
+		return
+	_send_assess(body)
+
+## The newest assessment asked for while another was in flight, or empty.
+var _assess_waiting: Dictionary = {}
+
+func _send_assess(body: Dictionary) -> void:
 	var error := _assess_request.request(
 		http_base + "/api/collection/assess",
 		_headers(),
@@ -340,6 +353,13 @@ func assess(card_ids: Array, format: String = "STANDARD", hero_id: String = "") 
 func _on_assess_completed(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
+	# A newer list is waiting: this verdict is already out of date, so it is
+	# not shown, and the newer one is asked about instead.
+	if not _assess_waiting.is_empty():
+		var next := _assess_waiting
+		_assess_waiting = {}
+		call_deferred("_send_assess", next)
+		return
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
@@ -350,8 +370,17 @@ func _on_assess_completed(
 
 # --- Decks ------------------------------------------------------------------
 
+## Set when the deck list was asked for mid-read; one more read follows.
+var _decks_stale := false
+
 func fetch_decks() -> void:
 	await _await_tree()
+	# The collection screen and the match deck picker both ask for this list,
+	# often in the same frame; a second ask is folded into a follow-up read
+	# rather than dropped.
+	if _busy(_deck_request):
+		_decks_stale = true
+		return
 	var error := _deck_request.request(http_base + "/api/decks", _headers(false))
 	if error != OK:
 		request_failed.emit("Could not load your decks.")
@@ -360,13 +389,16 @@ func _on_decks_completed(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		_decks_stale = false
 		request_failed.emit("Could not load your decks.")
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
-	if typeof(parsed) != TYPE_DICTIONARY:
-		return
-	var list: Variant = (parsed as Dictionary).get("decks", [])
-	decks_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+	if typeof(parsed) == TYPE_DICTIONARY:
+		var list: Variant = (parsed as Dictionary).get("decks", [])
+		decks_loaded.emit(list if typeof(list) == TYPE_ARRAY else [])
+	if _decks_stale:
+		_decks_stale = false
+		fetch_decks()
 
 func save_deck(
 	name: String,
@@ -430,8 +462,14 @@ func _on_deck_mutated(
 ## What the last mutation was, so the reply can be reported as what it was.
 var _pending_economy_operation := ""
 
+## Set when the balance was asked for mid-read; one more read follows.
+var _fragments_stale := false
+
 func fetch_fragments() -> void:
 	await _await_tree()
+	if _busy(_economy_request):
+		_fragments_stale = true
+		return
 	var error := _economy_request.request(http_base + "/api/economy", _headers(false))
 	if error != OK:
 		request_failed.emit("Could not load your Fragments.")
@@ -440,61 +478,81 @@ func _on_balance_completed(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		_fragments_stale = false
 		request_failed.emit("Could not load your Fragments.")
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
-	if typeof(parsed) != TYPE_DICTIONARY:
-		return
-	fragments_changed.emit(int((parsed as Dictionary).get("fragments", 0)))
+	if typeof(parsed) == TYPE_DICTIONARY:
+		fragments_changed.emit(int((parsed as Dictionary).get("fragments", 0)))
+	if _fragments_stale:
+		_fragments_stale = false
+		fetch_fragments()
 
 ## A fresh id per attempt, so a retry after a lost reply cannot craft twice.
 func _new_request_id(prefix: String) -> String:
 	return "%s-%d-%d" % [prefix, Time.get_ticks_msec(), randi()]
 
 func craft_card(card_id: String, quantity: int = 1, request_id: String = "") -> void:
-	await _await_tree()
-	_pending_economy_operation = "CRAFT"
-	var body := {
+	_queue_economy("CRAFT", "/api/economy/craft", {
 		"cardId": card_id,
 		"quantity": quantity,
 		"requestId": request_id if request_id != "" else _new_request_id("craft"),
-	}
-	var error := _economy_mutate_request.request(
-		http_base + "/api/economy/craft", _headers(), HTTPClient.METHOD_POST, JSON.stringify(body)
-	)
-	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+	})
 
 func disenchant_card(card_id: String, quantity: int = 1, request_id: String = "") -> void:
-	await _await_tree()
-	_pending_economy_operation = "DISENCHANT"
-	var body := {
+	_queue_economy("DISENCHANT", "/api/economy/disenchant", {
 		"cardId": card_id,
 		"quantity": quantity,
 		"requestId": request_id if request_id != "" else _new_request_id("dust"),
-	}
-	var error := _economy_mutate_request.request(
-		http_base + "/api/economy/disenchant",
-		_headers(),
-		HTTPClient.METHOD_POST,
-		JSON.stringify(body)
-	)
-	if error != OK:
-		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+	})
 
 ## Disenchants every copy held above the playable limit. Always explicit: the
 ## client asks for this, it never happens because spares were noticed.
 func disenchant_extras(request_id: String = "") -> void:
+	_queue_economy("DISENCHANT_EXTRAS", "/api/economy/extras", {
+		"requestId": request_id if request_id != "" else _new_request_id("extras"),
+	})
+
+## Economy mutations waiting their turn: {operation, path, body}.
+##
+## One request node carries one call at a time, and a second call on a busy
+## node is dropped outright — which for a craft or a disenchant means a click
+## that silently did nothing. So they queue, and run in the order asked.
+var _economy_queue: Array = []
+var _economy_in_flight := false
+
+func _queue_economy(operation: String, path: String, body: Dictionary) -> void:
 	await _await_tree()
-	_pending_economy_operation = "DISENCHANT_EXTRAS"
-	var body := {"requestId": request_id if request_id != "" else _new_request_id("extras")}
+	_economy_queue.append({"operation": operation, "path": path, "body": body})
+	_pump_economy()
+
+func _pump_economy() -> void:
+	if _economy_in_flight or _economy_queue.is_empty():
+		return
+	var next: Dictionary = _economy_queue.pop_front()
+	_pending_economy_operation = str(next["operation"])
 	var error := _economy_mutate_request.request(
-		http_base + "/api/economy/extras", _headers(), HTTPClient.METHOD_POST, JSON.stringify(body)
+		http_base + str(next["path"]),
+		_headers(),
+		HTTPClient.METHOD_POST,
+		JSON.stringify(next["body"])
 	)
 	if error != OK:
+		_pending_economy_operation = ""
 		economy_refused.emit("UNREACHABLE", "Could not reach the server.")
+		call_deferred("_pump_economy")
+		return
+	_economy_in_flight = true
 
 func _on_economy_mutated(
+	result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray
+) -> void:
+	_economy_in_flight = false
+	_handle_economy_reply(result, response_code, headers, body)
+	# Deferred, so the node has fully settled from this reply before the next.
+	call_deferred("_pump_economy")
+
+func _handle_economy_reply(
 	result: int, response_code: int, _h: PackedStringArray, body: PackedByteArray
 ) -> void:
 	var operation := _pending_economy_operation

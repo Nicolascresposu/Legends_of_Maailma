@@ -111,12 +111,17 @@ func _init() -> void:
 	# path rather than the spending one.
 	var expensive := _card_with_highest_craft_cost()
 	if expensive != "":
+		# Cleared first: the pack opened above left its own message in the
+		# status line, and waiting for "any text" would return at once — before
+		# the craft had even been answered.
+		screen._economy_status.text = ""
 		main.accounts.craft_card(expensive, 1)
 		for i in range(240):
 			await process_frame
 			if screen._economy_status.text != "":
 				break
-		_check("a refused craft is explained", screen._economy_status.text != "")
+		_check("a refused craft is explained",
+			screen._economy_status.text.contains("enough Fragments"))
 		print("  refusal: ", screen._economy_status.text)
 
 	# --- Disenchanting a spare returns Fragments. ---
