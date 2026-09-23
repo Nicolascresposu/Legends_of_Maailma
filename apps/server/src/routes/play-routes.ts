@@ -1,13 +1,12 @@
 import express from 'express';
 import { getScenarioDefinition } from '@maailma/card-definitions';
 import type { Logger } from '../logger.js';
-import type { MatchManager } from '../match-manager.js';
+import { AI_PLAYER_ID, type MatchManager } from '../match-manager.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
 import { requireUser, respondAccountError } from './auth-routes.js';
 
-/** The seat an AI opponent plays from in a player-versus-environment match. */
-export const AI_PLAYER_ID = 'ai';
+export { AI_PLAYER_ID };
 
 /**
  * Starting and joining matches as a signed-in player.

@@ -345,6 +345,62 @@ should join), `CHALLENGE_DECLINED`, `CHALLENGE_CANCELLED`, `FRIEND_REQUEST` and 
 The lobby is best-effort: every event it pushes is also readable over REST, so nothing depends on
 a socket having been open.
 
+## Admin debug API
+
+`/api/admin` is the backend for an admin debug panel: look inside any account and put it into
+whatever state a test needs. It needs an account with `isAdmin` set — `alice@maailma.dev` is one
+after `npm run seed` — and answers everyone else with a 404, so it cannot be found by probing.
+
+```text
+GET    /api/admin                                  confirms the caller is an admin
+GET    /api/admin/registry                         every card, hero, class, scenario, pack and
+                                                   expansion, unreleased included
+
+GET    /api/admin/users?search=&limit=             find accounts by display name or email
+GET    /api/admin/users/:id                        one account: balance, collection size, decks with
+                                                   readiness, friends, challenges, open trades,
+                                                   live matches, sessions, recent ledger
+PATCH  /api/admin/users/:id                        { isAdmin } — never your own rights away
+POST   /api/admin/users/:id/sessions               a session token for that account: sign in as them
+DELETE /api/admin/users/:id/sessions               sign them out everywhere
+
+GET    /api/admin/users/:id/collection             what they see, and the stored rows behind it
+PUT    /api/admin/users/:id/collection/:cardId     { quantity } — exact count, 0 removes
+POST   /api/admin/users/:id/collection/grant-all   { copies?, includeUnreleased? } — a playset of all
+POST   /api/admin/users/:id/collection/reset       back to the starter cards
+PUT    /api/admin/users/:id/fragments              { balance } — set exactly
+POST   /api/admin/users/:id/fragments              { amount } — add, or remove when negative
+GET    /api/admin/users/:id/ledger?limit=          the account's economy ledger
+
+GET    /api/admin/users/:id/decks                  their decks, with readiness
+POST   /api/admin/users/:id/decks/starter          { heroId, name? } — a ready starter deck
+DELETE /api/admin/users/:id/decks/:deckId
+POST   /api/admin/users/:id/packs/:packId/open     { seed? } — open a pack for them
+
+POST   /api/admin/friendships                      { userA, userB } — friends at once
+GET    /api/admin/users/:id/trades
+POST   /api/admin/trades/:tradeId/cancel
+
+GET    /api/admin/matches                          every live match
+POST   /api/admin/matches                          { userId, scenarioId, heroId?, cardIds? }
+GET    /api/admin/matches/:id                      state, setup, and each side's legal actions
+DELETE /api/admin/matches/:id                      end it
+```
+
+Two rules hold for everything it does:
+
+- **Every change is on the record.** Each one is logged as `Admin action` with the admin and the
+  account it touched. Changes to cards and Fragments are also written to that account's economy
+  ledger as `ADMIN_GRANT`, with the admin and the action in the metadata, so a balance or a
+  collection can always be accounted for.
+- **Ownership may be skipped, legality may not.** A debug match can use cards the player does not
+  own — that is how to try a card before anyone has it — but the engine still judges the deck,
+  class included. A pack opened for a player respects the expansion's policy, and a starter deck
+  is saved like any other deck.
+
+A debug match is played under the account's own id, so a client signed in as that player (a
+session from `POST /users/:id/sessions` does it) can join it by id.
+
 ## Logging
 
 The server writes structured logs to stdout. Two environment variables control them:
@@ -450,7 +506,7 @@ replays the original outcome instead of spending twice.
 
 Accounts, decks, collections, Fragments and trades are PostgreSQL-backed. Active matches still use
 `MatchRepository`, implemented in memory so a Redis-backed store can replace it later. Expansion
-policies are editable through an admin API but have no admin web app yet. Progression, complex boss
+policies and accounts are reachable through the admin API, which has no panel of its own yet. Progression, complex boss
 scripting, dynamic battlefield resizing, Locations, and production matchmaking remain outside this
 milestone, as do an auction house, real-money purchases and Fragment transfers between players.
 

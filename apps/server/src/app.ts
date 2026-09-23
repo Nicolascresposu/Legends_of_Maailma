@@ -25,6 +25,9 @@ import { createPackRouter } from './routes/pack-routes.js';
 import { createTradeRouter } from './routes/trade-routes.js';
 import { createSocialRouter } from './routes/social-routes.js';
 import { createPlayRouter } from './routes/play-routes.js';
+import { createAdminRouter } from './routes/admin-routes.js';
+import { AdminService } from './services/admin-service.js';
+import type { PrismaClient } from '@prisma/client';
 
 /**
  * Database-backed features. Omitted, the server runs exactly as it did before
@@ -41,6 +44,11 @@ export interface AppServices {
   packs: PackService;
   trades: TradeService;
   lobby: LobbyHub;
+  /**
+   * The database client, for the admin debug API. Optional so a deployment —
+   * or a test — can run without admin tooling at all.
+   */
+  prisma?: PrismaClient;
   databaseReachable?: () => Promise<boolean>;
 }
 
@@ -172,6 +180,10 @@ export function createApp(
     app.use('/api/packs', createPackRouter(services.packs, logger));
     app.use('/api/trades', createTradeRouter(services.trades, logger));
     app.use('/api/play', createPlayRouter(services.decks, manager, logger));
+    if (services.prisma) {
+      const admin = new AdminService({ ...services, prisma: services.prisma, manager });
+      app.use('/api/admin', createAdminRouter(admin, logger));
+    }
     app.use(
       '/api/social',
       createSocialRouter(services.social, services.decks, manager, services.lobby, logger),

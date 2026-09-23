@@ -8,6 +8,8 @@ export interface MatchRepository {
   get(matchId: string): GameEngine | undefined;
   save(engine: GameEngine): void;
   delete(matchId: string): boolean;
+  /** Every live match, for operator tooling. */
+  list(): GameEngine[];
 }
 
 export class InMemoryMatchRepository implements MatchRepository {
@@ -23,5 +25,9 @@ export class InMemoryMatchRepository implements MatchRepository {
 
   delete(matchId: string): boolean {
     return this.matches.delete(matchId);
+  }
+
+  list(): GameEngine[] {
+    return [...this.matches.values()];
   }
 }

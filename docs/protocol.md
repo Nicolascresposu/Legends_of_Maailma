@@ -95,5 +95,8 @@ Joining without a `deckId` is how a client asks first: a player already seated i
 and one who needs a deck is told `DECK_REQUIRED`. Challenges work the same way — the sender names
 a `deckId` when sending and the recipient when accepting, with no fallback deck.
 
+`/api/admin` is the admin debug API, listed in the README. It is reachable only by an account
+with `isAdmin` set; everyone else gets a 404, whatever the route.
+
 Every economy mutation accepts an optional client-chosen `requestId`. A retry after a lost response
 replays the original outcome instead of executing a second time.

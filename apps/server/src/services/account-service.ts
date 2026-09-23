@@ -127,6 +127,28 @@ export class AccountService {
     return result.count;
   }
 
+  /**
+   * A session for a user, issued without their password.
+   *
+   * For administrator tooling only — signing in as a player to see what they
+   * see. It is an ordinary session in every other respect: it expires on the
+   * usual schedule and `revokeSessions` ends it.
+   */
+  async issueSessionFor(userId: string): Promise<SignedInSession> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AccountError('USER_NOT_FOUND', 'No such player', 404);
+    return await this.startSession(user);
+  }
+
+  /** Ends every live session a user has, signing them out everywhere. */
+  async revokeSessions(userId: string): Promise<number> {
+    const result = await this.prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
   private async startSession(user: User): Promise<SignedInSession> {
     const issued = issueToken(new Date(), SESSION_TTL_MS);
     await this.prisma.session.create({

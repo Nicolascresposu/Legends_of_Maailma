@@ -40,6 +40,7 @@ const server = createServer(
     packs,
     trades,
     lobby,
+    prisma,
     databaseReachable: () => databaseReachable(),
   }),
 );

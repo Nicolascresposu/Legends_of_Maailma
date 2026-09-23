@@ -23,6 +23,9 @@ export interface ManagedActionResult {
  */
 export const OPEN_SEAT_ID = 'open-seat';
 
+/** The seat an AI opponent plays from in a player-versus-environment match. */
+export const AI_PLAYER_ID = 'ai';
+
 export class MatchManager {
   private readonly ai = new BasicAIController();
   /** Matches still waiting for an opponent, by match id. */
@@ -97,6 +100,20 @@ export class MatchManager {
 
   get(matchId: string): GameEngine | undefined {
     return this.matches.get(matchId);
+  }
+
+  /** Every live match. For operator tooling; players reach matches by id. */
+  list(): GameEngine[] {
+    return this.matches.list();
+  }
+
+  /**
+   * Removes a match outright. Anyone still connected finds it gone on their
+   * next message, exactly as if the server had restarted.
+   */
+  remove(matchId: string): boolean {
+    this.openSeats.delete(matchId);
+    return this.matches.delete(matchId);
   }
 
   private build(
