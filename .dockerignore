@@ -1,0 +1,13 @@
+# Only the server and its workspace packages go into the image.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+coverage
+.git
+.env
+**/.env
+*.exe
+*.md
+apps/godot-client
+tests
+deploy

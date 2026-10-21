@@ -452,6 +452,19 @@ line it produces, so a rejection can be traced back to its request. WebSocket li
 instead of writing to stdout; `apps/server/src/logger.ts` is the seam to swap in a hosted log
 shipper.
 
+## Deployment
+
+The server builds as a Docker image, and `deploy/docker-compose.yml` runs it with Postgres,
+applying migrations before it starts:
+
+```bash
+cd deploy && cp .env.example .env    # set POSTGRES_PASSWORD
+docker compose up -d --build
+```
+
+[docs/deployment.md](docs/deployment.md) covers exposing it through nginx and frp, the first admin
+account, and backups.
+
 ## Useful commands
 
 ```bash

@@ -1,0 +1,71 @@
+# Postgres, a one-shot migration, and the server. Run from this directory:
+#
+#   cp .env.example .env    # then set POSTGRES_PASSWORD
+#   docker compose up -d --build
+#
+# Lives here rather than at the repository root so it reads deploy/.env, not
+# the development .env there.
+name: maailma
+
+x-database-url: &database-url postgresql://${POSTGRES_USER:-maailma}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@db:5432/${POSTGRES_DB:-maailma}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-maailma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-maailma}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *logging
+
+  migrate:
+    build:
+      context: ..
+      target: migrate
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+    logging: *logging
+
+  server:
+    build:
+      context: ..
+      target: runtime
+    image: maailma-server
+    restart: unless-stopped
+    # Node as PID 1 ignores SIGTERM; tini forwards it so stops are immediate.
+    init: true
+    environment:
+      DATABASE_URL: *database-url
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+    # Loopback only by default: frpc on this host reaches it, the LAN does not.
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3000}:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *logging
+
+volumes:
+  db-data:
