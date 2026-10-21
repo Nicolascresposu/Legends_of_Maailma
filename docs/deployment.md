@@ -64,9 +64,9 @@ journalctl -fu maailma-update
 ```
 
 The service runs as the owner of the checkout, with the `docker` group added for it alone, so that
-user needs no Docker access of their own. The packages must be public for the timer to pull them
-without logging in; GitHub makes a new package private, so after the first publish set each one's
-visibility under the package's settings.
+user needs no Docker access of their own. The timer pulls without logging in, so the packages must
+be public; they take the repository's visibility when first published, so a private repository
+needs each package made public under its settings.
 
 To roll back, set `IMAGE_TAG` to an earlier commit's SHA; to follow `main` again, set it back to
 `latest`. A migration that fails stops the run before the server is replaced.
