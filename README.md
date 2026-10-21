@@ -462,8 +462,9 @@ cd deploy && cp .env.example .env    # set POSTGRES_PASSWORD
 docker compose up -d --build
 ```
 
-[docs/deployment.md](docs/deployment.md) covers exposing it through nginx and frp, the first admin
-account, and backups.
+Each push to `main` that passes CI publishes the images to GitHub Container Registry, and a timer on
+the host deploys them. [docs/deployment.md](docs/deployment.md) covers that, exposing the server
+through nginx and frp, the first admin account, and backups.
 
 ## Useful commands
 

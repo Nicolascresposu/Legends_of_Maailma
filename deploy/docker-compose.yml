@@ -3,6 +3,8 @@
 #   cp .env.example .env    # then set POSTGRES_PASSWORD
 #   docker compose up -d --build
 #
+# With IMAGE_PREFIX set, deploy/update.sh pulls published images instead.
+#
 # Lives here rather than at the repository root so it reads deploy/.env, not
 # the development .env there.
 name: maailma
@@ -36,6 +38,8 @@ services:
     build:
       context: ..
       target: migrate
+    # IMAGE_PREFIX in .env selects the images GitHub Actions publishes; unset, a local build uses this name.
+    image: ${IMAGE_PREFIX:-maailma}-migrate:${IMAGE_TAG:-latest}
     environment:
       DATABASE_URL: *database-url
     depends_on:
@@ -48,7 +52,7 @@ services:
     build:
       context: ..
       target: runtime
-    image: maailma-server
+    image: ${IMAGE_PREFIX:-maailma}-server:${IMAGE_TAG:-latest}
     restart: unless-stopped
     # Node as PID 1 ignores SIGTERM; tini forwards it so stops are immediate.
     init: true

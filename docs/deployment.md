@@ -23,7 +23,7 @@ curl http://127.0.0.1:3000/health   # {"ok":true,"service":"maailma-tcg","databa
 ```
 
 `up` starts Postgres, waits for it, applies any pending migrations with `prisma migrate deploy`,
-and only then starts the server. To deploy a new version:
+and only then starts the server. Without continuous deployment, a new version is:
 
 ```bash
 git pull
@@ -46,6 +46,30 @@ docker compose exec db psql -U maailma -d maailma \
 ```
 
 Further admins can be made from the Admin UI.
+
+### Continuous deployment
+
+Every push to `main` deploys itself. `.github/workflows/deploy.yml` lints, builds and tests it
+against a throwaway Postgres, then publishes two images to GitHub Container Registry:
+`maailma-server` and `maailma-migrate`, each tagged `latest` and with the commit SHA. GitHub never
+connects to the home machine: a timer there runs `deploy/update.sh` every two minutes, which
+fast-forwards the checkout, pulls the images, migrates, restarts the server and waits for it to be
+healthy. A run that finds nothing new changes nothing.
+
+To switch it on, set `IMAGE_PREFIX` in `deploy/.env` (see `.env.example`), then once:
+
+```bash
+sudo sh deploy/install-updater.sh
+journalctl -fu maailma-update
+```
+
+The service runs as the owner of the checkout, with the `docker` group added for it alone, so that
+user needs no Docker access of their own. The packages must be public for the timer to pull them
+without logging in; GitHub makes a new package private, so after the first publish set each one's
+visibility under the package's settings.
+
+To roll back, set `IMAGE_TAG` to an earlier commit's SHA; to follow `main` again, set it back to
+`latest`. A migration that fails stops the run before the server is replaced.
 
 ### Backups
 
@@ -87,7 +111,8 @@ that works too: point nginx's `proxy_pass` at the vhost port and keep the `Host`
 ## nginx
 
 The server needs WebSocket upgrades on `/matches` and `/lobby`, and it does not ping idle sockets,
-so the read timeout must outlast a quiet turn. The lobby socket carries the session token in its
+so the read timeout must outlast a quiet turn. For the same reason, if the domain is on Cloudflare,
+make its record DNS only: Cloudflare's proxy closes a WebSocket that is quiet for 100 seconds. The lobby socket carries the session token in its
 query string, so that location keeps it out of the access log.
 
 ```nginx
@@ -97,8 +122,9 @@ map $http_upgrade $connection_upgrade {
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    # nginx 1.25.1 and later prefer `listen 443 ssl;` with a separate `http2 on;`.
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name maailma.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/maailma.example.com/fullchain.pem;
@@ -125,6 +151,7 @@ server {
 
 server {
     listen 80;
+    listen [::]:80;
     server_name maailma.example.com;
     return 301 https://$host$request_uri;
 }
