@@ -122,9 +122,10 @@ map $http_upgrade $connection_upgrade {
 }
 
 server {
-    # nginx 1.25.1 and later prefer `listen 443 ssl;` with a separate `http2 on;`.
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    # No http2: the client speaks HTTP/1.1, and before nginx 1.25.1 enabling it here would enable
+    # it for every site sharing this port.
+    listen 443 ssl;
+    listen [::]:443 ssl;
     server_name maailma.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/maailma.example.com/fullchain.pem;
