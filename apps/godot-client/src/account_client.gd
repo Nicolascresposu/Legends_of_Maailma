@@ -58,6 +58,12 @@ signal admin_response(tag: String, ok: bool, payload: Dictionary)
 var http_base := ClientConfig.http_base()
 var token := ""
 var user: Dictionary = {}
+## The remembered account in use, or "" for a session that is not remembered
+## (an admin signed in as a player).
+var account_key := ""
+## The account whose saved session is being checked, so a rejection can say
+## whose password is needed.
+var restoring: SessionStore.Account = null
 
 ## One HTTPRequest per concern: a single node handles one call at a time, so
 ## sharing would drop whichever request started second.
@@ -222,6 +228,8 @@ func login(email: String, password: String) -> void:
 	if error != OK:
 		request_failed.emit("Could not reach the server.")
 
+## Ends the session. The account stays remembered, but needs its password next
+## time.
 func sign_out() -> void:
 	if token == "":
 		return
@@ -230,10 +238,42 @@ func sign_out() -> void:
 	_auth_request.request(
 		http_base + "/api/auth/logout", _headers(false), HTTPClient.METHOD_POST, ""
 	)
+	# Signing out must not leave a token that would resume on the next run.
+	SessionStore.end_session(account_key)
+	_leave()
+
+## Returns to the sign-in screen with the session still alive, so the account
+## can be picked again without its password.
+func switch_account() -> void:
+	if token == "":
+		return
+	_leave()
+
+## Removes a remembered account, ending its session on the server if it has one.
+func forget_account(account: SessionStore.Account) -> void:
+	SessionStore.forget(account.key)
+	if account.token == "":
+		return
+	await _await_tree()
+	# A node of its own: this must not displace a sign-in on the auth request,
+	# and nothing waits on the reply.
+	var request := HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(func(_r: int, _c: int, _h: PackedStringArray, _b: PackedByteArray) -> void:
+		request.queue_free())
+	var error := request.request(
+		account.server + "/api/auth/logout",
+		PackedStringArray(["Authorization: Bearer " + account.token]),
+		HTTPClient.METHOD_POST,
+		""
+	)
+	if error != OK:
+		request.queue_free()
+
+func _leave() -> void:
 	token = ""
 	user = {}
-	# Signing out must not leave a token that would resume on the next run.
-	SessionStore.clear()
+	account_key = ""
 	signed_out.emit()
 
 func _on_auth_completed(
@@ -257,34 +297,39 @@ func _on_auth_completed(
 
 ## Becomes the account a session belongs to: a sign-in, a registration, or an
 ## admin signing in as a player. `payload` is {token, user, expiresAt}.
-func adopt_session(payload: Dictionary) -> void:
+##
+## An admin's session as a player is not remembered: that account is not the
+## admin's to keep, and the next launch should come back as the admin.
+func adopt_session(payload: Dictionary, remember := true) -> void:
 	token = str(payload.get("token", ""))
 	var who: Variant = payload.get("user", {})
 	user = who if typeof(who) == TYPE_DICTIONARY else {}
-	# Remember the session so the next run starts signed in.
-	SessionStore.save(
-		token,
-		str(user.get("displayName", "")),
-		http_base,
-		str(payload.get("expiresAt", ""))
-	)
+	account_key = ""
+	if remember:
+		account_key = SessionStore.remember(user, token, http_base, str(payload.get("expiresAt", "")))
 	signed_in.emit(user)
 
 # --- Restoring a saved session ----------------------------------------------
 
-## Tries to resume the session saved by a previous run.
+## At launch, signs back in to the last account, when that is turned on and its
+## session still lives.
+func restore_session() -> void:
+	var account := SessionStore.resumable() if SessionStore.auto_sign_in() else null
+	if account == null:
+		restore_failed.emit("", true)
+		return
+	resume(account)
+
+## Signs in to a remembered account with its saved session.
 ##
 ## The token is only trusted once `/me` accepts it, so a revoked or expired
 ## session lands on the sign-in form rather than a half-working collection.
-func restore_session() -> void:
-	var saved := SessionStore.load_saved()
-	if saved == null:
-		restore_failed.emit("", true)
-		return
+func resume(account: SessionStore.Account) -> void:
+	restoring = account
 	# The token belongs to the server that issued it.
-	if saved.server != "":
-		http_base = saved.server
-	token = saved.token
+	if account.server != "":
+		http_base = account.server
+	token = account.token
 	restore_started.emit()
 	await _await_tree()
 	var error := _me_request.request(http_base + "/api/auth/me", _headers(false))
@@ -303,19 +348,23 @@ func _on_me_completed(
 		return
 	if response_code != 200:
 		# The server rejected it, so it will never work again.
-		token = ""
-		SessionStore.clear()
-		restore_failed.emit("Your session has expired; sign in again.", false)
+		_reject_restore()
 		return
 	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
 	var who: Variant = (parsed as Dictionary).get("user", {}) if typeof(parsed) == TYPE_DICTIONARY else {}
 	if typeof(who) != TYPE_DICTIONARY or str((who as Dictionary).get("id", "")) == "":
-		token = ""
-		SessionStore.clear()
-		restore_failed.emit("Your session has expired; sign in again.", false)
+		_reject_restore()
 		return
 	user = who
+	# Refreshes the name and email, and makes this the most recent account.
+	account_key = SessionStore.remember(user, token, http_base, "")
 	signed_in.emit(user)
+
+func _reject_restore() -> void:
+	token = ""
+	if restoring != null:
+		SessionStore.end_session(restoring.key)
+	restore_failed.emit("Your session has expired; sign in again.", false)
 
 # --- Collection -------------------------------------------------------------
 

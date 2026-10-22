@@ -69,25 +69,33 @@ MAAILMA_SERVER=127.0.0.1:3100 godot --path apps/godot-client # 2. environment
 A command-line or environment address applies to that run only and is not saved, so `--server=`
 never changes the stored default. Changing the address in the UI does save it, and both the
 sign-in screen and the match bar accept it. `localhost:3100`, `127.0.0.1:3100` and
-`http://127.0.0.1:3100/` are all accepted and normalized to the same value. The resolved address
+`http://127.0.0.1:3100/` are all accepted and normalized to the same value. Without a scheme, a
+domain name gets `https://` and localhost or an IP address gets `http://`. The resolved address
 and where it came from are printed at startup.
 
 A saved session records the server that issued it, so pointing the client somewhere else does not
 try to reuse a token from the previous one.
 
-### Staying signed in
+### Saved accounts
 
-Signing in saves the session token to Godot's per-user data directory
-(`user://session.cfg`), and the next launch resumes it: the screen shows that it is signing you
-back in, checks the token against `GET /api/auth/me`, and lands on the collection when the server
-confirms it. Tokens last 14 days.
+Every account signed in on this machine is remembered, with its session token, in Godot's per-user
+data directory (`user://accounts.cfg`). Passwords are never stored. The sign-in screen lists them:
+choosing one whose session still lives signs straight in, and choosing one without asks only for
+its password, with the email filled in. **Forget** removes an account and ends its session.
+
+With **Sign in automatically** ticked (the default), a launch resumes the most recently used
+account: the screen shows that it is signing you back in, checks the token against
+`GET /api/auth/me`, and lands on the collection when the server confirms it. Tokens last 14 days.
+
+In the collection, **Switch account** returns to the sign-in screen and keeps the session, to pick
+again later; **Sign out** ends the session, keeping the account listed for its password. An admin
+signed in as a player is not remembered.
 
 Nothing is trusted until the server agrees. A token that is expired, revoked or simply rejected is
 discarded and the sign-in form appears with a short explanation, rather than a half-working
-collection. A token already past its expiry is dropped without a request at all. Signing out
-deletes the saved session, so it will not resume.
+collection. A token already past its expiry is dropped without a request at all.
 
-The token is stored in plain text. Anything running as that user could read it, which is the same
+Tokens are stored in plain text. Anything running as that user could read it, which is the same
 trust level as most desktop game launchers; encrypting it with a key shipped inside the client
 would be obfuscation rather than protection.
 
@@ -143,7 +151,7 @@ Client scripts:
 - `src/card_reveal.gd` — the hover reveal for cards in play.
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
-- `src/session_store.gd` — remembers a signed-in session between runs.
+- `src/session_store.gd` — remembers the accounts signed in on this machine, for quick sign-in.
 - `src/client_config.gd` — resolves the server address from the command line, environment or disk.
 - `src/action_formatter.gd` — readable labels for actions and events.
 - `src/smoke_test.gd` — headless check of the transport and formatting layers.
@@ -162,7 +170,7 @@ Client scripts:
 - `src/admin_ui_test.gd` — signs in as an admin, flips the admin UI switch, works on an account in
   the panel, and edits a debug match from the match view. Signs in as the seeded admin unless given
   `--admin-email=` and `--admin-password=`; `--screenshot-dir=` saves what it saw.
-- `src/session_test.gd` — signs in, restarts the scene, and checks the session resumes.
+- `src/session_test.gd` — remembered accounts: resuming, switching, signing out, forgetting.
 - `src/config_test.gd` — checks address parsing and override precedence.
 
 With the server running, the client's own tests can be run from the command line:

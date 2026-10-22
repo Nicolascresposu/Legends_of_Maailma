@@ -47,6 +47,10 @@ var _root: VBoxContainer
 var _auth_box: VBoxContainer
 ## The inputs and buttons, hidden while a saved session is being checked.
 var _auth_form: HBoxContainer
+## Accounts signed in on this machine before, for quick sign-in.
+var _saved_box: VBoxContainer
+var _saved_list: VBoxContainer
+var _auto_sign_in: CheckBox
 var _server_input: LineEdit
 var _main_box: HBoxContainer
 var _email_input: LineEdit
@@ -114,6 +118,17 @@ func _build_auth() -> Control:
 	title.add_theme_font_size_override("font_size", 20)
 	_auth_box.add_child(title)
 
+	_saved_box = VBoxContainer.new()
+	_saved_box.add_theme_constant_override("separation", 4)
+	_auth_box.add_child(_saved_box)
+	var saved_title := Label.new()
+	saved_title.text = "Saved accounts"
+	saved_title.add_theme_font_size_override("font_size", 13)
+	_saved_box.add_child(saved_title)
+	_saved_list = VBoxContainer.new()
+	_saved_list.add_theme_constant_override("separation", 4)
+	_saved_box.add_child(_saved_list)
+
 	_auth_form = HBoxContainer.new()
 	_auth_form.add_theme_constant_override("separation", 6)
 	_auth_box.add_child(_auth_form)
@@ -165,11 +180,73 @@ func _build_auth() -> Control:
 	_server_input.focus_exited.connect(func() -> void: _apply_server(_server_input.text))
 	server_row.add_child(_server_input)
 
+	_auto_sign_in = CheckBox.new()
+	_auto_sign_in.text = "Sign in automatically"
+	_auto_sign_in.tooltip_text = "Start signed in to the last account used, while its session lasts."
+	_auto_sign_in.button_pressed = SessionStore.auto_sign_in()
+	_auto_sign_in.toggled.connect(func(on: bool) -> void: SessionStore.set_auto_sign_in(on))
+	server_row.add_child(_auto_sign_in)
+
 	_auth_status = Label.new()
 	_auth_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_auth_status.text = "New accounts start with the starter cards."
 	_auth_box.add_child(_auth_status)
+	_render_saved_accounts()
 	return _auth_box
+
+## One row per remembered account: its name to sign in with, and Forget.
+func _render_saved_accounts() -> void:
+	for child in _saved_list.get_children():
+		child.queue_free()
+	var list := SessionStore.accounts()
+	_saved_box.visible = not list.is_empty()
+	for account in list:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		_saved_list.add_child(row)
+
+		var pick := Button.new()
+		pick.text = "%s  ·  %s" % [account.display_name, account.email]
+		if account.token == "":
+			pick.text += "  (password needed)"
+		pick.tooltip_text = account.server
+		pick.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		# A fixed width keeps every Forget in one column; long names are clipped.
+		pick.clip_text = true
+		pick.custom_minimum_size.x = 420
+		pick.pressed.connect(_quick_sign_in.bind(account))
+		row.add_child(pick)
+
+		var forget := Button.new()
+		forget.text = "Forget"
+		forget.tooltip_text = "Remove this account from this computer, and end its session."
+		forget.pressed.connect(func() -> void:
+			accounts.forget_account(account)
+			_render_saved_accounts())
+		row.add_child(forget)
+
+## Signs in to a remembered account: straight in while its session lives,
+## otherwise by filling in what is known and asking for the password.
+func _quick_sign_in(account: SessionStore.Account) -> void:
+	_show_server(account.server)
+	if account.token != "":
+		accounts.resume(account)
+		return
+	_ask_password(account.email, "Enter the password for %s." % account.display_name)
+
+func _ask_password(email: String, message: String) -> void:
+	_email_input.text = email
+	_password_input.text = ""
+	_password_input.grab_focus()
+	_auth_status.text = message
+
+## Shows an account's server in the field and points the match client at it,
+## so the match view talks to the server the account belongs to.
+func _show_server(base: String) -> void:
+	if base == "" or _server_input.text == base:
+		return
+	_server_input.text = base
+	server_changed.emit(base)
 
 ## Points the account client at a new address and remembers it.
 func _apply_server(raw: String) -> void:
@@ -217,8 +294,16 @@ func _build_main() -> HBoxContainer:
 	_admin_button.visible = false
 	_admin_button.pressed.connect(func() -> void: admin_requested.emit())
 	header.add_child(_admin_button)
+	var switch := Button.new()
+	switch.text = "Switch account"
+	switch.tooltip_text = "Back to the sign-in screen. This account stays signed in, to pick again."
+	switch.pressed.connect(func() -> void:
+		accounts.switch_account()
+		_auth_status.text = "Pick an account, or sign in to another.")
+	header.add_child(switch)
 	var sign_out := Button.new()
 	sign_out.text = "Sign out"
+	sign_out.tooltip_text = "End this session. The account stays saved, but needs its password again."
 	sign_out.pressed.connect(func() -> void: accounts.sign_out())
 	header.add_child(sign_out)
 
@@ -368,9 +453,11 @@ func _on_signed_in(who: Dictionary) -> void:
 
 ## A saved session is being checked: hide the form so it does not flash away.
 func _on_restore_started() -> void:
+	_show_server(accounts.http_base)
 	_auth_box.visible = true
 	_main_box.visible = false
 	_auth_form.visible = false
+	_saved_box.visible = false
 	_auth_status.text = "Signing you back in…"
 	_auth_status.remove_theme_color_override("font_color")
 
@@ -378,19 +465,26 @@ func _on_restore_started() -> void:
 ## there was simply nothing saved.
 func _on_restore_failed(message: String, silent: bool) -> void:
 	_auth_form.visible = true
+	_render_saved_accounts()
 	if silent:
 		_auth_status.text = "New accounts start with the starter cards."
+		return
+	if accounts.restoring != null:
+		_ask_password(accounts.restoring.email, message)
 		return
 	_auth_status.text = message
 
 func _on_sign_in_failed(message: String) -> void:
 	_auth_form.visible = true
+	_render_saved_accounts()
 	_auth_status.text = message
 	_auth_status.add_theme_color_override("font_color", Color(0.88, 0.42, 0.45))
 
 func _on_signed_out() -> void:
 	_auth_box.visible = true
 	_main_box.visible = false
+	_auth_form.visible = true
+	_render_saved_accounts()
 	_auth_status.text = "Signed out."
 	collection = []
 	decks = []

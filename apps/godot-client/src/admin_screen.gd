@@ -495,7 +495,7 @@ func _on_admin_response(tag: String, ok: bool, payload: Dictionary) -> void:
 		# Become that player. The rest of the client follows the sign-in; an
 		# account that is not an admin no longer sees this panel.
 		_say("Signed in as %s." % str((payload.get("user", {}) as Dictionary).get("displayName", "")))
-		accounts.adopt_session(payload)
+		accounts.adopt_session(payload, false)
 	elif tag == "admin:debug-match":
 		var summary: Dictionary = payload.get("match", {})
 		var match_id := str(summary.get("matchId", ""))
