@@ -11,8 +11,14 @@ extends Control
 ## cursor, and releasing over a lit destination commits the action. A plain
 ## click selects instead, so the same move works without holding the button.
 
-const SLOT_SIZE := Vector2(148, 112)
-const CARD_SIZE := Vector2(132, 132)
+## Creatures on the board and in hand are drawn as cards, so slots and hand
+## cards are portrait, the frame's shape. The ring is the panel showing round
+## the frame: it carries the colour that says a card is ready, selected or a
+## target.
+const FRAME_WIDTH := 96.0
+const FRAME_RING := 4
+const SLOT_SIZE := Vector2(104, 138)
+const CARD_SIZE := Vector2(104, 138)
 const ARTIFACT_TILE := Vector2(92, 84)
 const WEAPON_TILE := Vector2(104, 84)
 const MAX_LOG_LINES := 120
@@ -937,14 +943,12 @@ func _slot_panel(
 	panel.custom_minimum_size = SLOT_SIZE
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 
-	var label := Label.new()
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(label)
-
 	if occupant == null:
+		var label := Label.new()
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		panel.add_child(label)
 		var key := Targeting.slot_key(owner_id, row_name, column)
 		var is_open: bool = slot_targets.has(key)
 		label.text = "＋" if is_open else ""
@@ -962,8 +966,6 @@ func _slot_panel(
 	var creature_id := str(occupant)
 	var creature: Dictionary = creatures.get(creature_id, {})
 	var definition_id := str(creature.get("definitionId", creature_id))
-	var display_name := library.card_name(definition_id)
-	var keyword_list := library.keywords(definition_id)
 
 	# Markers only matter for your own creatures: they say why one cannot act.
 	# The engine clears these at the owner's turn start, so an enemy creature
@@ -971,59 +973,24 @@ func _slot_panel(
 	var marks := ""
 	if is_mine:
 		if bool(creature.get("combatActionUsed", false)):
-			marks = "\nacted"
+			marks = "acted"
 		elif bool(creature.get("summonedThisTurn", false)):
-			marks = "\nsick"
-	var health := _num(creature.get("currentHealth", "?"))
-	var max_health := _num(creature.get("maxHealth", "?"))
-	# Show max health only while damaged, so a healthy creature stays uncluttered.
-	var health_text := health if health == max_health else "%s/%s" % [health, max_health]
-
-	var banner := CardArt.make_banner(definition_id, CardArt.BOARD_ART_HEIGHT)
-	if banner != null:
-		# With art present, the slot reads title / art / stats like a hand card.
-		# The plain label is reused for the stats line beneath the banner.
-		panel.remove_child(label)
-		# Named `stack` because `column` is already this function's board index.
-		var stack := VBoxContainer.new()
-		stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		stack.add_theme_constant_override("separation", 1)
-		panel.add_child(stack)
-
-		var title := Label.new()
-		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		title.add_theme_font_size_override("font_size", 11)
-		title.text = display_name
-		stack.add_child(title)
-		stack.add_child(banner)
-		stack.add_child(label)
-		label.text = "⚔ %s  ♥ %s%s" % [
-			_num(creature.get("currentAttack", "?")),
-			health_text,
-			marks,
-		]
-	else:
-		label.text = "%s\n⚔ %s  ♥ %s%s" % [
-			display_name,
-			_num(creature.get("currentAttack", "?")),
-			health_text,
-			marks,
-		]
-	if not keyword_list.is_empty():
-		label.text += "\n" + ", ".join(keyword_list)
-	# The hover reveal replaces the built-in tooltip for cards in play: it shows
-	# the same information, but large, with art, and without the delay-and-
-	# follow behaviour of a cursor tooltip.
-	panel.set_meta("reveal_key", creature_id)
-	panel.set_meta("reveal_card", {
+			marks = "sick"
+	var shown := {
 		"definition_id": definition_id,
 		"attack": creature.get("currentAttack", library.base_attack(definition_id)),
 		"health": creature.get("currentHealth", library.base_health(definition_id)),
 		"max_health": creature.get("maxHealth", library.base_health(definition_id)),
-		"marks": marks.strip_edges(),
-	})
+		"marks": marks,
+	}
+	# The creature is drawn as its card, with its live stats on the badges.
+	panel.set_meta("framed", true)
+	panel.add_child(CardFrame.make(library, shown, FRAME_WIDTH))
+	# The hover reveal replaces the built-in tooltip for cards in play: it shows
+	# the same card, but large enough to read its rules, and without the
+	# delay-and-follow behaviour of a cursor tooltip.
+	panel.set_meta("reveal_key", creature_id)
+	panel.set_meta("reveal_card", shown)
 
 	var is_target: bool = entity_targets.has(creature_id)
 	if creature_id == selected_entity:
@@ -1063,8 +1030,50 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	panel.custom_minimum_size = CARD_SIZE
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 
-	# Title above, art banner in the middle, remaining detail below. The whole
-	# column ignores the mouse so a press reaches the panel and starts a drag.
+	var cost := library.cost(definition_id)
+	# A Creature is drawn as its card; its cost badge says when it cannot be
+	# paid for, which is what the "needs" line says on other cards.
+	var label: Label = null
+	if CardFrame.supports(library, definition_id):
+		panel.set_meta("framed", true)
+		panel.add_child(CardFrame.make(library, {
+			"definition_id": definition_id,
+			"unaffordable": cost > available_taika,
+		}, FRAME_WIDTH))
+	else:
+		label = _hand_card_text(panel, definition_id)
+	var line := "%d Taika" % cost
+	var kind := library.card_type(definition_id)
+	if kind != "":
+		line += "\n" + kind.capitalize()
+	panel.tooltip_text = library.tooltip(definition_id)
+
+	var playable := not Targeting.actions_for_card(legal_actions, instance_id).is_empty()
+	if instance_id == selected_card:
+		_tint(panel, COLOR_SELECTED)
+	elif playable:
+		_tint(panel, COLOR_READY)
+		panel.set_meta("drag_card", instance_id)
+	else:
+		_tint(panel, COLOR_EMPTY)
+		panel.modulate = Color(0.72, 0.72, 0.76)
+		# Say why a card cannot be played, rather than just greying it out.
+		if cost > available_taika:
+			line += "\n(needs %d)" % cost
+			panel.tooltip_text += "\n\nNot enough Taika: %d of %d." % [available_taika, cost]
+		else:
+			panel.tooltip_text += "\n\nNo legal play for this card right now."
+	if playable:
+		panel.set_meta("drag_card", instance_id)
+	if label != null:
+		label.text = line
+	return panel
+
+## Title, art banner and a detail label for a hand card with no frame, which
+## is every card but a Creature. Returns the label, for the caller to fill.
+func _hand_card_text(panel: PanelContainer, definition_id: String) -> Label:
+	# The whole column ignores the mouse so a press reaches the panel and
+	# starts a drag.
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 2)
@@ -1088,35 +1097,7 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(label)
-
-	var cost := library.cost(definition_id)
-	var kind := library.card_type(definition_id)
-	var line := "%d Taika" % cost
-	if kind == "CREATURE":
-		line += "\n%d/%d" % [library.base_attack(definition_id), library.base_health(definition_id)]
-	elif kind != "":
-		line += "\n" + kind.capitalize()
-	panel.tooltip_text = library.tooltip(definition_id)
-
-	var playable := not Targeting.actions_for_card(legal_actions, instance_id).is_empty()
-	if instance_id == selected_card:
-		_tint(panel, COLOR_SELECTED)
-	elif playable:
-		_tint(panel, COLOR_READY)
-		panel.set_meta("drag_card", instance_id)
-	else:
-		_tint(panel, COLOR_EMPTY)
-		panel.modulate = Color(0.72, 0.72, 0.76)
-		# Say why a card cannot be played, rather than just greying it out.
-		if cost > available_taika:
-			line += "\n(needs %d)" % cost
-			panel.tooltip_text += "\n\nNot enough Taika: %d of %d." % [available_taika, cost]
-		else:
-			panel.tooltip_text += "\n\nNo legal play for this card right now."
-	if playable:
-		panel.set_meta("drag_card", instance_id)
-	label.text = line
-	return panel
+	return label
 
 ## Recolours existing target controls without rebuilding the board.
 ##
@@ -1591,10 +1572,14 @@ func _tint(panel: Control, color: Color) -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = color
 	style.set_corner_radius_all(4)
-	style.content_margin_left = 8
-	style.content_margin_right = 8
-	style.content_margin_top = 4
-	style.content_margin_bottom = 4
+	if panel.has_meta("framed"):
+		# Only a ring of colour shows round a card, so it is even on all sides.
+		style.set_content_margin_all(FRAME_RING)
+	else:
+		style.content_margin_left = 8
+		style.content_margin_right = 8
+		style.content_margin_top = 4
+		style.content_margin_bottom = 4
 	panel.add_theme_stylebox_override("panel", style)
 
 func _clear(node: Node) -> void:

@@ -9,10 +9,12 @@ class_name CardReveal
 ## never takes pointer input — the small panel underneath stays draggable
 ## while the large one is showing.
 
-## The panel is a fixed width and hugs its content vertically: a vanilla
-## creature is a short card and should not be padded out to the height of one
-## with three lines of rules text.
+## The text column is a fixed width and the panel hugs its content vertically:
+## a vanilla creature is a short card and should not be padded out to the
+## height of one with three lines of rules text. A Creature's card sits beside
+## the column rather than above it, so a wordy one still fits the screen.
 const PANEL_WIDTH := 264.0
+const CARD_WIDTH := 240.0
 ## Gap between the hovered panel and the reveal, and from the screen edge.
 const GAP := 14.0
 const MARGIN := 10.0
@@ -32,6 +34,8 @@ const COLOR_HURT := Color(0.92, 0.52, 0.52)
 var library: CardLibrary
 
 var _panel: PanelContainer
+## A Creature is revealed as its card, in place of the title, art and stats.
+var _card: CardFrame
 var _art: TextureRect
 var _art_slot: Control
 var _title: Label
@@ -84,10 +88,25 @@ func _build() -> void:
 	_panel.minimum_size_changed.connect(_queue_place)
 	add_child(_panel)
 
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 12)
+	_panel.add_child(row)
+
+	_card = CardFrame.new()
+	_card.detailed = true
+	_card.custom_minimum_size = Vector2(CARD_WIDTH, roundf(CARD_WIDTH / CardFrame.ASPECT))
+	_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_card.visible = false
+	row.add_child(_card)
+
+	# The column's width, not the panel's, sets where its text wraps, so it
+	# wraps the same whether or not a card sits beside it.
 	var column := VBoxContainer.new()
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 6)
-	_panel.add_child(column)
+	column.custom_minimum_size.x = PANEL_WIDTH - 24.0
+	row.add_child(column)
 
 	_title = Label.new()
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -274,9 +293,18 @@ func _fill(card: Dictionary) -> void:
 		parts.append(", ".join(tag_list))
 	_type_line.text = "  ·  ".join(parts)
 
+	# A Creature shows as its card, whose badges carry its name, art and
+	# stats; anything else keeps the plain layout.
+	var framed := CardFrame.supports(library, definition_id)
+	_card.visible = framed
+	if framed:
+		_card.show_card(library, card)
+	_title.visible = not framed
+	_stats.visible = not framed
+
 	var texture := CardArt.texture_for(definition_id)
 	_art.texture = texture
-	_art_slot.visible = texture != null
+	_art_slot.visible = texture != null and not framed
 
 	_stats.text = _stats_text(definition_id, card)
 	# Stats drifting from the printed card is the thing the reveal exists to
@@ -301,7 +329,9 @@ func _fill(card: Dictionary) -> void:
 	# with their bold keywords intact.
 	var rules := library.description_bbcode(definition_id)
 	_rules.text = rules
-	_rules.visible = rules.strip_edges() != ""
+	# A card's own text box holds most descriptions; one too long to read
+	# there is printed in full beneath the card as well.
+	_rules.visible = rules.strip_edges() != "" and (not framed or not _card.rules_fit)
 
 	var story := library.flavour_bbcode(definition_id)
 	_flavour.text = story
@@ -351,9 +381,11 @@ func _stats_color(definition_id: String, card: Dictionary) -> Color:
 ## off the card whose stats you are comparing it against.
 func _place(anchor: Rect2) -> void:
 	var view := get_viewport_rect().size
-	# `size` still holds the previous card's height until the layout pass that
-	# follows `_fill`, so ask the content what it needs now.
-	var panel_size := Vector2(PANEL_WIDTH, maxf(_panel.get_combined_minimum_size().y, 1.0))
+	# `size` still holds the previous card's size until the layout pass that
+	# follows `_fill`, so ask the content what it needs now. The width changes
+	# too, as a Creature's card appears or goes.
+	var needed := _panel.get_combined_minimum_size()
+	var panel_size := Vector2(maxf(needed.x, PANEL_WIDTH), maxf(needed.y, 1.0))
 	_panel.size = panel_size
 
 	var x := anchor.position.x + anchor.size.x + GAP

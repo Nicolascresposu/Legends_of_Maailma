@@ -111,18 +111,29 @@ apps/godot-client/art/cards/<card_id>.png
 engine, which the architecture keeps free of UI concepts, and no server change is involved.
 `.webp`, `.jpg` and `.svg` are also accepted, tried in that order after PNG.
 
-A card with no art file renders exactly as it did before art existed — title and stats only — so
-art can be added one card at a time. Images are cropped to fill their banner rather than
-stretched, so authoring them wider than tall (roughly 2:1) gives the best result.
+A card with no art file still renders, with its name and stats and no picture, so art can be
+added one card at a time. Images are cropped to fill their space rather than stretched.
 
-Art appears on hand cards and on creatures and artifacts in play, laid out as title, art banner,
-then stats. The collection browser shows the same art as a row thumbnail.
+Creatures are drawn as printed cards, on the board, in hand and in the hover reveal: the frame
+from `art/assets/card_default.png`, the card's art in its oval window, the name on the ribbon, cost
+on the Taika gem, Attack and Health on their badges, and keywords in the text box (the full rules
+text on the large reveal). The oval is close to round, so creature art should be authored with
+its subject in the centre; the sides of wider art are cropped away. Live stats are coloured as
+they drift from the printed card — green when buffed, red when damaged or reduced — and a hand
+card's cost turns red when it cannot be paid for yet. `src/card_frame.gd` places every part as a
+fraction of the frame, so the regions there are what to adjust if the frame art changes shape.
+
+Other cards in hand, and artifacts and weapons in play, are laid out as title, art banner, then
+stats; art for them reads best authored wider than tall (roughly 2:1). The collection browser
+shows art as a row thumbnail.
 
 ### Hover reveal
 
 A board panel is too small for a card's full text, so resting the pointer on a creature or
 artifact in play blows it up beside the board, Hearthstone style: large art, the printed cost and
-type, live stats, the card's description in full, and its flavour.
+type, live stats, the card's description in full, and its flavour. A creature is shown as its card,
+with the keyword explanations and flavour beside it; a description too long for the card's text box
+is printed in full beneath them as well.
 
 A description is the card's rules and nothing else, with every keyword in bold; story text lives
 in a separate `flavour` field and is shown dimmed and in italics beneath it. Both are written in a
@@ -151,6 +162,7 @@ Client scripts:
 - `src/card_reveal.gd` — the hover reveal for cards in play.
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
+- `src/card_frame.gd` — draws a Creature as a printed card, at any size.
 - `src/session_store.gd` — remembers the accounts signed in on this machine, for quick sign-in.
 - `src/client_config.gd` — resolves the server address from the command line, environment or disk.
 - `src/action_formatter.gd` — readable labels for actions and events.
@@ -159,6 +171,8 @@ Client scripts:
 - `src/reveal_test.gd` — checks the hover reveal's dwell, content and placement.
 - `src/reveal_layout_test.gd` — headless, needs no server: checks the reveal stays on screen
   when a tall card replaces a short one.
+- `src/card_frame_test.gd` — headless, needs no server: checks the framed card's stats, colours
+  and text at board and reveal sizes; `--screenshot-dir=` (windowed) saves what it drew.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
   refusal is explained rather than merely relayed.
@@ -180,6 +194,7 @@ godot --headless --path apps/godot-client --script src/smoke_test.gd
 godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/reveal_test.gd
 godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
+godot --headless --path apps/godot-client --script src/card_frame_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/trade_test.gd

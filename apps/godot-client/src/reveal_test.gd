@@ -66,15 +66,23 @@ func _init() -> void:
 	# The reveal must show the hovered card, and show it in full: the rules
 	# text is the thing a small board panel cannot fit.
 	var definition_id := str((zone["card"] as Dictionary).get("definition_id", ""))
-	_check("the reveal names the hovered card",
-		main.reveal._title.text == main.library.card_name(definition_id))
+	# A creature is revealed as its card: the name is on its ribbon, and the
+	# description in its text box, or beneath it when too long for the box.
+	var framed: bool = main.reveal._card.visible
+	_check("a creature is revealed as its card",
+		framed == CardFrame.supports(main.library, definition_id))
+	var shown_name: String = main.reveal._card._name.text if framed else main.reveal._title.text
+	_check("the reveal names the hovered card", shown_name == main.library.card_name(definition_id))
+	var rules_label: RichTextLabel = main.reveal._rules
+	if framed and not main.reveal._rules.visible:
+		rules_label = main.reveal._card._text
 	var plain: String = main.library.description_plain(definition_id)
 	_check("every card has a description", plain.strip_edges() != "")
 	_check("the reveal shows the card's description",
-		main.reveal._rules.visible and main.reveal._rules.get_parsed_text().contains(plain))
+		rules_label.is_visible_in_tree() and rules_label.get_parsed_text().contains(plain))
 	# The markup must reach the label as formatting, not as literal asterisks.
 	_check("the description's markup is rendered, not printed",
-		not main.reveal._rules.get_parsed_text().contains("*"))
+		not rules_label.get_parsed_text().contains("*"))
 	# Flavour is shown, but in its own place: never mixed into the rules.
 	var story: String = main.library.flavour_plain(definition_id)
 	if story == "":
@@ -93,7 +101,7 @@ func _init() -> void:
 			not main.reveal._keywords.visible)
 	else:
 		_check("the description prints its keywords in bold",
-			main.reveal._rules.text.contains("[b]"))
+			rules_label.text.contains("[b]"))
 		var explained := true
 		for keyword in keyword_list:
 			var line: String = CardLibrary.keyword_line(str(keyword))
