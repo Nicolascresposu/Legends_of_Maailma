@@ -25,6 +25,16 @@ func _init() -> void:
 		ClientConfig.normalize("http://127.0.0.1:4000/api/cards") == "http://127.0.0.1:4000")
 	_check("surrounding space is ignored",
 		ClientConfig.normalize("  127.0.0.1:4000  ") == "http://127.0.0.1:4000")
+	_check("a bare domain gets https",
+		ClientConfig.normalize("maailma.example.com") == "https://maailma.example.com")
+	_check("a bare domain with a port gets https",
+		ClientConfig.normalize("play.example:8443/") == "https://play.example:8443")
+	_check("a LAN address gets http",
+		ClientConfig.normalize("192.168.0.94:3000") == "http://192.168.0.94:3000")
+	_check("an IPv6 literal gets http",
+		ClientConfig.normalize("[::1]:3000") == "http://[::1]:3000")
+	_check("an explicit http domain is kept",
+		ClientConfig.normalize("http://maailma.example.com") == "http://maailma.example.com")
 	_check("empty input yields nothing", ClientConfig.normalize("   ") == "")
 
 	# --- Websocket derivation follows the scheme. ---

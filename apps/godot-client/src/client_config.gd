@@ -78,13 +78,16 @@ static func clear() -> void:
 ## or "" when there is nothing usable in it.
 ##
 ## `localhost:4000`, `127.0.0.1:4000` and `http://127.0.0.1:4000/` all resolve
-## to the same address; a trailing slash or path is dropped.
+## to the same address; a trailing slash or path is dropped. Without a scheme, a
+## domain name gets https — a public server sits behind TLS, and plain http
+## would be redirected, which turns every POST into a bodiless GET — while
+## localhost and IP addresses, the development and LAN cases, get http.
 static func normalize(raw: String) -> String:
 	var value := raw.strip_edges()
 	if value == "":
 		return ""
 	if not (value.begins_with("http://") or value.begins_with("https://")):
-		value = "http://" + value
+		value = ("http://" if _is_local_host(value) else "https://") + value
 	# Trim any path, query or fragment: the base is scheme, host and port.
 	var scheme_end := value.find("://") + 3
 	var rest := value.substr(scheme_end)
@@ -95,6 +98,26 @@ static func normalize(raw: String) -> String:
 	if rest == "":
 		return ""
 	return value.substr(0, scheme_end) + rest
+
+## True for localhost and IP literals, given an address without a scheme.
+static func _is_local_host(address: String) -> bool:
+	# An IPv6 literal is bracketed, and a bracket appears in nothing else.
+	if address.begins_with("["):
+		return true
+	var host := address
+	for separator in [":", "/", "?", "#"]:
+		var at := host.find(separator)
+		if at != -1:
+			host = host.substr(0, at)
+	if host.to_lower() == "localhost":
+		return true
+	var parts := host.split(".")
+	if parts.size() != 4:
+		return false
+	for part in parts:
+		if not part.is_valid_int():
+			return false
+	return true
 
 ## The websocket base for a given http base, so callers derive both the same way.
 static func websocket_base(base: String) -> String:
