@@ -79,8 +79,12 @@ func _stays_on_screen(reveal: CardReveal, view: Vector2) -> bool:
 			ok = false
 	return ok
 
+## Waits by the clock, as the reveal's dwell is timed: a scene timer counts
+## frame time, and a slow frame before the wait can make it fire early.
 func _wait(seconds: float) -> void:
-	await create_timer(seconds).timeout
+	var start := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start < seconds * 1000.0:
+		await process_frame
 
 func _check(label: String, condition: bool) -> void:
 	print("  [%s] %s" % ["ok" if condition else "XX", label])

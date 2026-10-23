@@ -80,7 +80,7 @@ func _init() -> void:
 			var cid2: String = str(card_zone.get("id", ""))
 			var acts2 := Targeting.actions_for_card(main.legal_actions, cid2)
 			if not Targeting.slot_targets(acts2, main.player_id).is_empty():
-				summoned = await _drag_card_to_slot(card_zone)
+				summoned = await _click_card_to_slot(card_zone)
 		if not summoned and not main.end_turn_button.disabled:
 			main.end_turn_button.emit_signal("pressed")
 		for i in range(80):
@@ -126,6 +126,11 @@ func _init() -> void:
 	if hero_key == "":
 		print("  [--] no hero-targeting action became available this run; skipped")
 	if hero_key != "":
+		# The board scrolls, and only what is in view can be aimed at: bring
+		# the hero into view, as a player would.
+		var hero_strip := _control_for(main.board_container, hero_key)
+		if hero_strip != null:
+			main.board_area.ensure_control_visible(hero_strip)
 		await process_frame
 		await process_frame
 		main._rebuild_drop_zones()
@@ -150,9 +155,10 @@ func _init() -> void:
 			main._press_origin = hfrom
 			main._begin_drag(str(hero_source.get("id", "")),
 				str(hero_source.get("kind", "")) == "drag_card")
-			_check("arrow visible while aiming at a hero", main.arrow.visible)
 			_check("the hero is offered as a target", main.entity_targets.has(hero_key))
+			# A targeting card fires its arrow once it leaves the hand.
 			main._on_pointer_move(hto)
+			_check("arrow visible while aiming at a hero", main.arrow.visible)
 			_check("hero highlights as a valid target", main._hovered_key == hero_key)
 			main._on_pointer_up(hto)
 			for i in range(120):
@@ -199,15 +205,72 @@ func _drag_card_to_slot(card_zone: Dictionary) -> bool:
 	# the rest of the assertions meaningless.
 	main._press_origin = from
 	main._begin_drag(cid, true)
-	_check("arrow became visible during card drag", main.arrow.visible)
+	_check("the card itself is held during the drag", main.hand_view.held_id() == cid)
 	_check("drag registered a selection", main.selected_card == cid)
+	# Let go anywhere over the battlefield, a card lands on the nearest lit
+	# slot. The row labels sit left of every slot and are never a slot.
+	var board_rect: Rect2 = main.board_area.get_global_rect()
+	var off_slot := Vector2(board_rect.position.x + 6.0, to.y)
+	_check("over the battlefield but off a slot, the nearest lit slot is chosen",
+		slots.has(main._card_drop_key(off_slot)))
 	main._on_pointer_move(to)
 	_check("hovering a valid slot is recorded", main._hovered_key == slot_key)
 	main._on_pointer_up(to)
+	_check("the played card leaves the hand", main.hand_view.is_spent(cid))
+	_check("the played card breaks up", main.play_effect.is_busy())
+	_check("its oval falls toward the slot", main.play_effect.is_flying(slot_key))
 	_check("arrow hidden after release", not main.arrow.visible)
 	for i in range(120):
 		await process_frame
+	var token: CreatureToken = main._token_in_slot(main.board_container, slot_key)
+	_check("the creature's token shows once its oval is down",
+		token != null and is_equal_approx(token.modulate.a, 1.0))
 	return true
+
+## Plays a card the click way: one click picks it up, and it follows the
+## pointer with no button held until a second click puts it down.
+func _click_card_to_slot(card_zone: Dictionary) -> bool:
+	var cid: String = str(card_zone.get("id", ""))
+	var acts := Targeting.actions_for_card(main.legal_actions, cid)
+	var slots := Targeting.slot_targets(acts, main.player_id)
+	if slots.is_empty():
+		return false
+	var slot_key: String = slots.keys()[0]
+	var from: Vector2 = (card_zone["rect"] as Rect2).get_center()
+	# In a crowded hand the next card may cover this one's centre.
+	if not main._drop_zones.has(slot_key) or main.hand_view.card_at(from) != cid:
+		return await _drag_card_to_slot(card_zone)
+	var to: Vector2 = (main._drop_zones[slot_key]["rect"] as Rect2).get_center()
+	print("[probe] clicking card ", cid, " onto ", slot_key)
+	main._on_pointer_down(from)
+	main._on_pointer_up(from)
+	_check("a clicked card is held without the button",
+		main.hand_view.held_id() == cid and main._sticky)
+	main._input(_motion(to))
+	_check("a clicked card follows the pointer to a lit slot", main._hovered_key == slot_key)
+	main._input(_button(to, true))
+	main._input(_button(to, false))
+	_check("a second click plays the card",
+		main.hand_view.is_spent(cid) and main.hand_view.held_id() == "")
+	_check("the second click's release is not taken as another",
+		not main._swallow_release and not main._dragging)
+	for i in range(120):
+		await process_frame
+	return true
+
+func _motion(at: Vector2) -> InputEventMouseMotion:
+	var event := InputEventMouseMotion.new()
+	event.position = at
+	event.global_position = at
+	return event
+
+func _button(at: Vector2, pressed: bool) -> InputEventMouseButton:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = at
+	event.global_position = at
+	return event
 
 func _drag_entity_to_target(ent: Dictionary, targets: Dictionary) -> bool:
 	var eid: String = str(ent.get("id", ""))
@@ -227,6 +290,16 @@ func _drag_entity_to_target(ent: Dictionary, targets: Dictionary) -> bool:
 	for i in range(120):
 		await process_frame
 	return true
+
+## The board control registered as the drop target `key`, or null.
+func _control_for(node: Node, key: String) -> Control:
+	for child in node.get_children():
+		if child is Control and str((child as Control).get_meta("target_id", "")) == key:
+			return child
+		var found := _control_for(child, key)
+		if found != null:
+			return found
+	return null
 
 func _check(label: String, condition: bool) -> void:
 	print("  [%s] %s" % ["ok" if condition else "XX", label])

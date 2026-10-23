@@ -30,17 +30,27 @@ until then.
 The client does not reproduce game rules: every command is validated and resolved by the server,
 and the client only ever offers actions the server has already declared legal.
 
-Targeting works as it does in Hearthstone. Press a card in your hand, or one of your creatures,
-and drag: every destination that selection can legally reach lights up, a dotted arrow follows the
-cursor, and releasing over a lit destination commits the action. The arrow turns green over a
-legal target and red over an illegal one. Heroes are targetable in their own right — both hero
-strips accept a drop whenever the server allows it, which covers attacks on the enemy Hero and
-healing aimed at your own.
+The hand and targeting work as they do in Hearthstone. Your hand fans out below the board, and
+resting the pointer on a card lifts it and shows it large, with its keywords explained beside it.
+Drag a card out of the hand and it follows the cursor while every slot it can legally reach lights
+up; let go anywhere over the battlefield to play it, on the lit slot under the cursor or the
+nearest one. A card that needs a target instead parks above the hand and fires a dotted arrow;
+release it over a lit target to play it. Your creatures attack the same way: press one and drag
+its arrow onto a lit target. The arrow turns green over a legal target and red over an illegal
+one. Heroes are targetable in their own right — both hero strips accept a drop whenever the server
+allows it, which covers attacks on the enemy Hero and healing aimed at your own.
 
-Dragging is not required: a plain click selects, and a second click on a lit destination commits,
-so the whole game is playable without holding the mouse button. Clicking the same card or creature
-again clears the selection, as does right-click or Escape. The action list on the right mirrors
-whatever the current selection offers and remains usable as a fallback.
+Holding the mouse button is not required. Clicking a hand card picks it up, and it follows the
+cursor until a second click plays it — or, over the hand, puts it back. Clicking a creature selects
+it, and a second click on a lit target commits. Right-click or Escape cancels either. The action
+list on the right mirrors whatever the current selection offers and remains usable as a fallback.
+
+A played card crumbles where it was let go, from its edges in. A creature summoned to a slot leaves
+its art oval behind, which drops into the slot, lands with a bump and a puff of dust, and becomes
+its token; the token the server sends stays hidden until the oval is down. Any other card crumbles
+away entirely. If the server refuses the play, the card comes back to the hand and any oval still
+out fades where it is. `src/card_play_effect.gd` draws this, from a copy of the card rendered
+offscreen, so the shards carry the card's real pixels.
 
 The client opens on the collection screen: sign in or create an account, browse every collectible
 card with the copies you own, and build decks. Cards you do not own stay visible but dimmed, and
@@ -114,14 +124,22 @@ engine, which the architecture keeps free of UI concepts, and no server change i
 A card with no art file still renders, with its name and stats and no picture, so art can be
 added one card at a time. Images are cropped to fill their space rather than stretched.
 
-Creatures are drawn as printed cards, on the board, in hand and in the hover reveal: the frame
-from `art/assets/card_default.png`, the card's art in its oval window, the name on the ribbon, cost
-on the Taika gem, Attack and Health on their badges, and keywords in the text box (the full rules
-text on the large reveal). The oval is close to round, so creature art should be authored with
-its subject in the centre; the sides of wider art are cropped away. Live stats are coloured as
-they drift from the printed card — green when buffed, red when damaged or reduced — and a hand
-card's cost turns red when it cannot be paid for yet. `src/card_frame.gd` places every part as a
-fraction of the frame, so the regions there are what to adjust if the frame art changes shape.
+Every card is drawn as a printed card in hand and in the hover reveal, on its type's frame from
+`art/assets/` (`creature_default.png`, `spell_default.png`, `weapon_default.png`,
+`artifact_default.png`, and `location_default.png`, ready for when Locations exist): the card's art
+in the frame's window, the name on the ribbon, cost on the Taika gem, its stats — a Creature's
+Attack and Health on their badges, a Weapon's Attack and Durability in its roundels, an Artifact's
+Durability on its shield — and keywords in the text box (the full rules text on the large reveal).
+`src/card_frame.gd` places every part as a fraction of each frame, so the regions there are what to
+adjust if the frame art changes shape.
+
+On the board a creature is only its art, as a Hearthstone minion is: a large oval filling the slot,
+with Attack and Health on badges at its foot, its keywords on a chip across the top, and "sick" or
+"acted" when it cannot act (its art dims too). The ring round the oval says whether it is ready,
+selected or a target. `src/creature_token.gd` draws it. Both ovals are taller than they are wide,
+so creature art should be authored with its subject in the centre; the sides of wider art are
+cropped away. Live stats are coloured as they drift from the printed card — green when buffed, red
+when damaged or reduced — and a hand card's cost turns red when it cannot be paid for yet.
 
 Other cards in hand, and artifacts and weapons in play, are laid out as title, art banner, then
 stats; art for them reads best authored wider than tall (roughly 2:1). The collection browser
@@ -129,8 +147,8 @@ shows art as a row thumbnail.
 
 ### Hover reveal
 
-A board panel is too small for a card's full text, so resting the pointer on a creature or
-artifact in play blows it up beside the board, Hearthstone style: large art, the printed cost and
+A creature on the board shows only its art and stats, so resting the pointer on a creature or
+artifact in play shows the whole card beside it, Hearthstone style: large art, the printed cost and
 type, live stats, the card's description in full, and its flavour. A creature is shown as its card,
 with the keyword explanations and flavour beside it; a description too long for the card's text box
 is printed in full beneath them as well.
@@ -146,9 +164,9 @@ Keywords are spelled out rather than listed. The server sends them as bare ident
 glossary lives in `card_library.gd`. A keyword with no entry falls back to its name, and the
 client's own test fails if one is missing, so a keyword added server-side is not quietly dropped.
 
-The reveal waits out a short dwell, so sweeping the pointer across the board does not flash a card
-at every slot it crosses, and it hides while a drag is in flight rather than covering the targets
-being aimed at.
+The reveal waits out a half-second dwell, so sweeping the pointer across the board or aiming past
+a creature does not flash its card, and it hides while a drag is in flight rather than covering the
+targets being aimed at. Cards in hand need no dwell: they show large the moment they are hovered.
 
 Client scripts:
 
@@ -163,6 +181,9 @@ Client scripts:
 - `src/card_library.gd` — client-side cache of server card definitions.
 - `src/card_art.gd` — looks up card art by id, with a text fallback.
 - `src/card_frame.gd` — draws a Creature as a printed card, at any size.
+- `src/creature_token.gd` — draws a Creature in play as its art oval and stats.
+- `src/card_play_effect.gd` — a played card crumbling, and a summoned creature's oval falling into its slot.
+- `src/hand_view.gd` — the hand: its fan, the large card on hover, and the card held to play.
 - `src/session_store.gd` — remembers the accounts signed in on this machine, for quick sign-in.
 - `src/client_config.gd` — resolves the server address from the command line, environment or disk.
 - `src/action_formatter.gd` — readable labels for actions and events.
@@ -172,7 +193,13 @@ Client scripts:
 - `src/reveal_layout_test.gd` — headless, needs no server: checks the reveal stays on screen
   when a tall card replaces a short one.
 - `src/card_frame_test.gd` — headless, needs no server: checks the framed card's stats, colours
-  and text at board and reveal sizes; `--screenshot-dir=` (windowed) saves what it drew.
+  and text at hand and reveal sizes; `--screenshot-dir=` (windowed) saves what it drew.
+- `src/card_play_effect_test.gd` — headless, needs no server: checks a played card's shards, the
+  oval's fall and landing, and a refused play; `--screenshot-dir=` (windowed) saves a filmstrip.
+- `src/creature_token_test.gd` — headless, needs no server: checks a creature in play's oval,
+  stats, keywords and markers; `--screenshot-dir=` (windowed) saves what it drew.
+- `src/hand_view_test.gd` — headless, needs no server: checks the hand's fan, hover, holding and
+  playing; `--screenshot-dir=` (windowed) saves what it drew.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
   refusal is explained rather than merely relayed.
@@ -195,6 +222,9 @@ godot --path apps/godot-client --script src/drag_test.gd
 godot --path apps/godot-client --script src/reveal_test.gd
 godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --headless --path apps/godot-client --script src/card_frame_test.gd
+godot --headless --path apps/godot-client --script src/creature_token_test.gd
+godot --headless --path apps/godot-client --script src/card_play_effect_test.gd
+godot --headless --path apps/godot-client --script src/hand_view_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/trade_test.gd

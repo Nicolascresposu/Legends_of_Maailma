@@ -53,6 +53,26 @@ func _init() -> void:
 	var rect: Rect2 = zone["rect"]
 	var at := rect.get_center()
 
+	# On the board a creature is only its art oval; the whole card is what the
+	# reveal is for.
+	var creature_zone: Dictionary = {}
+	for candidate_key in main._drop_zones:
+		var candidate: Dictionary = main._drop_zones[candidate_key]
+		if str(candidate.get("kind", "")) == "reveal" and CardFrame.supports(
+				main.library, str((candidate["card"] as Dictionary).get("definition_id", ""))):
+			creature_zone = candidate
+			break
+	if creature_zone.is_empty():
+		print("  [--] no creature in play this run; token check skipped")
+	else:
+		var drawn_as_token := false
+		var drawn_as_card := false
+		for child in (creature_zone["control"] as Control).get_children():
+			drawn_as_token = drawn_as_token or child is CreatureToken
+			drawn_as_card = drawn_as_card or child is CardFrame
+		_check("a creature in play is drawn as its oval, not its card",
+			drawn_as_token and not drawn_as_card)
+
 	# Pointing at a card does not reveal it at once: the dwell is what stops a
 	# pointer crossing the board from flashing every card it passes.
 	main._on_hover_move(at)

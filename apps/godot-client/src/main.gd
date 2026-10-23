@@ -6,15 +6,17 @@ extends Control
 ## decides legality: dragging a card or creature only ever offers targets the
 ## server has already declared legal, and every choice is sent for validation.
 ##
-## Interaction follows Hearthstone's model. Press a hand card or one of your
-## creatures and drag: valid destinations light up, a dotted arrow follows the
-## cursor, and releasing over a lit destination commits the action. A plain
-## click selects instead, so the same move works without holding the button.
+## Interaction follows Hearthstone's model. Hand cards fan out at the bottom
+## and show large under the pointer. Drag one, or click it to pick it up, and
+## it follows the cursor: let go over the battlefield to play it, on the lit
+## slot under the cursor or the nearest one. A card that needs a target parks
+## above the hand and fires a dotted arrow instead. Press one of your creatures
+## and drag to aim its arrow at a lit target, or click it, then click a target.
 
-## Creatures on the board and in hand are drawn as cards, so slots and hand
-## cards are portrait, the frame's shape. The ring is the panel showing round
-## the frame: it carries the colour that says a card is ready, selected or a
-## target.
+## Cards in hand are drawn as cards, and Creatures in play as a large art
+## oval, so slots and hand cards are both portrait. The ring carries the colour that
+## says a card is ready, selected or a target: round a hand card it is the
+## frame's own, round its body, and round a creature, the oval's own.
 const FRAME_WIDTH := 96.0
 const FRAME_RING := 4
 const SLOT_SIZE := Vector2(104, 138)
@@ -80,6 +82,13 @@ var _pressed_source := ""
 var _pressed_is_card := false
 var _press_origin := Vector2.ZERO
 var _dragging := false
+## How a held hand card plays: "place" follows the pointer and lands where it
+## is let go; "aim" parks above the hand and fires the arrow at a target.
+var _card_mode := ""
+## A clicked card stays held without the button, until the next click.
+var _sticky := false
+## The release of the click that set a sticky card down is not another drop.
+var _swallow_release := false
 var _hovered_key := ""
 ## Where the pointer was last seen, so a board rebuilt underneath it can decide
 ## whether what it was revealing is still there.
@@ -96,7 +105,9 @@ var match_input: LineEdit
 var player_input: LineEdit
 var server_input: LineEdit
 var board_container: VBoxContainer
-var hand_container: HBoxContainer
+## The battlefield's scroll area: letting a card go anywhere over it plays it.
+var board_area: Control
+var hand_view: HandView
 var action_container: VBoxContainer
 var action_hint: Label
 var log_label: RichTextLabel
@@ -106,6 +117,7 @@ var create_pve_button: Button
 var join_button: Button
 var arrow: TargetingArrow
 var reveal: CardReveal
+var play_effect: CardPlayEffect
 
 func _ready() -> void:
 	client = MatchClient.new()
@@ -243,16 +255,13 @@ func _build_interface() -> void:
 	board_container.add_theme_constant_override("separation", 6)
 	board_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	board_scroll.add_child(board_container)
+	board_area = board_scroll
 
-	left.add_child(_section_title("Your hand"))
-	var hand_scroll := ScrollContainer.new()
-	hand_scroll.custom_minimum_size.y = CARD_SIZE.y + 18
-	hand_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left.add_child(hand_scroll)
-	hand_container = HBoxContainer.new()
-	hand_container.add_theme_constant_override("separation", 6)
-	hand_scroll.add_child(hand_container)
+	# Not in a scroll container: a hovered or held card rises out of the hand
+	# over the board, and a scroll container would clip it.
+	hand_view = HandView.new()
+	hand_view.setup(library)
+	left.add_child(hand_view)
 
 	game_row.add_child(_build_side_panel())
 
@@ -262,7 +271,15 @@ func _build_interface() -> void:
 	reveal.setup(library)
 	game_root.add_child(reveal)
 
+	# A played card breaking up, over the board and the hand it leaves.
+	play_effect = CardPlayEffect.new()
+	play_effect.z_index = HandView.Z_HELD + 1
+	play_effect.landed.connect(_on_oval_landed)
+	game_root.add_child(play_effect)
+
 	arrow = TargetingArrow.new()
+	# Over the held hand card it is fired from, which draws above the board.
+	arrow.z_index = HandView.Z_ZOOM + 5
 	game_root.add_child(arrow)
 
 func _build_connection_bar() -> Control:
@@ -629,6 +646,9 @@ func _on_library_loaded() -> void:
 
 func _on_match_state(new_state: Dictionary) -> void:
 	state = new_state
+	# A new board invalidates what a held card was aiming at; it goes back.
+	if _dragging:
+		_end_drag()
 	_clear_selection()
 	_render_state()
 	_apply_admin_ui()
@@ -665,18 +685,23 @@ func _on_server_error(code: String, message: String) -> void:
 	_set_status("%s: %s" % [code, message], true)
 	_append_log("[color=#e06c75]%s — %s[/color]" % [code, message])
 	_cancel_drag()
+	# A refused play leaves its card in the hand, so bring it straight back,
+	# and let any oval still on its way to the board fade where it is.
+	hand_view.restore_spent()
+	play_effect.cancel_all()
 
 # --- Rendering --------------------------------------------------------------
 
 func _render_state() -> void:
 	_clear(board_container)
-	_clear(hand_container)
 	_drop_zones.clear()
 	if state.is_empty():
+		hand_view.clear_cards()
 		return
 	var sides: Variant = state.get("sides", {})
 	if typeof(sides) != TYPE_DICTIONARY or not (sides as Dictionary).has(player_id):
 		turn_banner.text = "Waiting for match state…"
+		hand_view.clear_cards()
 		return
 	var order: Variant = state.get("playerOrder", [])
 	opponent_id = ""
@@ -983,11 +1008,22 @@ func _slot_panel(
 		"max_health": creature.get("maxHealth", library.base_health(definition_id)),
 		"marks": marks,
 	}
-	# The creature is drawn as its card, with its live stats on the badges.
-	panel.set_meta("framed", true)
-	panel.add_child(CardFrame.make(library, shown, FRAME_WIDTH))
+	# In play a creature is its art in a large oval, with its live stats on the
+	# badges, as a Hearthstone minion is; resting on it reveals the whole card.
+	panel.set_meta("token", true)
+	var token := CreatureToken.make(library, shown, SLOT_SIZE)
+	panel.add_child(token)
+	# A creature just summoned here is still falling in as its card's oval: its
+	# token shows once the oval is down, and if the oval is already down and
+	# waiting for it, the token takes over now.
+	var slot_key := Targeting.slot_key(owner_id, row_name, column)
+	panel.set_meta("slot_key", slot_key)
+	if play_effect.is_flying(slot_key):
+		token.modulate.a = 0.0
+	elif play_effect.is_waiting(slot_key):
+		play_effect.release(slot_key)
 	# The hover reveal replaces the built-in tooltip for cards in play: it shows
-	# the same card, but large enough to read its rules, and without the
+	# the whole card, large enough to read its rules, and without the
 	# delay-and-follow behaviour of a cursor tooltip.
 	panel.set_meta("reveal_key", creature_id)
 	panel.set_meta("reveal_card", shown)
@@ -1010,18 +1046,26 @@ func _slot_panel(
 	return panel
 
 func _render_hand(side: Dictionary) -> void:
+	hand_view.begin_update()
 	var hand: Variant = side.get("hand", [])
-	if typeof(hand) != TYPE_ARRAY or (hand as Array).is_empty():
-		var empty := Label.new()
-		empty.text = "(no cards in hand)"
-		hand_container.add_child(empty)
-		return
 	var taika: Dictionary = side.get("taika", {})
 	var available := int(taika.get("current", 0))
-	for card in (hand as Array):
-		if typeof(card) != TYPE_DICTIONARY:
-			continue
-		hand_container.add_child(_hand_card(card, available))
+	if typeof(hand) == TYPE_ARRAY:
+		for card in (hand as Array):
+			if typeof(card) != TYPE_DICTIONARY:
+				continue
+			var definition_id := str(card.get("definitionId", ""))
+			var panel := _hand_card(card, available)
+			var playable := panel.has_meta("drag_card")
+			# What the large card on hover shows besides the card itself.
+			hand_view.put_card(str(card.get("instanceId", "")), panel, {
+				"definition_id": definition_id,
+				"playable": playable,
+				"unaffordable": library.cost(definition_id) > available,
+				"ring": COLOR_READY if playable else COLOR_EMPTY,
+				"note": str(panel.get_meta("hand_note", "")),
+			})
+	hand_view.end_update()
 
 func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	var instance_id := str(card.get("instanceId", ""))
@@ -1031,8 +1075,9 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var cost := library.cost(definition_id)
-	# A Creature is drawn as its card; its cost badge says when it cannot be
-	# paid for, which is what the "needs" line says on other cards.
+	# A card is drawn on its type's frame; its cost badge says when it cannot
+	# be paid for, which is what the "needs" line says on a card of a type
+	# with no frame.
 	var label: Label = null
 	if CardFrame.supports(library, definition_id):
 		panel.set_meta("framed", true)
@@ -1046,7 +1091,7 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	var kind := library.card_type(definition_id)
 	if kind != "":
 		line += "\n" + kind.capitalize()
-	panel.tooltip_text = library.tooltip(definition_id)
+	# No tooltip: hovering shows the card large, with this note beside it.
 
 	var playable := not Targeting.actions_for_card(legal_actions, instance_id).is_empty()
 	if instance_id == selected_card:
@@ -1060,17 +1105,18 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 		# Say why a card cannot be played, rather than just greying it out.
 		if cost > available_taika:
 			line += "\n(needs %d)" % cost
-			panel.tooltip_text += "\n\nNot enough Taika: %d of %d." % [available_taika, cost]
+			panel.set_meta("hand_note", "Not enough Taika: %d of %d." % [available_taika, cost])
 		else:
-			panel.tooltip_text += "\n\nNo legal play for this card right now."
+			panel.set_meta("hand_note", "No legal play for this card right now.")
 	if playable:
 		panel.set_meta("drag_card", instance_id)
 	if label != null:
 		label.text = line
 	return panel
 
-## Title, art banner and a detail label for a hand card with no frame, which
-## is every card but a Creature. Returns the label, for the caller to fill.
+## Title, art banner and a detail label for a hand card with no frame: one of
+## a type the client has no frame for. Returns the label, for the caller to
+## fill.
 func _hand_card_text(panel: PanelContainer, definition_id: String) -> Label:
 	# The whole column ignores the mouse so a press reaches the panel and
 	# starts a drag.
@@ -1122,7 +1168,24 @@ func _repaint_highlights() -> void:
 func _rebuild_drop_zones() -> void:
 	_drop_zones.clear()
 	_collect_zones(board_container)
-	_collect_zones(hand_container)
+	# The board scrolls, and what is scrolled out of view may lie behind the
+	# hand: only what can be seen can be aimed at or revealed.
+	var visible_board := board_area.get_global_rect()
+	for key in _drop_zones.keys():
+		var clipped := (_drop_zones[key]["rect"] as Rect2).intersection(visible_board)
+		if clipped.has_area():
+			_drop_zones[key]["rect"] = clipped
+		else:
+			_drop_zones.erase(key)
+	# Hand cards are where they rest in the fan, not where they are drawn this
+	# frame: a hovered card lifts, and a held one is off following the pointer.
+	for id in hand_view.card_ids():
+		if bool(hand_view.info_for(id).get("playable", false)):
+			_drop_zones["card:" + id] = {
+				"rect": hand_view.rest_rect(id),
+				"kind": "drag_card",
+				"id": id,
+			}
 	_refresh_reveal()
 
 ## Keeps a showing reveal honest after the board is rebuilt: a card that has
@@ -1210,6 +1273,12 @@ func _on_hover_move(at: Vector2) -> void:
 	if reveal == null:
 		return
 	_hover_at = at
+	# A hand card shows large in the hand itself, so it needs no reveal.
+	var in_hand := hand_view.card_at(at)
+	hand_view.hover(in_hand)
+	if in_hand != "":
+		reveal.hide_reveal()
+		return
 	# Rects go stale whenever the board re-renders, which happens on every
 	# state update, so refresh before trusting a miss. The board is a dozen
 	# panels, so this is cheaper than tracking when it last changed.
@@ -1245,8 +1314,21 @@ func _reveal_zone_at(at: Vector2) -> Dictionary:
 
 func _on_pointer_down(at: Vector2) -> void:
 	_rebuild_drop_zones()
-	# Starting a drag on a target of the current selection commits instead.
-	var zone := _zone_at(at, ["drag_card", "drag_entity"])
+	# Hand cards overlap, so the hand says which one is on top under the
+	# pointer rather than the first rect that contains it.
+	var card_id := hand_view.card_at(at)
+	if card_id != "":
+		if not _drop_zones.has("card:" + card_id):
+			var note := str(hand_view.info_for(card_id).get("note", ""))
+			if note != "":
+				_set_status(note, true)
+			return
+		_pressed_source = card_id
+		_pressed_is_card = true
+		_press_origin = at
+		_dragging = false
+		return
+	var zone := _zone_at(at, ["drag_entity"])
 	if zone.is_empty():
 		return
 	_pressed_source = str(zone.get("id", ""))
@@ -1262,6 +1344,23 @@ func _on_pointer_move(at: Vector2) -> void:
 		_begin_drag(_pressed_source, _pressed_is_card)
 	if not _dragging:
 		return
+	if selected_card != "":
+		if _card_mode == "place":
+			hand_view.move_held(at)
+			var drop_key := _card_drop_key(at)
+			_set_hovered(drop_key)
+			hand_view.set_held_ready(drop_key != "" or _plays_untargeted_at(at))
+			return
+		if _over_hand(at):
+			# Back over the hand the card follows again, and letting go there
+			# puts it back, as in Hearthstone.
+			hand_view.move_held(at)
+			arrow.finish()
+			_set_hovered("")
+			return
+		if not arrow.active:
+			hand_view.park_held()
+			arrow.begin(hand_view.park_point() - arrow.global_position)
 	var hovered := _target_zone_at(at)
 	if hovered.is_empty():
 		# A miss may mean the cached rects predate the last layout pass rather
@@ -1288,15 +1387,27 @@ func _on_pointer_up(at: Vector2) -> void:
 		# Rects may have gone stale during the drag; refresh before committing
 		# so a legitimate drop is never discarded as a miss.
 		_rebuild_drop_zones()
-		var hovered := _target_zone_at(at)
-		if not hovered.is_empty():
-			_commit_target(str(hovered.get("key", "")))
+		if selected_card != "":
+			_drop_card(at)
 		else:
-			_set_status("No legal target there.", true)
-			_clear_selection()
+			var hovered := _target_zone_at(at)
+			if not hovered.is_empty():
+				_commit_target(str(hovered.get("key", "")))
+			else:
+				_set_status("No legal target there.", true)
+				_clear_selection()
 		_end_drag()
 		_render_state()
 		_render_actions()
+		return
+
+	# A click on a hand card picks it up: it follows the pointer, without the
+	# button held, until the next click plays it or puts it back.
+	if _pressed_source != "" and _pressed_is_card:
+		_begin_drag(_pressed_source, true)
+		_sticky = _dragging
+		if _dragging:
+			_on_pointer_move(at)
 		return
 
 	# A plain click: either pick up a source, or commit onto a lit target.
@@ -1320,11 +1431,10 @@ func _on_pointer_up(at: Vector2) -> void:
 
 func _begin_drag(source_id: String, is_card: bool) -> void:
 	if is_card:
-		selected_card = source_id
-		selected_entity = ""
-	else:
-		selected_entity = source_id
-		selected_card = ""
+		_begin_card_drag(source_id)
+		return
+	selected_entity = source_id
+	selected_card = ""
 	_refresh_targets()
 	if slot_targets.is_empty() and entity_targets.is_empty():
 		# Nothing to aim at; keep the selection but do not draw an arrow.
@@ -1339,7 +1449,7 @@ func _begin_drag(source_id: String, is_card: bool) -> void:
 	# The reveal would sit over the very targets the drag is aiming at.
 	if reveal != null:
 		reveal.hide_reveal()
-	var zone_key := ("card:" if is_card else "drag:") + source_id
+	var zone_key := "drag:" + source_id
 	var origin := _press_origin
 	if _drop_zones.has(zone_key):
 		origin = (_drop_zones[zone_key]["rect"] as Rect2).get_center()
@@ -1349,11 +1459,154 @@ func _begin_drag(source_id: String, is_card: bool) -> void:
 	_repaint_highlights()
 	_render_actions()
 
+## Picks a hand card up. It follows the pointer whatever it plays as: a card
+## with somewhere to land ("place") is put down where it is let go, and one
+## that only targets ("aim") parks above the hand once it leaves it, and the
+## arrow takes over. Nothing is sent until the card is let go.
+func _begin_card_drag(card_id: String) -> void:
+	selected_card = card_id
+	selected_entity = ""
+	_refresh_targets()
+	if _selection_actions().is_empty():
+		_clear_selection()
+		_pressed_source = ""
+		return
+	_card_mode = "aim" if slot_targets.is_empty() and not entity_targets.is_empty() else "place"
+	_dragging = true
+	if reveal != null:
+		reveal.hide_reveal()
+	hand_view.pick_up(card_id, _press_origin)
+	_repaint_highlights()
+	_render_actions()
+
+## Lets a held card go at `at`, playing it if that is somewhere it can land.
+func _drop_card(at: Vector2) -> void:
+	var card_id := selected_card
+	var played := false
+	# The slot a creature is summoned to, which its oval falls into.
+	var landing_slot := ""
+	if _card_mode == "place":
+		var key := _card_drop_key(at)
+		if key != "":
+			if slot_targets.has(key):
+				landing_slot = key
+			played = _commit_target(key)
+		elif _plays_untargeted_at(at):
+			played = _submit(_untargeted_for_selection() as Dictionary)
+	elif not _over_hand(at):
+		var hovered := _target_zone_at(at)
+		if not hovered.is_empty():
+			played = _commit_target(str(hovered.get("key", "")))
+		else:
+			_set_status("No legal target there.", true)
+	if played:
+		_play_card_effect(card_id, landing_slot)
+		hand_view.spend_held(false)
+	_clear_selection()
+
+## Breaks the played card up where it was let go. A creature summoned to a slot
+## leaves its art oval, which falls into that slot.
+func _play_card_effect(card_id: String, landing_slot: String) -> void:
+	var held := hand_view.panel_for(card_id)
+	var card := _hand_entry(card_id)
+	if held == null or card.is_empty():
+		return
+	var side: Dictionary = (state.get("sides", {}) as Dictionary).get(player_id, {})
+	var available := int((side.get("taika", {}) as Dictionary).get("current", 0))
+	# A fresh copy of the card for the effect to break up: the hand keeps its
+	# own, to bring back if the server refuses the play.
+	var copy := _hand_card(card, available)
+	var landing := Rect2()
+	if landing_slot != "" and _drop_zones.has(landing_slot):
+		var slot: Variant = _drop_zones[landing_slot].get("control", null)
+		if slot is Control and is_instance_valid(slot):
+			# Where the token's oval will be, once the creature is in the slot.
+			var area := (slot as Control).get_global_rect()
+			landing = Rect2(
+				area.position + CreatureToken.OVAL.position * area.size,
+				CreatureToken.OVAL.size * area.size
+			)
+	play_effect.play(copy, held, landing, landing_slot if landing.has_area() else "")
+
+## The card with `card_id` in the player's hand, as the state has it, or {}.
+func _hand_entry(card_id: String) -> Dictionary:
+	var side: Dictionary = (state.get("sides", {}) as Dictionary).get(player_id, {})
+	var hand: Variant = side.get("hand", [])
+	if typeof(hand) == TYPE_ARRAY:
+		for card in (hand as Array):
+			if typeof(card) == TYPE_DICTIONARY and str(card.get("instanceId", "")) == card_id:
+				return card
+	return {}
+
+## An oval came down in its slot. If the server has already put the creature
+## there, its token takes over now; otherwise the oval waits on the board, and
+## the render that brings the creature releases it.
+func _on_oval_landed(slot_key: String) -> void:
+	var token := _token_in_slot(board_container, slot_key)
+	if token != null:
+		token.modulate.a = 1.0
+		play_effect.release(slot_key)
+
+func _token_in_slot(node: Node, slot_key: String) -> CreatureToken:
+	for child in node.get_children():
+		if child is Control and str((child as Control).get_meta("slot_key", "")) == slot_key:
+			for inner in child.get_children():
+				if inner is CreatureToken:
+					return inner
+		var found := _token_in_slot(child, slot_key)
+		if found != null:
+			return found
+	return null
+
+## Where a placed card would land if let go at `at`: the lit target under the
+## pointer, or anywhere over the battlefield, the lit slot nearest to it —
+## Hearthstone puts a minion down wherever it is let go over the board.
+func _card_drop_key(at: Vector2) -> String:
+	var hovered := _target_zone_at(at)
+	if hovered.is_empty():
+		_rebuild_drop_zones()
+		hovered = _target_zone_at(at)
+	if not hovered.is_empty():
+		return str(hovered.get("key", ""))
+	if not _over_board(at):
+		return ""
+	var nearest := ""
+	var nearest_distance := INF
+	for key in slot_targets:
+		if not _drop_zones.has(key):
+			continue
+		var distance := ((_drop_zones[key]["rect"] as Rect2).get_center()).distance_to(at)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = str(key)
+	return nearest
+
+## Whether letting the held card go at `at` plays it with no target, as a
+## spell that needs none does when dropped on the battlefield.
+func _plays_untargeted_at(at: Vector2) -> bool:
+	return _over_board(at) and _untargeted_for_selection() != null
+
+func _over_board(at: Vector2) -> bool:
+	return board_area.get_global_rect().has_point(at) and not _over_hand(at)
+
+func _over_hand(at: Vector2) -> bool:
+	return hand_view.get_global_rect().has_point(at)
+
+func _set_hovered(key: String) -> void:
+	if key == _hovered_key:
+		return
+	_hovered_key = key
+	_repaint_highlights()
+
 func _end_drag() -> void:
 	_dragging = false
 	_pressed_source = ""
 	_hovered_key = ""
+	_card_mode = ""
+	_sticky = false
 	arrow.finish()
+	# A card still held was not played, so it goes back to the hand.
+	hand_view.return_held()
 
 func _cancel_drag() -> void:
 	_end_drag()
@@ -1405,15 +1658,17 @@ func _refresh_targets() -> void:
 	slot_targets = Targeting.slot_targets(actions, player_id)
 	entity_targets = Targeting.entity_targets(actions)
 
-func _commit_target(key: String) -> void:
+## Sends the selection's action for `key`; true if it went to the server.
+func _commit_target(key: String) -> bool:
 	if key == "":
-		return
+		return false
 	var action: Variant = slot_targets.get(key, entity_targets.get(key, null))
 	if action == null:
 		_set_status("That is not a legal target for this selection.", true)
-		return
-	_submit(action as Dictionary)
+		return false
+	var sent := _submit(action as Dictionary)
 	_clear_selection()
+	return sent
 
 ## The drop zone under a point, restricted to the current selection's targets.
 func _target_zone_at(at: Vector2) -> Dictionary:
@@ -1541,11 +1796,47 @@ func _end_turn() -> void:
 			return
 	_set_status("Ending the turn is not legal right now.", true)
 
-func _submit(action: Dictionary) -> void:
+## Sends an action; true if it went to the server.
+func _submit(action: Dictionary) -> bool:
 	if not client.submit_action(action):
 		_set_status("Not connected — press Join to reconnect.", true)
-		return
+		return false
 	_clear_selection()
+	return true
+
+## While something is pressed or held, the pointer belongs to it wherever it
+## goes. Otherwise a button under a held card would take the click meant to
+## play it, and the card would stop following the pointer over the side panel.
+func _input(event: InputEvent) -> void:
+	if not game_root.visible or not (event is InputEventMouse):
+		return
+	var button := event as InputEventMouseButton
+	if button != null and _swallow_release and button.button_index == MOUSE_BUTTON_LEFT \
+			and not button.pressed:
+		_swallow_release = false
+		get_viewport().set_input_as_handled()
+		return
+	if not _dragging and _pressed_source == "":
+		return
+	var at := (event as InputEventMouse).global_position
+	if event is InputEventMouseMotion:
+		_on_pointer_move(at)
+	elif button != null and button.button_index == MOUSE_BUTTON_RIGHT:
+		if button.pressed:
+			# Right click cancels, as in Hearthstone.
+			_cancel_drag()
+			_render_state()
+			_render_actions()
+	elif button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed and _sticky:
+			# The click that sets a held card down; its release is not a second.
+			_swallow_release = true
+			_on_pointer_up(at)
+		elif not button.pressed:
+			_on_pointer_up(at)
+	else:
+		return
+	get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and (event as InputEventKey).pressed \
@@ -1569,17 +1860,32 @@ func _append_log(line: String) -> void:
 	log_label.text = "\n".join(log_lines)
 
 func _tint(panel: Control, color: Color) -> void:
+	if panel.has_meta("token"):
+		# A creature's oval carries the colour as a ring of its own; a
+		# rectangle behind it would show at the corners.
+		for child in panel.get_children():
+			if child is CreatureToken:
+				(child as CreatureToken).ring_color = color
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		return
+	if panel.has_meta("framed"):
+		# Likewise a card: its frame is clear at the sides, so it draws the
+		# ring round its own body. The margin keeps room for the ring.
+		for child in panel.get_children():
+			if child is CardFrame:
+				(child as CardFrame).ring_color = color
+				(child as CardFrame).ring_width = FRAME_RING
+		var room := StyleBoxEmpty.new()
+		room.set_content_margin_all(FRAME_RING)
+		panel.add_theme_stylebox_override("panel", room)
+		return
 	var style := StyleBoxFlat.new()
 	style.bg_color = color
 	style.set_corner_radius_all(4)
-	if panel.has_meta("framed"):
-		# Only a ring of colour shows round a card, so it is even on all sides.
-		style.set_content_margin_all(FRAME_RING)
-	else:
-		style.content_margin_left = 8
-		style.content_margin_right = 8
-		style.content_margin_top = 4
-		style.content_margin_bottom = 4
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
 	panel.add_theme_stylebox_override("panel", style)
 
 func _clear(node: Node) -> void:

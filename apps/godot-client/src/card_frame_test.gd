@@ -23,8 +23,26 @@ const WORDY := {
 	"description": "**Guard**, **Ward**, **Lifesteal**\n**Arrival:** Give adjacent friendly Creatures +1 Health, then give every other friendly Creature +1 Attack until the end of your turn, and restore 2 Health to your Hero for each Creature that was given Health this way.",
 }
 const SPELL := {
-	"id": "firebolt", "name": "Firebolt", "type": "SPELL", "cost": 1,
+	"id": "firebolt", "name": "Firebolt", "type": "ACTION", "cost": 1,
 	"tags": [], "keywords": [], "description": "Deal 2 damage.",
+}
+const WEAPON := {
+	"id": "longbow", "name": "Longbow", "type": "WEAPON", "cost": 3,
+	"attack": 2, "durability": 3, "range": "RANGED", "tags": [],
+	"description": "**Ranged**",
+}
+const ARTIFACT := {
+	"id": "totem", "name": "Totem", "type": "ARTIFACT", "cost": 2,
+	"durability": 3, "tags": [], "description": "At the end of your turn, heal 1.",
+}
+## Locations are not in the game yet; this one stands in for the first.
+const LOCATION := {
+	"id": "old_keep", "name": "The Old Keep", "type": "LOCATION", "cost": 3,
+	"tags": [], "description": "Friendly Creatures here have +1 Health.",
+}
+const UNKNOWN := {
+	"id": "mystery", "name": "Mystery", "type": "SOMETHING_NEW", "cost": 0,
+	"tags": [], "description": "",
 }
 
 ## The widths the client uses: a board slot, a hand card, the hover reveal.
@@ -37,10 +55,14 @@ func _init() -> void:
 	await process_frame
 	print("== card frame test ==")
 	var library := CardLibrary.new()
-	library.ingest([WOLF, NO_ART, WORDY, SPELL])
+	library.ingest([WOLF, NO_ART, WORDY, SPELL, WEAPON, ARTIFACT, LOCATION, UNKNOWN])
 
 	_check("creatures are framed", CardFrame.supports(library, "wolf"))
-	_check("spells are not framed yet", not CardFrame.supports(library, "firebolt"))
+	_check("spells are framed", CardFrame.supports(library, "firebolt"))
+	_check("weapons are framed", CardFrame.supports(library, "longbow"))
+	_check("artifacts are framed", CardFrame.supports(library, "totem"))
+	_check("locations are framed", CardFrame.supports(library, "old_keep"))
+	_check("a type the client does not know is not framed", not CardFrame.supports(library, "mystery"))
 
 	var row := HBoxContainer.new()
 	row.position = Vector2(16, 16)
@@ -61,6 +83,38 @@ func _init() -> void:
 	row.add_child(revealed)
 	var revealed_wordy := CardFrame.make(library, {"definition_id": "wordy_warden"}, REVEAL_WIDTH, true)
 	row.add_child(revealed_wordy)
+
+	var second_row := HBoxContainer.new()
+	second_row.position = Vector2(16, 16 + roundf(REVEAL_WIDTH / CardFrame.ASPECT) + 16)
+	second_row.add_theme_constant_override("separation", 12)
+	get_root().add_child(second_row)
+	var spell := CardFrame.make(library, {"definition_id": "firebolt"}, BOARD_WIDTH)
+	second_row.add_child(spell)
+	# An equipped Weapon, worn down by a swing.
+	var worn := CardFrame.make(library, {"definition_id": "longbow", "attack": 2, "durability": 1}, BOARD_WIDTH)
+	second_row.add_child(worn)
+	var revealed_spell := CardFrame.make(library, {"definition_id": "firebolt"}, REVEAL_WIDTH, true)
+	second_row.add_child(revealed_spell)
+	var revealed_weapon := CardFrame.make(library, {"definition_id": "longbow"}, REVEAL_WIDTH, true)
+	second_row.add_child(revealed_weapon)
+
+	var third_row := HBoxContainer.new()
+	third_row.position = second_row.position + Vector2(0, roundf(REVEAL_WIDTH / CardFrame.ASPECT) + 16)
+	third_row.add_theme_constant_override("separation", 12)
+	get_root().add_child(third_row)
+	# An Artifact in play with nothing left, beside one as printed.
+	var spent := CardFrame.make(library, {"definition_id": "totem", "durability": 0}, BOARD_WIDTH)
+	third_row.add_child(spent)
+	var location := CardFrame.make(library, {"definition_id": "old_keep"}, BOARD_WIDTH)
+	third_row.add_child(location)
+	var revealed_artifact := CardFrame.make(library, {"definition_id": "totem"}, REVEAL_WIDTH, true)
+	third_row.add_child(revealed_artifact)
+	var revealed_location := CardFrame.make(library, {"definition_id": "old_keep"}, REVEAL_WIDTH, true)
+	third_row.add_child(revealed_location)
+
+	# A ready card's ring, which the card draws round its own body.
+	for ringed in [hurt, spell, worn, spent, location]:
+		ringed.ring_color = Color(0.45, 0.85, 0.55)
 	await process_frame
 	await process_frame
 
@@ -91,6 +145,52 @@ func _init() -> void:
 		revealed._text.get_parsed_text().contains("Swift") and revealed.rules_fit)
 	_check("a description too long for the box says so", not revealed_wordy.rules_fit)
 	_check("the frame takes no pointer input", _ignores_mouse(hurt))
+	# The creature image has a clear margin below the card and none above it;
+	# it is the card, not the image, that is centred.
+	_check("a creature's body fills the card's height, centred", _fills(hurt, false))
+	_check("the art oval is reported where it is drawn", hurt.art_rect() == hurt._art.get_rect())
+
+	_check("a spell keeps the card's shape",
+		is_equal_approx(roundf(BOARD_WIDTH / CardFrame.ASPECT), spell.size.y))
+	_check("a spell is drawn on the spell frame",
+		spell._frame.texture != null and spell._frame.texture == CardFrame._texture(CardFrame.SPELL_FRAME_PATH))
+	_check("a spell shows no stats",
+		not spell._attack_value.visible and not spell._health_value.visible and not spell._durability_value.visible)
+	_check("a spell still shows its cost", spell._cost_value.visible and spell._cost_value.text == "1")
+	_check("a detailed spell prints its description",
+		revealed_spell._text.get_parsed_text().contains("Deal 2 damage"))
+	_check("a weapon is drawn on the weapon frame",
+		worn._frame.texture != null and worn._frame.texture == CardFrame._texture(CardFrame.WEAPON_FRAME_PATH))
+	_check("a weapon keeps the card's size", is_equal_approx(roundf(BOARD_WIDTH / CardFrame.ASPECT), worn.size.y))
+	_check("a weapon's body fills the card's width, centred", _fills(worn, true))
+	_check("a weapon shows Attack and Durability, not Health",
+		worn._attack_value.visible and worn._durability_value.visible and not worn._health_value.visible
+		and not worn._attack.visible and not worn._health.visible)
+	_check("a weapon shows its live stats", worn._attack_value.text == "2" and worn._durability_value.text == "1")
+	_check("a worn Durability is coloured as hurt",
+		worn._durability_value.get_theme_color("font_color") == CardFrame.COLOR_HURT)
+	_check("a weapon in hand shows its printed Durability", revealed_weapon._durability_value.text == "3")
+	_check("a small weapon card says it is Ranged", worn._text.get_parsed_text().contains("Ranged"))
+
+	_check("an artifact is drawn on the artifact frame",
+		spent._frame.texture != null and spent._frame.texture == CardFrame._texture(CardFrame.ARTIFACT_FRAME_PATH))
+	_check("an artifact shows Durability on its shield, and nothing else",
+		spent._durability.visible and spent._durability_value.visible and not spent._attack_value.visible
+		and not spent._health_value.visible)
+	_check("an artifact in hand shows its printed Durability", revealed_artifact._durability_value.text == "3")
+	_check("an artifact with no Durability left shows the cracked shield",
+		spent._durability.texture != null
+		and spent._durability.texture == CardFrame._texture(CardFrame.DURABILITY_ZERO_PATH)
+		and spent._durability_value.text == "0")
+	_check("a whole artifact shows the whole shield",
+		revealed_artifact._durability.texture == CardFrame._texture(CardFrame.DURABILITY_PATH))
+	_check("a location is drawn on the location frame",
+		location._frame.texture != null and location._frame.texture == CardFrame._texture(CardFrame.LOCATION_FRAME_PATH))
+	_check("a location shows no stats",
+		not location._attack_value.visible and not location._health_value.visible
+		and not location._durability_value.visible and not location._durability.visible)
+	_check("a detailed location prints its description",
+		revealed_location._text.get_parsed_text().contains("+1 Health"))
 
 	var shots := _arg("--screenshot-dir=")
 	if shots != "" and DisplayServer.get_name() != "headless":
@@ -104,6 +204,15 @@ func _init() -> void:
 		print("  FAIL: ", failure)
 	print("RESULT: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+## Whether `card`'s visible body spans its full width (or height) and is
+## centred along the other.
+func _fills(card: CardFrame, across: bool) -> bool:
+	var body := card.body_rect()
+	var centred := body.get_center().distance_to(card.size * 0.5) < 0.5
+	if across:
+		return centred and absf(body.size.x - card.size.x) < 0.5 and body.size.y <= card.size.y + 0.5
+	return centred and absf(body.size.y - card.size.y) < 0.5 and body.size.x <= card.size.x + 0.5
 
 func _ignores_mouse(node: Node) -> bool:
 	if node is Control and (node as Control).mouse_filter != Control.MOUSE_FILTER_IGNORE:

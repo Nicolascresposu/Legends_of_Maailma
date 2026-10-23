@@ -11,8 +11,8 @@ class_name CardReveal
 
 ## The text column is a fixed width and the panel hugs its content vertically:
 ## a vanilla creature is a short card and should not be padded out to the
-## height of one with three lines of rules text. A Creature's card sits beside
-## the column rather than above it, so a wordy one still fits the screen.
+## height of one with three lines of rules text. A framed card sits beside the
+## column rather than above it, so a wordy one still fits the screen.
 const PANEL_WIDTH := 264.0
 const CARD_WIDTH := 240.0
 ## Gap between the hovered panel and the reveal, and from the screen edge.
@@ -22,8 +22,10 @@ const MARGIN := 10.0
 ## stays below them rather than covering controls the player is using.
 const TOP_MARGIN := 108.0
 ## Pointer dwell before the reveal appears. Long enough that sweeping the
-## pointer across the board does not flash a card at every slot it crosses.
-const DELAY := 0.35
+## pointer across the board, or aiming past a creature, does not flash its
+## card: the token already shows what the board needs, and the whole card is
+## for a player who stops to read it.
+const DELAY := 0.5
 
 const COLOR_BACKDROP := Color(0.09, 0.10, 0.13, 0.97)
 const COLOR_BORDER := Color(0.85, 0.74, 0.44)
@@ -34,7 +36,7 @@ const COLOR_HURT := Color(0.92, 0.52, 0.52)
 var library: CardLibrary
 
 var _panel: PanelContainer
-## A Creature is revealed as its card, in place of the title, art and stats.
+## A framed card is revealed as its card, in place of the title, art and stats.
 var _card: CardFrame
 var _art: TextureRect
 var _art_slot: Control
@@ -49,11 +51,13 @@ var _marks: Label
 ## What is currently revealed, so a repaint of the same card is a no-op and a
 ## re-render of the board does not make the reveal flicker.
 var _shown_key := ""
-## The card waiting out `DELAY`, and how much of it has elapsed.
+## The card waiting out `DELAY`, and when it started waiting, in msec. Timed
+## by the clock rather than by adding up frame times, so a slow frame from
+## before the pointer arrived does not count towards the dwell.
 var _pending_key := ""
 var _pending_card: Dictionary = {}
 var _pending_anchor := Rect2()
-var _elapsed := 0.0
+var _pending_since := 0
 ## Whether a re-place is already waiting on the deferred queue.
 var _place_queued := false
 
@@ -204,7 +208,7 @@ func request(key: String, card: Dictionary, anchor: Rect2) -> void:
 		_pending_key = key
 		_pending_card = card
 		_pending_anchor = anchor
-		_elapsed = 0.0
+		_pending_since = Time.get_ticks_msec()
 		# Switching cards while one is already up swaps immediately: the dwell
 		# is there to avoid flashing cards at a pointer in transit, and a
 		# pointer that has already settled has served it.
@@ -230,7 +234,7 @@ func refresh(key: String, card: Dictionary, anchor: Rect2) -> void:
 func hide_reveal() -> void:
 	_pending_key = ""
 	_pending_card = {}
-	_elapsed = 0.0
+	_pending_since = 0
 	if _shown_key == "":
 		return
 	_shown_key = ""
@@ -239,11 +243,10 @@ func hide_reveal() -> void:
 func is_revealing() -> bool:
 	return _shown_key != ""
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if _pending_key == "" or _pending_key == _shown_key:
 		return
-	_elapsed += delta
-	if _elapsed >= DELAY:
+	if Time.get_ticks_msec() - _pending_since >= DELAY * 1000.0:
 		_reveal()
 
 func _reveal() -> void:
@@ -293,8 +296,8 @@ func _fill(card: Dictionary) -> void:
 		parts.append(", ".join(tag_list))
 	_type_line.text = "  ·  ".join(parts)
 
-	# A Creature shows as its card, whose badges carry its name, art and
-	# stats; anything else keeps the plain layout.
+	# A card shows on its type's frame, which carries its name, art and
+	# stats; a type with no frame keeps the plain layout.
 	var framed := CardFrame.supports(library, definition_id)
 	_card.visible = framed
 	if framed:
@@ -383,7 +386,7 @@ func _place(anchor: Rect2) -> void:
 	var view := get_viewport_rect().size
 	# `size` still holds the previous card's size until the layout pass that
 	# follows `_fill`, so ask the content what it needs now. The width changes
-	# too, as a Creature's card appears or goes.
+	# too, as a card's frame appears or goes.
 	var needed := _panel.get_combined_minimum_size()
 	var panel_size := Vector2(maxf(needed.x, PANEL_WIDTH), maxf(needed.y, 1.0))
 	_panel.size = panel_size
