@@ -76,6 +76,18 @@ func _init() -> void:
 	hand.hover("b")
 	await _settle()
 	_check("hovering shows the card large", hand.is_zoomed())
+	if DisplayServer.get_name() != "headless":
+		await RenderingServer.frame_post_draw
+		# The preview's outline/shadow once submitted thousands of tiny shapes.
+		# Check rendering work instead of machine-dependent frame timings.
+		var calls := Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+		_check("a hover preview stays within the draw-call budget", calls > 0 and calls < 1000)
+		var cached := CardFrame._outline_layers.size()
+		hand.clear_hover()
+		hand.hover("b")
+		await _settle()
+		await RenderingServer.frame_post_draw
+		_check("reopening the preview reuses its outline textures", CardFrame._outline_layers.size() == cached)
 	var zoom := Rect2(hand._zoom.global_position, hand._zoom.size * hand._zoom.scale)
 	_check("the large card is several times the hand card",
 		zoom.size.x >= HandView.CARD_SIZE.x * 2.0)

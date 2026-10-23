@@ -102,6 +102,9 @@ var _zoom: PanelContainer
 var _zoom_scale := ZOOM_START
 var _notes: PanelContainer
 var _glow: Panel
+var _glow_frame: CardFrame
+var _glow_style: StyleBoxFlat
+var _glow_empty := StyleBoxEmpty.new()
 var _empty: Label
 
 func setup(card_library: CardLibrary) -> void:
@@ -127,13 +130,15 @@ func _init() -> void:
 	_glow.z_index = Z_GLOW
 	_glow.visible = false
 	var glow_style := StyleBoxFlat.new()
-	glow_style.bg_color = Color(COLOR_GLOW, 0.35)
+	_glow_style = glow_style
+	glow_style.draw_center = false
 	glow_style.border_color = COLOR_GLOW
 	glow_style.set_border_width_all(3)
 	glow_style.set_corner_radius_all(9)
 	glow_style.shadow_color = Color(COLOR_GLOW, 0.6)
 	glow_style.shadow_size = 14
 	_glow.add_theme_stylebox_override("panel", glow_style)
+	_glow.draw.connect(_draw_held_outline)
 	add_child(_glow)
 
 	_zoom = PanelContainer.new()
@@ -440,6 +445,20 @@ func _place_glow() -> void:
 	_glow.position = panel.position
 	_glow.rotation = panel.rotation
 	_glow.scale = panel.scale
+	_glow_frame = null
+	for child in panel.get_children():
+		if child is CardFrame:
+			_glow_frame = child
+			break
+	if _glow_frame != null:
+		_glow.add_theme_stylebox_override("panel", _glow_empty)
+	else:
+		_glow.add_theme_stylebox_override("panel", _glow_style)
+	_glow.queue_redraw()
+
+func _draw_held_outline() -> void:
+	if is_instance_valid(_glow_frame):
+		_glow_frame.draw_outline(_glow, _glow_frame.position, COLOR_GLOW, 6.0)
 
 ## Stands the large card on the bottom of the hand, centred over the hovered
 ## card and kept inside the view, growing to full size as it appears.

@@ -187,9 +187,15 @@ var ring_color := Color(0, 0, 0, 0):
 	set(value):
 		ring_color = value
 		queue_redraw()
-var ring_width := 4.0
+var ring_width := 4.0:
+	set(value):
+		ring_width = value
+		queue_redraw()
 ## A drop shadow under the ring, for a card lifted above the others.
-var ring_shadow := 0
+var ring_shadow := 0:
+	set(value):
+		ring_shadow = value
+		queue_redraw()
 
 ## The card type whose frame is showing; a key of `LAYOUTS`.
 var _kind := "CREATURE"
@@ -212,6 +218,10 @@ var _text_plain := ""
 
 ## Loaded textures, so a board of cards loads each image once.
 static var _textures: Dictionary = {}
+## Normalized outer contours, traced once from each image's opaque pixels.
+static var _outlines: Dictionary = {}
+## Shared rasterized rings and shadows; hover animation only draws two quads.
+static var _outline_layers: Dictionary = {}
 
 ## Whether a card is drawn with a frame: every card type the client knows
 ## has one.
@@ -356,15 +366,100 @@ func _notification(what: int) -> void:
 		_layout()
 
 func _draw() -> void:
-	if ring_color.a <= 0.0 and ring_shadow <= 0:
+	draw_outline(self, Vector2.ZERO, ring_color, ring_width, ring_shadow)
+
+## Draws behind the artwork, following the frame and its visible badges.
+## The held-card cue uses the same cached textures in the hand's overlay.
+func draw_outline(canvas: CanvasItem, offset: Vector2, color: Color, width: float, shadow := 0) -> void:
+	if color.a <= 0.0 and shadow <= 0:
 		return
-	var body := body_rect().grow(ring_width)
-	var style := StyleBoxFlat.new()
-	style.bg_color = ring_color
-	style.set_corner_radius_all(int(ring_width) + 2)
-	style.shadow_color = Color(0, 0, 0, 0.5)
-	style.shadow_size = ring_shadow
-	draw_style_box(style, body)
+	var durability_path := _durability.texture.resource_path if _durability.texture != null else ""
+	var key := "%s:%s:%s:%s:%s" % [_kind, _card_size(), width, shadow, durability_path]
+	if not _outline_layers.has(key):
+		_outline_layers[key] = _bake_outline(width, shadow)
+	var layers: Dictionary = _outline_layers[key]
+	var rect: Rect2 = layers["rect"]
+	rect.position += offset
+	if layers["shadow"] != null:
+		canvas.draw_texture_rect(layers["shadow"], rect, false, Color.BLACK)
+	if color.a > 0.0 and layers["ring"] != null:
+		canvas.draw_texture_rect(layers["ring"], rect, false, color)
+
+## SVG rasterization supplies round joins and antialiasing once, rather than
+## submitting thousands of line/circle primitives on every rendered frame.
+func _bake_outline(width: float, shadow: int) -> Dictionary:
+	var contours: Array[PackedVector2Array] = []
+	var bounds := Rect2(Vector2.ZERO, _card_size())
+	for image: TextureRect in [_frame, _cost, _attack, _health, _durability]:
+		if not image.visible or image.texture == null:
+			continue
+		var points := PackedVector2Array()
+		for point: Vector2 in _texture_outline(image.texture):
+			var at := image.position + point * image.size
+			points.append(at)
+			bounds = bounds.expand(at)
+		if points.size() > 2:
+			contours.append(points)
+	bounds = bounds.grow(width + shadow + 2.0)
+	bounds = Rect2(bounds.position.floor(), bounds.size.ceil() + Vector2.ONE)
+	var paths := ""
+	for points in contours:
+		paths += "M"
+		for index in points.size():
+			var point := points[index] - bounds.position
+			paths += "%s%.3f,%.3f" % ["" if index == 0 else "L", point.x, point.y]
+		paths += "Z"
+	return {
+		"rect": bounds,
+		"ring": _rasterize_outline(paths, bounds.size, width, 0),
+		"shadow": _rasterize_outline(paths, bounds.size, width, shadow) if shadow > 0 else null,
+	}
+
+static func _rasterize_outline(paths: String, dimensions: Vector2, width: float, shadow: int) -> Texture2D:
+	var svg := '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">' % [int(dimensions.x), int(dimensions.y)]
+	var stroke := '<path d="%s" fill="none" stroke="white" stroke-width="%.3f" stroke-opacity="%.3f" stroke-linejoin="round" stroke-linecap="round"/>'
+	if shadow > 0:
+		for spread in range(shadow, 0, -2):
+			svg += stroke % [paths, (width + spread) * 2.0, 0.08]
+	else:
+		svg += stroke % [paths, width * 2.0, 1.0]
+	svg += "</svg>"
+	var image := Image.new()
+	var error := image.load_svg_from_string(svg, 2.0)
+	if error != OK:
+		push_error("Could not rasterize card outline: %s" % error)
+		return null
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+static func _texture_outline(texture: Texture2D) -> PackedVector2Array:
+	var key := texture.resource_path
+	if _outlines.has(key):
+		return _outlines[key]
+	var image := texture.get_image()
+	if image.is_compressed():
+		image.decompress()
+	# Trace at card-display resolution, avoiding tiny specks in the source art.
+	var fit := minf(256.0 / maxf(image.get_width(), image.get_height()), 1.0)
+	image.resize(maxi(1, roundi(image.get_width() * fit)), maxi(1, roundi(image.get_height() * fit)))
+	var mask := BitMap.new()
+	mask.create_from_image_alpha(image, 0.5)
+	var outline := PackedVector2Array()
+	var largest := 0.0
+	# Ignore detached flecks and interior holes in the source artwork.
+	for polygon in mask.opaque_to_polygons(Rect2i(Vector2i.ZERO, image.get_size()), 1.0):
+		var bounds := Rect2(polygon[0], Vector2.ZERO)
+		for point in polygon:
+			bounds = bounds.expand(point)
+		var area := bounds.get_area()
+		if area > largest:
+			largest = area
+			outline = polygon
+	var dimensions := Vector2(image.get_size())
+	for index in outline.size():
+		outline[index] /= dimensions
+	_outlines[key] = outline
+	return outline
 
 ## Places every part for the card's current size, and fits its text.
 func _layout() -> void:

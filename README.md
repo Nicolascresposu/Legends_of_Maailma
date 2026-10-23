@@ -224,6 +224,7 @@ godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --headless --path apps/godot-client --script src/card_frame_test.gd
 godot --headless --path apps/godot-client --script src/creature_token_test.gd
 godot --headless --path apps/godot-client --script src/card_play_effect_test.gd
+godot --headless --path apps/godot-client --script src/combat_effect_test.gd
 godot --headless --path apps/godot-client --script src/hand_view_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd

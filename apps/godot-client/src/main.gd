@@ -118,6 +118,13 @@ var join_button: Button
 var arrow: TargetingArrow
 var reveal: CardReveal
 var play_effect: CardPlayEffect
+var combat_effect: CombatEffect
+## Preserve server order while an attack is playing. Its state is revealed at
+## impact; the next attack waits until these tokens have returned home.
+var _presentation_queue: Array[Dictionary] = []
+var _presenting := false
+var _combat_preparing := false
+var _presentation_generation := 0
 
 func _ready() -> void:
 	client = MatchClient.new()
@@ -276,6 +283,12 @@ func _build_interface() -> void:
 	play_effect.z_index = HandView.Z_HELD + 1
 	play_effect.landed.connect(_on_oval_landed)
 	game_root.add_child(play_effect)
+
+	combat_effect = CombatEffect.new()
+	combat_effect.z_index = HandView.Z_HELD + 2
+	combat_effect.clip_contents = true
+	combat_effect.impacted.connect(_apply_combat_updates)
+	game_root.add_child(combat_effect)
 
 	arrow = TargetingArrow.new()
 	# Over the held hand card it is fired from, which draws above the board.
@@ -440,6 +453,7 @@ func _show_admin_view() -> void:
 
 ## Opens a match the admin panel started or picked, as the signed-in player.
 func _play_admin_match(match_id: String) -> void:
+	_reset_combat_presentation()
 	_show_match_view()
 	match_input.text = match_id
 	player_id = str(accounts.user.get("id", player_id))
@@ -561,6 +575,7 @@ func _on_deck_picked(deck_id: String) -> void:
 			join_match_with_deck(str(_pending_entry.get("match_id", "")), deck_id)
 
 func _on_match_started(match_id: String, seated_as: String, waiting: bool) -> void:
+	_reset_combat_presentation()
 	_pending_entry = {}
 	player_id = seated_as
 	match_input.text = match_id
@@ -645,6 +660,9 @@ func _on_library_loaded() -> void:
 		_render_actions()
 
 func _on_match_state(new_state: Dictionary) -> void:
+	_queue_presentation("state", new_state)
+
+func _present_match_state(new_state: Dictionary) -> void:
 	state = new_state
 	# A new board invalidates what a held card was aiming at; it goes back.
 	if _dragging:
@@ -656,6 +674,9 @@ func _on_match_state(new_state: Dictionary) -> void:
 func _on_legal_actions(target_player: String, actions: Array) -> void:
 	if target_player != player_id:
 		return
+	_queue_presentation("actions", actions)
+
+func _present_legal_actions(actions: Array) -> void:
 	legal_actions = actions
 	# A selection made before this arrived may no longer be legal.
 	_refresh_targets()
@@ -663,6 +684,9 @@ func _on_legal_actions(target_player: String, actions: Array) -> void:
 	_render_actions()
 
 func _on_game_events(events: Array) -> void:
+	_queue_presentation("events", events)
+
+func _present_game_events(events: Array) -> void:
 	for event in events:
 		if typeof(event) != TYPE_DICTIONARY:
 			continue
@@ -671,15 +695,147 @@ func _on_game_events(events: Array) -> void:
 		var line := ActionFormatter.event_line(event, state, library)
 		if line != "":
 			_append_log(line)
+	for event in events:
+		if typeof(event) != TYPE_DICTIONARY or str(event.get("type", "")) != "ATTACK_STARTED":
+			continue
+		var source_id := str(event.get("sourceId", ""))
+		var target_id := str(event.get("targetId", ""))
+		# Only creature-to-creature combat. Hidden match views need no animation.
+		if CombatEffect._creature(state, source_id).is_empty() \
+				or CombatEffect._creature(state, target_id).is_empty() or not game_root.visible:
+			continue
+		var generation := _presentation_generation
+		_combat_preparing = true
+		_cancel_drag()
+		# Several AI messages can arrive in one socket poll, including a summon
+		# immediately before an attack. Let its new containers lay out first.
+		await get_tree().process_frame
+		await get_tree().process_frame
+		if generation != _presentation_generation:
+			return
+		var source := _combat_token(source_id)
+		var target := _combat_token(target_id)
+		if source == null or target == null:
+			_combat_preparing = false
+			continue
+		var source_rect := source.get_global_rect()
+		var target_rect := target.get_global_rect()
+		var board_rect := board_area.get_global_rect()
+		# Frame both fighters when they fit; otherwise focus on the defender.
+		# The flight is clipped to the board so a distant back-row attacker can
+		# enter from offscreen without being drawn over the hand or side panel.
+		var span := source_rect.merge(target_rect)
+		if board_area is ScrollContainer:
+			var scroll := board_area as ScrollContainer
+			var focus_y := span if span.size.y <= board_rect.size.y else target_rect
+			var focus_x := span if span.size.x <= board_rect.size.x else target_rect
+			var shift := Vector2(maxf(0.0, focus_x.end.x - board_rect.end.x),
+				maxf(0.0, focus_y.end.y - board_rect.end.y))
+			if focus_y.position.y < board_rect.position.y:
+				shift.y = focus_y.position.y - board_rect.position.y
+			if focus_x.position.x < board_rect.position.x:
+				shift.x = focus_x.position.x - board_rect.position.x
+			scroll.scroll_vertical += ceili(shift.y)
+			scroll.scroll_horizontal += ceili(shift.x)
+			if not shift.is_zero_approx():
+				await get_tree().process_frame
+				if generation != _presentation_generation:
+					return
+				source = _combat_token(source_id)
+				target = _combat_token(target_id)
+				if source == null or target == null:
+					_combat_preparing = false
+					continue
+			source_rect = source.get_global_rect()
+			target_rect = target.get_global_rect()
+		_combat_preparing = false
+		combat_effect.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		combat_effect.position = game_root.get_global_transform().affine_inverse() * board_rect.position
+		combat_effect.size = board_rect.size / game_root.get_global_transform().get_scale()
+		var source_card: Dictionary = source.get_parent().get_meta("reveal_card", {})
+		var target_card: Dictionary = target.get_parent().get_meta("reveal_card", {})
+		combat_effect.play(library, source_id, source_card, source_rect,
+			target_id, target_card, target_rect, game_root)
+		source.modulate.a = 0.0
+		target.modulate.a = 0.0
+		_render_actions()
+		await combat_effect.finished
+		if generation != _presentation_generation:
+			return
+		_render_state()
+		_render_actions()
 
 func _on_match_ended(winner_id: String) -> void:
-	var outcome := "You win!" if winner_id == player_id else "You lose."
-	if winner_id == "":
-		outcome = "The match ends in a draw."
+	_queue_presentation("ended", winner_id)
+
+func _present_match_ended(winner_id: String) -> void:
+	var outcome := _match_outcome(winner_id)
 	turn_banner.text = "Match over — " + outcome
 	_append_log("[b]%s[/b]" % outcome)
 	end_turn_button.disabled = true
 	_cancel_drag()
+
+func _match_outcome(winner_id: String) -> String:
+	if winner_id == "":
+		return "The match ends in a draw."
+	return "You win!" if winner_id == player_id else "You lose."
+
+func _combat_locked() -> bool:
+	return _combat_preparing or (combat_effect != null and combat_effect.is_busy())
+
+func _queue_presentation(kind: String, payload: Variant) -> void:
+	_presentation_queue.append({"kind": kind, "payload": payload})
+	if combat_effect.has_impacted():
+		_apply_combat_updates()
+	_drain_presentation_queue()
+
+func _drain_presentation_queue() -> void:
+	if _presenting:
+		return
+	_presenting = true
+	while not _presentation_queue.is_empty():
+		var message: Dictionary = _presentation_queue.pop_front()
+		if message["kind"] == "events":
+			await _present_game_events(message["payload"])
+		else:
+			_apply_presentation(message)
+	_presenting = false
+
+func _apply_presentation(message: Dictionary) -> void:
+	match str(message["kind"]):
+		"state":
+			_present_match_state(message["payload"])
+			combat_effect.resolve(library, state)
+		"actions":
+			_present_legal_actions(message["payload"])
+		"ended":
+			_present_match_ended(str(message["payload"]))
+
+func _apply_combat_updates() -> void:
+	# Consume just this attack's result, stopping before the next event batch.
+	# Also runs for a result that arrives after the animation reaches impact.
+	while not _presentation_queue.is_empty() and _presentation_queue[0]["kind"] != "events":
+		_apply_presentation(_presentation_queue.pop_front())
+
+func _reset_combat_presentation() -> void:
+	_presentation_generation += 1
+	_presentation_queue.clear()
+	_combat_preparing = false
+	combat_effect.cancel()
+
+func _combat_token(entity_id: String) -> CreatureToken:
+	return _find_combat_token(board_container, entity_id)
+
+func _find_combat_token(node: Node, entity_id: String) -> CreatureToken:
+	if node is Control and str(node.get_meta("reveal_key", "")) == entity_id:
+		for child in node.get_children():
+			if child is CreatureToken:
+				return child
+	for child in node.get_children():
+		var found := _find_combat_token(child, entity_id)
+		if found != null:
+			return found
+	return null
 
 func _on_server_error(code: String, message: String) -> void:
 	_set_status("%s: %s" % [code, message], true)
@@ -721,6 +877,8 @@ func _render_state() -> void:
 	]
 	if opponent_id == OPEN_SEAT_ID:
 		turn_banner.text = "Waiting for an opponent to join — share the match ID"
+	if str(state.get("phase", "")) == "FINISHED":
+		turn_banner.text = "Match over — " + _match_outcome(str(state.get("winnerId", "")))
 	turn_banner.add_theme_color_override(
 		"font_color", COLOR_READY if is_my_turn else Color(0.85, 0.72, 0.42)
 	)
@@ -1022,6 +1180,8 @@ func _slot_panel(
 		token.modulate.a = 0.0
 	elif play_effect.is_waiting(slot_key):
 		play_effect.release(slot_key)
+	if combat_effect.owns(creature_id):
+		token.modulate.a = 0.0
 	# The hover reveal replaces the built-in tooltip for cards in play: it shows
 	# the whole card, large enough to read its rules, and without the
 	# delay-and-follow behaviour of a cursor tooltip.
@@ -1244,6 +1404,8 @@ func _collect_zones(node: Node) -> void:
 # --- Pointer interaction ----------------------------------------------------
 
 func _gui_input(event: InputEvent) -> void:
+	if _combat_locked():
+		return
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.button_index != MOUSE_BUTTON_LEFT:
@@ -1544,7 +1706,8 @@ func _hand_entry(card_id: String) -> Dictionary:
 func _on_oval_landed(slot_key: String) -> void:
 	var token := _token_in_slot(board_container, slot_key)
 	if token != null:
-		token.modulate.a = 1.0
+		if not combat_effect.owns(str(token.get_parent().get_meta("reveal_key", ""))):
+			token.modulate.a = 1.0
 		play_effect.release(slot_key)
 
 func _token_in_slot(node: Node, slot_key: String) -> CreatureToken:
@@ -1713,6 +1876,14 @@ func _entity_can_act(entity_id: String) -> bool:
 
 func _render_actions() -> void:
 	_clear(action_container)
+	if str(state.get("phase", "")) == "FINISHED":
+		end_turn_button.disabled = true
+		action_hint.text = "Match over."
+		return
+	if _combat_locked():
+		end_turn_button.disabled = true
+		action_hint.text = "Combat resolving..."
+		return
 	var is_my_turn := str(state.get("activePlayerId", "")) == player_id
 	end_turn_button.disabled = not is_my_turn or legal_actions.is_empty()
 
@@ -1798,6 +1969,8 @@ func _end_turn() -> void:
 
 ## Sends an action; true if it went to the server.
 func _submit(action: Dictionary) -> bool:
+	if _combat_locked():
+		return false
 	if not client.submit_action(action):
 		_set_status("Not connected — press Join to reconnect.", true)
 		return false
@@ -1808,7 +1981,7 @@ func _submit(action: Dictionary) -> bool:
 ## goes. Otherwise a button under a held card would take the click meant to
 ## play it, and the card would stop following the pointer over the side panel.
 func _input(event: InputEvent) -> void:
-	if not game_root.visible or not (event is InputEventMouse):
+	if _combat_locked() or not game_root.visible or not (event is InputEventMouse):
 		return
 	var button := event as InputEventMouseButton
 	if button != null and _swallow_release and button.button_index == MOUSE_BUTTON_LEFT \
