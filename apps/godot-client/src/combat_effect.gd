@@ -88,6 +88,14 @@ func has_impacted() -> bool:
 func owns(entity_id: String) -> bool:
 	return is_busy() and (entity_id == _attacker.id or entity_id == _defender.id)
 
+## The dying attacker's position is at contact, rather than its home slot.
+func creature_rect(entity_id: String) -> Rect2:
+	if not owns(entity_id):
+		return Rect2()
+	_pose()
+	var fighter := _attacker if entity_id == _attacker.id else _defender
+	return fighter.token.get_global_rect()
+
 ## Read the authoritative result at the hit, including simultaneous deaths.
 func resolve(library: CardLibrary, state: Dictionary) -> void:
 	if not has_impacted():

@@ -119,6 +119,8 @@ var arrow: TargetingArrow
 var reveal: CardReveal
 var play_effect: CardPlayEffect
 var combat_effect: CombatEffect
+var last_breath_effect: LastBreathEffect
+var _pending_last_breath_deaths: Dictionary = {}
 ## Preserve server order while an attack is playing. Its state is revealed at
 ## impact; the next attack waits until these tokens have returned home.
 var _presentation_queue: Array[Dictionary] = []
@@ -291,6 +293,10 @@ func _build_interface() -> void:
 	combat_effect.clip_contents = true
 	combat_effect.impacted.connect(_apply_combat_updates)
 	game_root.add_child(combat_effect)
+	last_breath_effect = LastBreathEffect.new()
+	last_breath_effect.z_index = HandView.Z_HELD + 3
+	last_breath_effect.clip_contents = true
+	game_root.add_child(last_breath_effect)
 
 	arrow = TargetingArrow.new()
 	# Over the held hand card it is fired from, which draws above the board.
@@ -665,6 +671,7 @@ func _on_match_state(new_state: Dictionary) -> void:
 	_queue_presentation("state", new_state)
 
 func _present_match_state(new_state: Dictionary) -> void:
+	_present_last_breath_deaths(new_state)
 	if not state.is_empty():
 		for side: Dictionary in new_state.get("sides", {}).values():
 			for id in side.get("creatures", {}):
@@ -702,6 +709,9 @@ func _present_game_events(events: Array) -> void:
 	for event in events:
 		if typeof(event) != TYPE_DICTIONARY:
 			continue
+		if str(event.get("type", "")) == "CREATURE_DIED" \
+				and library.keywords(str(event.get("cardDefinitionId", ""))).has("LAST_BREATH"):
+			_pending_last_breath_deaths[str(event.get("sourceId", ""))] = true
 		# Some events are bookkeeping the player need not read — a resolved
 		# marker whose damage lines already told the story. They format to "".
 		var line := ActionFormatter.event_line(event, state, library)
@@ -834,7 +844,31 @@ func _reset_combat_presentation() -> void:
 	_presentation_queue.clear()
 	_combat_preparing = false
 	_guard_arrivals.clear()
+	_pending_last_breath_deaths.clear()
+	last_breath_effect.cancel()
 	combat_effect.cancel()
+
+## Death events are recorded before combat starts, but shown only when its
+## authoritative state is applied at impact. Other damage resolves at once.
+func _present_last_breath_deaths(new_state: Dictionary) -> void:
+	for id: String in _pending_last_breath_deaths.keys():
+		if not CombatEffect._creature(new_state, id).is_empty():
+			continue
+		_pending_last_breath_deaths.erase(id)
+		if not game_root.visible:
+			continue
+		var area := Rect2()
+		if combat_effect.owns(id):
+			area = combat_effect.creature_rect(id)
+		else:
+			var token := _combat_token(id)
+			if token != null:
+				area = token.get_global_rect()
+		if area.has_area():
+			var board_rect := board_area.get_global_rect()
+			last_breath_effect.position = game_root.get_global_transform().affine_inverse() * board_rect.position
+			last_breath_effect.size = board_rect.size / game_root.get_global_transform().get_scale()
+			last_breath_effect.play(area)
 
 func _combat_token(entity_id: String) -> CreatureToken:
 	return _find_combat_token(board_container, entity_id)

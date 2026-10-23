@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "MACHINES_OF_KONA",
+  "name": "Machines of Kona",
+  "policy": {
+    "released": false,
+    "tradeable": false,
+    "duplicateProtection": false,
+    "craftable": false,
+    "disenchantable": false,
+    "availableInPacks": false,
+    "standard": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "CHRONICLE",
+  "name": "Chronicle",
+  "policy": {
+    "released": true,
+    "tradeable": true,
+    "duplicateProtection": false,
+    "craftable": true,
+    "disenchantable": true,
+    "availableInPacks": true,
+    "standard": true
+  }
+}

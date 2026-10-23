@@ -21,6 +21,14 @@ game-engine <- protocol <- server / clients
 Definitions are immutable registry data. Runtime instances contain damage, statuses, position,
 summoning sickness, and combat-action exhaustion; no match mutates a definition.
 
+Expansions, cards and packs are loaded from `packages/card-definitions/content/<expansion>/`
+JSON files. The Node loader discovers folders in sorted order and validates their shapes against
+`content.schema.json`, then checks IDs, references, printed text and pack slot totals before
+exposing the existing registry exports. Paths are relative to the package, independent of the
+working directory. Content is loaded once per process; a new deployment/restart applies edits.
+Heroes, classes, scenarios, starter decks, crafting prices and all mechanics remain TypeScript.
+See [Creating expansion content](content.md) for the authoring workflow.
+
 ## Glossary
 
 The terms the code, the docs and the card text use, and use only in these senses:
@@ -88,7 +96,7 @@ touches a collection: what a player owns is settled before the match starts and 
 during it.
 
 Expansion policies sit deliberately on the database side even though expansion _definitions_ are
-code-owned alongside the cards. Rotating a set out of Standard or withdrawing it from packs is an
+versioned JSON alongside the cards. Rotating a set out of Standard or withdrawing it from packs is an
 operational act rather than a release, and a policy that required a redeploy to change would make
 the lifecycle a deployment problem instead of a decision.
 

@@ -1,0 +1,107 @@
+[
+  {
+    "id": "kona_scrapwalker",
+    "name": "Kona Scrapwalker",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 2,
+    "health": 2,
+    "tags": ["CONSTRUCT", "MECHANIC"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "MACHINES_OF_KONA",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "No special abilities.",
+    "flavour": "Assembled from whatever the last war left lying about."
+  },
+  {
+    "id": "kona_riveter",
+    "name": "Kona Riveter",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 2,
+    "health": 3,
+    "tags": ["DWARF", "MECHANIC"],
+    "keywords": ["ARRIVAL"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "BUFF",
+          "attack": 1,
+          "health": 0,
+          "target": "SELF"
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "MACHINES_OF_KONA",
+    "rarity": "RARE",
+    "collectible": true,
+    "description": "**Arrival:** Gain +1 Attack.",
+    "flavour": "Measure once, rivet twice."
+  },
+  {
+    "id": "kona_forgeheart",
+    "name": "Kona Forgeheart",
+    "type": "CREATURE",
+    "cost": 5,
+    "attack": 4,
+    "health": 5,
+    "tags": ["CONSTRUCT", "ANIMA"],
+    "keywords": ["GUARD", "WARD"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "MACHINES_OF_KONA",
+    "rarity": "EPIC",
+    "collectible": true,
+    "description": "**Guard**, **Ward**",
+    "flavour": "The furnace at its core has never once gone out."
+  },
+  {
+    "id": "ilvi_kona",
+    "name": "Ilvi of Kona",
+    "type": "CREATURE",
+    "cost": 6,
+    "attack": 5,
+    "health": 6,
+    "tags": ["HUMAN", "MECHANIC", "REBEL"],
+    "keywords": ["CHARGE"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "BUFF",
+          "attack": 1,
+          "health": 1,
+          "target": "ADJACENT_FRIENDLY_CREATURES"
+        }
+      }
+    ],
+    "source": "CHRONICLE",
+    "expansionId": "MACHINES_OF_KONA",
+    "rarity": "LEGENDARY",
+    "collectible": true,
+    "description": "**Charge**\n**Arrival:** Give adjacent friendly Creatures +1/+1.",
+    "flavour": "\"Kona was built by rebels. It will be rebuilt by them.\""
+  },
+  {
+    "id": "kona_piston_hammer",
+    "name": "Kona Piston Hammer",
+    "type": "WEAPON",
+    "cost": 3,
+    "attack": 3,
+    "durability": 2,
+    "range": "MELEE",
+    "tags": ["HAMMER"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "MACHINES_OF_KONA",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "flavour": "Every swing is a small explosion, carefully timed."
+  }
+]

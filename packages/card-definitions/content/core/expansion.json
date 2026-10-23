@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "CORE",
+  "name": "Core",
+  "policy": {
+    "released": true,
+    "tradeable": true,
+    "duplicateProtection": true,
+    "craftable": true,
+    "disenchantable": true,
+    "availableInPacks": true,
+    "standard": true
+  }
+}

@@ -1,0 +1,164 @@
+# Creating expansion content
+
+Expansion metadata, cards and packs live in JSON under `packages/card-definitions/content/`:
+
+```text
+content/
+  core/
+    expansion.json
+    cards.json
+    packs.json
+  chronicle/
+    expansion.json
+    cards.json
+    packs.json
+  machines-of-kona/
+    expansion.json
+    cards.json
+    packs.json
+```
+
+Every immediate, non-hidden directory is an expansion. Add a directory with these three files;
+there is no TypeScript import list or manifest to update. Folder names are organizational, while
+the IDs inside the files identify content. IDs must be unique across all expansions. Keep a card
+and its pack definitions in the folder whose `expansion.json` has their `expansionId`.
+
+`cards.json` and `packs.json` are arrays. Either can be `[]` for unfinished content or a set that
+has no packs. JSON requires double quotes and does not support comments or trailing commas.
+
+## Expansion metadata
+
+For example, create `content/frozen-frontier/expansion.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "FROZEN_FRONTIER",
+  "name": "Frozen Frontier",
+  "policy": {
+    "released": false,
+    "tradeable": true,
+    "duplicateProtection": false,
+    "craftable": true,
+    "disenchantable": true,
+    "availableInPacks": true,
+    "standard": true
+  }
+}
+```
+
+All seven policy flags must be explicit booleans. `released: false` hides the expansion from
+players and gates the other flags. `standard: false` rotates a released set out of Standard while
+leaving it playable in Wild. The version is the content format version, currently `1`.
+
+These policies are shipped defaults. Existing database overrides still take precedence; changing
+JSON will not replace an override. Admin endpoints can change flags or clear the override.
+
+## Cards
+
+Create `cards.json`, for example:
+
+```json
+[
+  {
+    "id": "frost_wolf",
+    "name": "Frost Wolf",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 3,
+    "health": 2,
+    "tags": ["BEAST"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "FROZEN_FRONTIER",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "No special abilities.",
+    "flavour": "Its tracks disappear beneath the snow."
+  }
+]
+```
+
+Copy an existing card of the desired type to get its full structure. Supported types are
+`CREATURE`, `ACTION`, `ARTIFACT` and `WEAPON`. Fields such as `keywords`, `tags` and `effects`
+must be present when required by the card type, even when empty. Omit `classId` for a neutral
+card; existing class IDs are `PRIEST` and `WIZARD`. `flavour` is optional.
+
+`source` is the existing category (`CORE` or `CHRONICLE`), separate from `expansionId`.
+Adding an expansion does not require adding a source category. Rarities are `BASIC`, `COMMON`,
+`RARE`, `EPIC` and `LEGENDARY`. Basic cards are outside the crafting/trading/pack economy.
+
+Descriptions are presentation text, not executable rules. Keywords must be printed in `**bold**`.
+Encode mechanics in the relevant fields as well. Creatures, Artifacts and Weapons use triggered
+effects, for example:
+
+```json
+{
+  "trigger": "ARRIVAL",
+  "effect": { "type": "HEAL", "amount": 3, "target": "OWNER_HERO" }
+}
+```
+
+Actions instead use effects directly, without the trigger wrapper, and require `targetMode`.
+Supported effects are `DEAL_DAMAGE`, `HEAL`, `DRAW_CARD`, `BUFF`, `APPLY_STATUS`, `SUMMON`,
+`MOVE`, `DESTROY` and `GAIN_TAIKA`. A `SUMMON` must reference an existing Creature, including
+one in another expansion. New mechanics require an engine implementation and schema update.
+
+Artwork is a separate Godot asset: `apps/godot-client/art/cards/<card_id>.png` (WebP, JPEG and SVG
+are also supported). Content files do not bundle or upload artwork.
+
+## Packs
+
+Create `packs.json`, for example:
+
+```json
+[
+  {
+    "id": "FROZEN_FRONTIER_PACK",
+    "name": "Frozen Frontier Pack",
+    "expansionId": "FROZEN_FRONTIER",
+    "cardCount": 5,
+    "rarityRules": {
+      "slots": [
+        { "count": 4, "weights": { "COMMON": 70, "RARE": 23, "EPIC": 6, "LEGENDARY": 1 } },
+        { "count": 1, "weights": { "RARE": 80, "EPIC": 17, "LEGENDARY": 3 } }
+      ]
+    }
+  }
+]
+```
+
+Slot counts must total `cardCount`; counts and weights must be positive. Weights are relative,
+not percentages, and cannot include Basic cards. The pool is automatically the expansion's
+collectible, non-Basic cards. Rarities absent from the pool are skipped; if none of a slot's
+weighted rarities exist, the existing generator falls back to available rarities. A pack needs
+at least one eligible card to open successfully. A guaranteed non-Common slot therefore also
+requires non-Common cards in the set.
+
+## Validate and apply
+
+From the repository root, run:
+
+```sh
+npm run validate:content
+npm run build
+npm test
+```
+
+The standalone validation command needs no database. It checks file shapes, supported enums and
+effects, required fields, numeric constraints, duplicate IDs, expansion/class/summon references,
+description markup and pack totals. Errors identify the file and relevant field or card ID.
+The machine-readable format is defined by `packages/card-definitions/content.schema.json`.
+`npm run build` also validates content, so invalid JSON cannot pass the normal build.
+The full test suite requires the project's PostgreSQL database.
+
+Restart the server after editing JSON (`npm run dev` locally), then reconnect the client to fetch
+the updated registry. JSON is loaded once at startup; there is no live publishing or hot reload.
+Docker images include the JSON and schema alongside compiled code. Commit the content with the
+rest of the project and deploy it through the usual workflow. No database migration or content
+seeding is needed for a new expansion.
+
+Keep existing card IDs stable: collections and decks store those IDs. Never reuse an old ID for
+a different card. Heroes, classes, starter decks, scenarios and crafting prices remain in the
+TypeScript modules in `packages/card-definitions/src/`.

@@ -1,0 +1,68 @@
+[
+  {
+    "id": "lio_varga",
+    "name": "Lio Varga",
+    "type": "CREATURE",
+    "cost": 5,
+    "attack": 4,
+    "health": 5,
+    "tags": ["DWARF", "MECHANIC", "REBEL"],
+    "keywords": ["ARRIVAL"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "BUFF",
+          "attack": 1,
+          "health": 1,
+          "target": "ADJACENT_FRIENDLY_CREATURES"
+        }
+      }
+    ],
+    "source": "CHRONICLE",
+    "expansionId": "CHRONICLE",
+    "rarity": "LEGENDARY",
+    "collectible": true,
+    "description": "**Arrival:** Give adjacent friendly Creatures +1/+1.",
+    "flavour": "\"Give me a wrench and a grudge, and I'll build you a revolution.\""
+  },
+  {
+    "id": "darek_voln",
+    "name": "Darek Voln",
+    "type": "CREATURE",
+    "cost": 6,
+    "attack": 5,
+    "health": 5,
+    "tags": ["HUMAN", "WARDEN", "REBEL"],
+    "keywords": ["CHARGE", "LIFESTEAL"],
+    "effects": [],
+    "source": "CHRONICLE",
+    "expansionId": "CHRONICLE",
+    "rarity": "LEGENDARY",
+    "collectible": true,
+    "description": "**Charge**, **Lifesteal**",
+    "flavour": "A Warden who turned the oath against those who wrote it."
+  },
+  {
+    "id": "arcane_battery",
+    "name": "Arcane Battery",
+    "type": "ARTIFACT",
+    "cost": 3,
+    "durability": 3,
+    "source": "CHRONICLE",
+    "expansionId": "CHRONICLE",
+    "rarity": "EPIC",
+    "collectible": true,
+    "description": "At the start of your turn, gain 1 Taika this turn.",
+    "flavour": "It hums with what the storm left behind.",
+    "effects": [
+      {
+        "trigger": "TURN_STARTED",
+        "effect": {
+          "type": "GAIN_TAIKA",
+          "amount": 1
+        }
+      }
+    ]
+  }
+]

@@ -243,7 +243,8 @@ laid-out rects.
 - `packages/game-model` — JSON-compatible domain types, actions, events, state, and scenarios.
 - `packages/rng` — serializable seeded random number generator.
 - `packages/card-definitions` — immutable card, class, Hero, expansion, pack, starter deck, and
-  scenario data, plus the crafting price table.
+  scenario data, plus the crafting price table. Expansions, cards and packs are authored in
+  `content/<expansion>/` JSON files; see [Creating expansion content](docs/content.md).
 - `packages/game-engine` — battlefield rules, event/effect queue, controllers, decks, pack
   generation, and replay.
 - `packages/protocol` — transport-neutral client/server messages.
@@ -257,8 +258,9 @@ Accounts, decks, collections, Fragments, trades and the economy ledger live in P
 Prisma. Active matches deliberately do not: they stay in memory behind `MatchRepository`, so a
 match in progress never waits on a database round trip.
 
-Expansion _definitions_ are code-owned alongside the cards, but their _policies_ are not: a stored
-override shadows the shipped defaults, so a set can be rotated or withdrawn without a redeploy.
+Expansion and card _definitions_ are versioned JSON files in `packages/card-definitions/content`.
+A stored policy override shadows the shipped defaults, so a set can be rotated or withdrawn
+without a redeploy.
 
 Set `DATABASE_URL` in `.env` (git-ignored), then apply the schema:
 

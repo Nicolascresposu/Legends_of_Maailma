@@ -9,7 +9,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node packages/card-definitions/dist/validate-content.js",
+    "validate:content": "tsc -b packages/game-model && tsx packages/card-definitions/src/validate-content.ts",
     "clean": "tsc -b --clean",
     "dev": "tsx apps/server/src/index.ts",
     "lint": "eslint . --max-warnings=0",

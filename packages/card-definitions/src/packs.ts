@@ -2,6 +2,7 @@ import type { Rarity } from '@maailma/game-model';
 import { RARITIES } from '@maailma/game-model';
 import { isBasicRarity } from './economy.js';
 import { isKnownExpansion } from './expansions.js';
+import { CONTENT } from './content.js';
 
 /**
  * How likely each rarity is in one pack slot.
@@ -38,39 +39,7 @@ export interface PackDefinition {
   rarityRules: PackRarityRules;
 }
 
-/** Four ordinary slots and one that is never Common. */
-const STANDARD_RULES: PackRarityRules = {
-  slots: [
-    { count: 4, weights: { COMMON: 70, RARE: 23, EPIC: 6, LEGENDARY: 1 } },
-    // The guaranteed slot: a pack always contains something above Common, so
-    // opening one is never entirely flat.
-    { count: 1, weights: { RARE: 80, EPIC: 17, LEGENDARY: 3 } },
-  ],
-};
-
-const packs: PackDefinition[] = [
-  {
-    id: 'CORE_PACK',
-    name: 'Core Pack',
-    expansionId: 'CORE',
-    cardCount: 5,
-    rarityRules: STANDARD_RULES,
-  },
-  {
-    id: 'CHRONICLE_PACK',
-    name: 'Chronicle Pack',
-    expansionId: 'CHRONICLE',
-    cardCount: 5,
-    rarityRules: STANDARD_RULES,
-  },
-  {
-    id: 'MACHINES_OF_KONA_PACK',
-    name: 'Machines of Kona Pack',
-    expansionId: 'MACHINES_OF_KONA',
-    cardCount: 5,
-    rarityRules: STANDARD_RULES,
-  },
-];
+const packs = CONTENT.packs;
 
 export function validatePackDefinition(definition: PackDefinition): string[] {
   const where = definition?.id || '(unnamed pack)';

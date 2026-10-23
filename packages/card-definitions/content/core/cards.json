@@ -1,0 +1,414 @@
+[
+  {
+    "id": "wolf",
+    "name": "Wolf",
+    "type": "CREATURE",
+    "cost": 1,
+    "attack": 2,
+    "health": 1,
+    "tags": ["BEAST"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "No special abilities.",
+    "flavour": "The first to find you, and never the last."
+  },
+  {
+    "id": "brown_bear",
+    "name": "Brown Bear",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 3,
+    "health": 4,
+    "tags": ["BEAST"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "BASIC",
+    "collectible": true,
+    "description": "No special abilities.",
+    "flavour": "It does not want your camp. It wants what is in your camp."
+  },
+  {
+    "id": "hawk",
+    "name": "Hawk",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 2,
+    "health": 1,
+    "tags": ["BEAST"],
+    "keywords": ["SWIFT"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Swift**",
+    "flavour": "Seen before it is heard, and gone before either."
+  },
+  {
+    "id": "giant_rat",
+    "name": "Giant Rat",
+    "type": "CREATURE",
+    "cost": 1,
+    "attack": 1,
+    "health": 1,
+    "tags": ["BEAST"],
+    "keywords": ["LAST_BREATH"],
+    "effects": [
+      {
+        "trigger": "LAST_BREATH",
+        "effect": {
+          "type": "DRAW_CARD",
+          "amount": 1
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Last Breath:** Draw a card.",
+    "flavour": "Where there is one, there are more in the walls."
+  },
+  {
+    "id": "hunting_spider",
+    "name": "Hunting Spider",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 2,
+    "health": 2,
+    "tags": ["BEAST"],
+    "keywords": ["HIDDEN"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Hidden**",
+    "flavour": "The web is only a warning. The spider is the trap."
+  },
+  {
+    "id": "elf_archer",
+    "name": "Elf Archer",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 2,
+    "health": 2,
+    "tags": ["ELF", "ARCHER"],
+    "keywords": ["RANGED"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Ranged**",
+    "flavour": "Elves measure distance in heartbeats, not paces."
+  },
+  {
+    "id": "dwarf_defender",
+    "name": "Dwarf Defender",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 2,
+    "health": 4,
+    "tags": ["DWARF", "SOLDIER"],
+    "keywords": ["GUARD"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Guard**",
+    "flavour": "\"Through me, or not at all.\""
+  },
+  {
+    "id": "human_mercenary",
+    "name": "Human Mercenary",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 3,
+    "health": 2,
+    "tags": ["HUMAN", "SOLDIER"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "No special abilities.",
+    "flavour": "Loyal to the last coin, and not one coin further."
+  },
+  {
+    "id": "field_medic",
+    "name": "Field Medic",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 2,
+    "health": 3,
+    "tags": ["HUMAN"],
+    "keywords": ["ARRIVAL"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "HEAL",
+          "amount": 3,
+          "target": "OWNER_HERO"
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Arrival:** Restore 3 Health to your Hero.",
+    "flavour": "Bandages first. Questions never.",
+    "classId": "PRIEST"
+  },
+  {
+    "id": "apprentice_mage",
+    "name": "Apprentice Mage",
+    "type": "CREATURE",
+    "cost": 3,
+    "attack": 2,
+    "health": 2,
+    "tags": ["HUMAN", "MAGE"],
+    "keywords": ["ARRIVAL"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "DEAL_DAMAGE",
+          "amount": 1,
+          "target": "PLAY_TARGET"
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Arrival:** Deal 1 damage to an enemy character.",
+    "flavour": "The spell works. The aim is still being taught.",
+    "classId": "WIZARD"
+  },
+  {
+    "id": "maintenance_anima",
+    "name": "Maintenance Anima",
+    "type": "CREATURE",
+    "cost": 2,
+    "attack": 1,
+    "health": 3,
+    "tags": ["ANIMA", "CONSTRUCT"],
+    "keywords": ["WARD"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Ward**",
+    "flavour": "Built to keep the old machines running, it keeps itself running too."
+  },
+  {
+    "id": "warden_sentinel",
+    "name": "Warden Sentinel",
+    "type": "CREATURE",
+    "cost": 4,
+    "attack": 3,
+    "health": 4,
+    "tags": ["HUMAN", "WARDEN"],
+    "keywords": ["GUARD", "ARRIVAL"],
+    "effects": [
+      {
+        "trigger": "ARRIVAL",
+        "effect": {
+          "type": "BUFF",
+          "attack": 0,
+          "health": 1,
+          "target": "ADJACENT_FRIENDLY_CREATURES"
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "RARE",
+    "collectible": true,
+    "description": "**Guard**\n**Arrival:** Give adjacent friendly Creatures +1 Health.",
+    "flavour": "The wall is only as strong as the one who stands beside you."
+  },
+  {
+    "id": "mercy_4",
+    "name": "Mercy-4",
+    "type": "CREATURE",
+    "cost": 4,
+    "attack": 3,
+    "health": 4,
+    "tags": ["ANIMA", "CONSTRUCT"],
+    "keywords": ["LAST_BREATH"],
+    "effects": [
+      {
+        "trigger": "LAST_BREATH",
+        "effect": {
+          "type": "HEAL",
+          "amount": 2,
+          "target": "OWNER_HERO"
+        }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Last Breath:** Restore 2 Health to your Hero.",
+    "flavour": "Its final directive is the same as its first."
+  },
+  {
+    "id": "healing_potion",
+    "name": "Healing Potion",
+    "type": "ACTION",
+    "cost": 1,
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "classId": "PRIEST",
+    "description": "Restore 4 Health to a friendly character.",
+    "flavour": "Tastes of pine tar and regret.",
+    "targetMode": "FRIENDLY_CHARACTER",
+    "effects": [
+      {
+        "type": "HEAL",
+        "amount": 4,
+        "target": "PLAY_TARGET"
+      }
+    ]
+  },
+  {
+    "id": "firebolt",
+    "name": "Firebolt",
+    "type": "ACTION",
+    "cost": 2,
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "classId": "WIZARD",
+    "description": "Deal 3 damage to an enemy character.",
+    "flavour": "Taika drawn in anger burns brightest.",
+    "targetMode": "ENEMY_CHARACTER",
+    "effects": [
+      {
+        "type": "DEAL_DAMAGE",
+        "amount": 3,
+        "target": "PLAY_TARGET"
+      }
+    ]
+  },
+  {
+    "id": "rusty_dagger",
+    "name": "Rusty Dagger",
+    "type": "WEAPON",
+    "cost": 1,
+    "attack": 1,
+    "durability": 2,
+    "range": "MELEE",
+    "tags": ["DAGGER"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "flavour": "Its edge is long gone. Its bite is not."
+  },
+  {
+    "id": "iron_sword",
+    "name": "Iron Sword",
+    "type": "WEAPON",
+    "cost": 2,
+    "attack": 2,
+    "durability": 2,
+    "range": "MELEE",
+    "tags": ["SWORD"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "flavour": "Plain, honest, and sharp enough."
+  },
+  {
+    "id": "war_axe",
+    "name": "War Axe",
+    "type": "WEAPON",
+    "cost": 4,
+    "attack": 4,
+    "durability": 2,
+    "range": "MELEE",
+    "tags": ["AXE"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "flavour": "Swung once, and remembered by everyone who was there."
+  },
+  {
+    "id": "hunting_bow",
+    "name": "Hunting Bow",
+    "type": "WEAPON",
+    "cost": 3,
+    "attack": 2,
+    "durability": 2,
+    "range": "RANGED",
+    "tags": ["BOW"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Ranged**. Your Hero attacks with this Weapon.",
+    "flavour": "Strung with sinew, and with patience."
+  },
+  {
+    "id": "longbow",
+    "name": "Longbow",
+    "type": "WEAPON",
+    "cost": 5,
+    "attack": 3,
+    "durability": 2,
+    "range": "RANGED",
+    "tags": ["BOW"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "**Ranged**. Your Hero attacks with this Weapon.",
+    "flavour": "Taller than its archer, and it carries farther than any shout."
+  },
+  {
+    "id": "dwarven_maul",
+    "name": "Dwarven Maul",
+    "type": "WEAPON",
+    "cost": 4,
+    "attack": 3,
+    "durability": 3,
+    "range": "MELEE",
+    "tags": ["HAMMER", "DWARVEN"],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "RARE",
+    "collectible": true,
+    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "flavour": "Dwarven smiths forge hammers to outlast the hands that swing them."
+  }
+]

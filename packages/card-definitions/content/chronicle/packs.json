@@ -1,0 +1,29 @@
+[
+  {
+    "id": "CHRONICLE_PACK",
+    "name": "Chronicle Pack",
+    "expansionId": "CHRONICLE",
+    "cardCount": 5,
+    "rarityRules": {
+      "slots": [
+        {
+          "count": 4,
+          "weights": {
+            "COMMON": 70,
+            "RARE": 23,
+            "EPIC": 6,
+            "LEGENDARY": 1
+          }
+        },
+        {
+          "count": 1,
+          "weights": {
+            "RARE": 80,
+            "EPIC": 17,
+            "LEGENDARY": 3
+          }
+        }
+      ]
+    }
+  }
+]

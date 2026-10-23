@@ -4,66 +4,10 @@ import type {
   ExpansionPolicyFlag,
 } from '@maailma/game-model';
 import { EXPANSION_POLICY_FLAGS } from '@maailma/game-model';
+import { CONTENT } from './content.js';
 
-/**
- * The expansions cards belong to, and the policies that currently govern them.
- *
- * Definitions live here beside the cards because both are code-owned data in
- * this milestone. The policies, however, are only the *defaults*: the server
- * layers stored overrides on top, so an operator can rotate a set without a
- * redeploy. Nothing reads these values directly — everything goes through the
- * helpers below, so there is one place where `released` gets the last word.
- */
-const expansions: ExpansionDefinition[] = [
-  {
-    id: 'CORE',
-    name: 'Core',
-    // The permanent basic set: always available, always craftable, and
-    // duplicate-protected so that a new player completing it is not held up by
-    // repeats. Special only in its values, not in the code.
-    policy: {
-      released: true,
-      tradeable: true,
-      duplicateProtection: true,
-      craftable: true,
-      disenchantable: true,
-      availableInPacks: true,
-      standard: true,
-    },
-  },
-  {
-    id: 'CHRONICLE',
-    name: 'Chronicle',
-    // The campaign set. Released and playable, but deliberately not
-    // duplicate-protected: it is in its social phase, where repeats are meant
-    // to be traded away rather than avoided.
-    policy: {
-      released: true,
-      tradeable: true,
-      duplicateProtection: false,
-      craftable: true,
-      disenchantable: true,
-      availableInPacks: true,
-      standard: true,
-    },
-  },
-  {
-    id: 'MACHINES_OF_KONA',
-    name: 'Machines of Kona',
-    // Future content, fully defined but not yet public. `standard` is already
-    // configured so that releasing it needs no second decision; `released`
-    // overrides it until then.
-    policy: {
-      released: false,
-      tradeable: false,
-      duplicateProtection: false,
-      craftable: false,
-      disenchantable: false,
-      availableInPacks: false,
-      standard: true,
-    },
-  },
-];
+/** Shipped JSON policies are defaults; stored server overrides take precedence. */
+const expansions = CONTENT.expansions;
 
 /**
  * Rejects a malformed policy at load.

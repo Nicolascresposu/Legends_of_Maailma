@@ -49,6 +49,8 @@ COPY packages/rng/package.json packages/rng/
 RUN npm ci --omit=dev && rm -rf node_modules/.prisma && npm cache clean --force
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma
 COPY --from=build /app/packages/card-definitions/dist packages/card-definitions/dist
+COPY --from=build /app/packages/card-definitions/content packages/card-definitions/content
+COPY --from=build /app/packages/card-definitions/content.schema.json packages/card-definitions/content.schema.json
 COPY --from=build /app/packages/game-engine/dist packages/game-engine/dist
 COPY --from=build /app/packages/game-model/dist packages/game-model/dist
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
