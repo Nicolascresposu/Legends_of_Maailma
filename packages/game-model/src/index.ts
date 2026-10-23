@@ -387,11 +387,18 @@ export interface ScenarioDefinition {
   defeatConditions?: VictoryCondition[];
 }
 
+export interface CardContentSnapshot {
+  version: string;
+  cards: Readonly<Record<string, CardDefinition>>;
+}
+
 export interface MatchSetup {
   matchId?: string;
   scenario: ScenarioDefinition;
   seed: number | string;
   players: readonly [PlayerSetup, PlayerSetup];
+  /** Pinned definitions make matches and exported replays independent of later publications. */
+  content?: CardContentSnapshot;
 }
 
 export interface PlayerSetup {
@@ -404,6 +411,7 @@ export interface PlayerSetup {
 export interface MatchState {
   matchId: string;
   scenarioId: string;
+  contentVersion?: string;
   seed: number;
   rngState: number;
   turn: number;

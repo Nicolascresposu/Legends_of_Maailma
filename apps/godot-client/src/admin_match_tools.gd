@@ -161,7 +161,7 @@ func _set_stats() -> void:
 	accounts.admin(HTTPClient.METHOD_POST, "/matches/%s/stats" % match_id, body, _tag("edit"))
 
 func _on_admin_response(tag: String, ok: bool, payload: Dictionary) -> void:
-	if tag == _tag("registry"):
+	if tag == _tag("registry") or tag == "admin:registry":
 		if ok:
 			_cards = payload.get("cards", [])
 			_fill_cards()

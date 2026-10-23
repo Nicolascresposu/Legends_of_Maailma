@@ -1,7 +1,8 @@
-import { getCardDefinition, getHeroDefinition } from '@maailma/card-definitions';
+import { captureCardContent, freezeContent, getHeroDefinition } from '@maailma/card-definitions';
 import type {
   ActionResult,
   CardDefinition,
+  CardContentSnapshot,
   CreatureDefinition,
   CreatureInstance,
   DamageContext,
@@ -66,6 +67,7 @@ interface AttackProfile {
 
 export class GameEngine {
   readonly setup: MatchSetup;
+  readonly content: CardContentSnapshot;
   readonly state!: MatchState;
   private rng: SeededRng;
   private queue: WorkItem[] = [];
@@ -74,10 +76,48 @@ export class GameEngine {
   private lethalContext = new Map<EntityId, DamageContext>();
 
   constructor(setup: MatchSetup) {
-    validateSetup(setup);
-    this.setup = structuredClone(setup);
+    this.content = freezeContent(structuredClone(setup.content ?? captureCardContent()));
+    this.setup = { ...structuredClone(setup), content: this.content };
+    validateSetup(this.setup, (id) => this.getCardDefinition(id));
     this.rng = new SeededRng(setup.seed);
-    this.createInitialState(setup);
+    this.createInitialState(this.setup);
+  }
+
+  getCardDefinition(id: string): CardDefinition {
+    const card = Object.hasOwn(this.content.cards, id) ? this.content.cards[id] : undefined;
+    if (!card) throw new Error(`Unknown card definition in match ${this.content.version}: ${id}`);
+    return card;
+  }
+
+  /** Only definitions used by this match and its transitive summons leave the server. */
+  presentationCards(): CardDefinition[] {
+    const ids = new Set<string>();
+    for (const player of this.setup.players) for (const id of player.deck) ids.add(id);
+    for (const side of [this.setup.scenario.sideA, this.setup.scenario.sideB]) {
+      for (const id of side.startingCards ?? []) ids.add(id);
+      for (const creature of side.startingCreatures ?? []) ids.add(creature.definitionId);
+      for (const id of side.startingArtifacts ?? []) ids.add(id);
+      if (side.startingWeapon) ids.add(side.startingWeapon);
+    }
+    for (const side of Object.values(this.state.sides)) {
+      for (const card of side.hand) ids.add(card.definitionId);
+      for (const card of Object.values(side.creatures)) ids.add(card.definitionId);
+      for (const card of side.artifacts) ids.add(card.definitionId);
+      if (side.hero.equippedWeapon) ids.add(side.hero.equippedWeapon.definitionId);
+    }
+    const pending = [...ids];
+    for (let index = 0; index < pending.length; index++) {
+      const card = this.getCardDefinition(pending[index]!);
+      const effects =
+        card.type === 'ACTION' ? card.effects : card.effects.map((entry) => entry.effect);
+      for (const effect of effects) {
+        if (effect.type === 'SUMMON' && !ids.has(effect.definitionId)) {
+          ids.add(effect.definitionId);
+          pending.push(effect.definitionId);
+        }
+      }
+    }
+    return [...ids].sort().map((id) => this.getCardDefinition(id));
   }
 
   static replay(replay: ReplayData): GameEngine {
@@ -147,7 +187,7 @@ export class GameEngine {
     rule(Boolean(side), 'UNKNOWN_PLAYER', 'No such player in this match');
     let known = true;
     try {
-      getCardDefinition(definitionId);
+      this.getCardDefinition(definitionId);
     } catch {
       known = false;
     }
@@ -220,7 +260,7 @@ export class GameEngine {
     const actions: GameAction[] = [];
 
     for (const card of side.hand) {
-      const definition = getCardDefinition(card.definitionId);
+      const definition = this.getCardDefinition(card.definitionId);
       if (definition.cost > side.taika.current) continue;
       const positions =
         definition.type === 'CREATURE' ? emptyPositions(side.battlefield) : [undefined];
@@ -348,6 +388,7 @@ export class GameEngine {
     const state: MatchState = {
       matchId: setup.matchId ?? `match-${normalizeSeed(setup.seed).toString(16)}`,
       scenarioId: setup.scenario.id,
+      contentVersion: this.content.version,
       seed: normalizeSeed(setup.seed),
       rngState: this.rng.state,
       turn: 1,
@@ -451,7 +492,7 @@ export class GameEngine {
     const side = this.side(action.actorId);
     const card = side.hand.find((candidate) => candidate.instanceId === action.cardInstanceId);
     rule(card, 'CARD_NOT_IN_HAND', 'The selected card is not in hand');
-    const definition = getCardDefinition(card.definitionId);
+    const definition = this.getCardDefinition(card.definitionId);
     rule(side.taika.current >= definition.cost, 'INSUFFICIENT_TAIKA', 'Not enough Taika');
     if (definition.type === 'CREATURE') {
       rule(action.position, 'POSITION_REQUIRED', 'A Creature requires a destination tile');
@@ -684,7 +725,7 @@ export class GameEngine {
     const side = this.side(action.actorId);
     const index = side.hand.findIndex((card) => card.instanceId === action.cardInstanceId);
     const card = side.hand[index]!;
-    const definition = getCardDefinition(card.definitionId);
+    const definition = this.getCardDefinition(card.definitionId);
     side.hand.splice(index, 1);
     side.taika.current -= definition.cost;
     this.enqueueEvent({ type: 'TAIKA_CHANGED', actorId: side.playerId, amount: -definition.cost });
@@ -926,7 +967,7 @@ export class GameEngine {
       event.cardDefinitionId &&
       event.actorId
     ) {
-      const definition = getCardDefinition(event.cardDefinitionId);
+      const definition = this.getCardDefinition(event.cardDefinitionId);
       if (definition.type === 'CREATURE') {
         for (const effect of definition.effects.filter(
           (candidate) => candidate.trigger === trigger,
@@ -942,11 +983,11 @@ export class GameEngine {
       const sources = [
         ...Object.values(side.creatures).map((creature) => ({
           id: creature.instanceId,
-          definition: getCardDefinition(creature.definitionId),
+          definition: this.getCardDefinition(creature.definitionId),
         })),
         ...side.artifacts.map((artifact) => ({
           id: artifact.instanceId,
-          definition: getCardDefinition(artifact.definitionId),
+          definition: this.getCardDefinition(artifact.definitionId),
         })),
       ].sort((a, b) => a.id.localeCompare(b.id));
       for (const source of sources) {
@@ -1275,7 +1316,7 @@ export class GameEngine {
   }
 
   private addCardToHand(side: MatchSide, definitionId: string): void {
-    getCardDefinition(definitionId);
+    this.getCardDefinition(definitionId);
     side.hand.push({ instanceId: this.nextId('card'), definitionId });
   }
 
@@ -1285,7 +1326,7 @@ export class GameEngine {
     position: Position,
     summonedThisTurn: boolean,
   ): CreatureInstance {
-    const definition = getCardDefinition(definitionId);
+    const definition = this.getCardDefinition(definitionId);
     if (definition.type !== 'CREATURE') throw new Error(`${definitionId} is not a Creature`);
     if (!isPositionValid(side.battlefield, position) || entityAt(side.battlefield, position)) {
       throw new Error('Invalid initial Creature position');
@@ -1380,7 +1421,7 @@ export class GameEngine {
   }
 
   private weaponDefinitionById(definitionId: string): WeaponDefinition {
-    const definition = getCardDefinition(definitionId);
+    const definition = this.getCardDefinition(definitionId);
     if (definition.type !== 'WEAPON') throw new Error(`${definitionId} is not a Weapon`);
     return definition;
   }
@@ -1390,7 +1431,7 @@ export class GameEngine {
   }
 
   private createArtifact(side: MatchSide, definitionId: string) {
-    const definition = getCardDefinition(definitionId);
+    const definition = this.getCardDefinition(definitionId);
     if (definition.type !== 'ARTIFACT') throw new Error(`${definitionId} is not an Artifact`);
     const artifact = {
       instanceId: this.nextId('artifact'),
@@ -1497,7 +1538,7 @@ export class GameEngine {
   }
 
   private creatureDefinition(creature: CreatureInstance): CreatureDefinition {
-    const definition = getCardDefinition(creature.definitionId);
+    const definition = this.getCardDefinition(creature.definitionId);
     if (definition.type !== 'CREATURE')
       throw new Error('Creature instance references a non-Creature definition');
     return definition;
@@ -1545,7 +1586,7 @@ function cardTargetMode(definition: CardDefinition): TargetMode {
   return 'NONE';
 }
 
-function validateSetup(setup: MatchSetup): void {
+function validateSetup(setup: MatchSetup, definitionFor: (id: string) => CardDefinition): void {
   if (setup.players.length !== 2) throw new Error('A match currently requires exactly two sides');
   if (setup.players[0].playerId === setup.players[1].playerId)
     throw new Error('Player IDs must be unique');
@@ -1553,7 +1594,7 @@ function validateSetup(setup: MatchSetup): void {
     throw new Error('Scenario battlefield width must be a positive integer');
   }
   for (const player of setup.players) {
-    for (const cardId of player.deck) getCardDefinition(cardId);
+    for (const cardId of player.deck) definitionFor(cardId);
   }
 }
 

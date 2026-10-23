@@ -4,6 +4,7 @@
 **/*.tsbuildinfo
 coverage
 .git
+.maailma-content
 .env
 **/.env
 *.exe

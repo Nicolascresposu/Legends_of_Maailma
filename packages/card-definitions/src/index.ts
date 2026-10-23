@@ -9,12 +9,22 @@ import { CLASS_DEFINITIONS, cardFitsClass, isKnownClass } from './classes.js';
 import { validateCardDescription } from './descriptions.js';
 import { isKnownExpansion } from './expansions.js';
 import { CONTENT } from './content.js';
+import { CARD_DEFINITIONS } from './registry.js';
 
 export * from './classes.js';
 export * from './descriptions.js';
 export * from './expansions.js';
 export * from './economy.js';
 export * from './packs.js';
+export * from './registry.js';
+export {
+  loadContent,
+  parseContentDocuments,
+  validateExpansionDocument,
+  contentDocuments,
+  type ContentCatalog,
+  type ExpansionDocument,
+} from './content.js';
 
 const cards = CONTENT.cards;
 
@@ -86,10 +96,6 @@ const definitionErrors = [
 if (definitionErrors.length > 0) {
   throw new Error(`Invalid card definitions: ${definitionErrors.join('; ')}`);
 }
-
-export const CARD_DEFINITIONS: Readonly<Record<string, CardDefinition>> = Object.freeze(
-  Object.fromEntries(cards.map((card) => [card.id, Object.freeze(card)])),
-);
 
 export const HERO_DEFINITIONS: Readonly<Record<string, HeroDefinition>> = Object.freeze({
   healer: {

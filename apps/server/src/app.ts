@@ -28,6 +28,9 @@ import { createPlayRouter } from './routes/play-routes.js';
 import { createAdminRouter } from './routes/admin-routes.js';
 import { AdminService } from './services/admin-service.js';
 import type { PrismaClient } from '@prisma/client';
+import type { ContentPublishingService } from './services/content-publishing-service.js';
+import { createContentRouter } from './routes/content-routes.js';
+import { createReplay } from '@maailma/game-engine';
 
 /**
  * Database-backed features. Omitted, the server runs exactly as it did before
@@ -49,6 +52,7 @@ export interface AppServices {
    * or a test — can run without admin tooling at all.
    */
   prisma?: PrismaClient;
+  publishing?: ContentPublishingService;
   databaseReachable?: () => Promise<boolean>;
 }
 
@@ -59,6 +63,7 @@ export function createApp(
 ) {
   const app = express();
   app.use(cors());
+  app.use('/api/admin/content', express.json({ limit: '2mb' }));
   app.use(express.json({ limit: '64kb' }));
   app.use(requestLogger(logger));
 
@@ -128,6 +133,18 @@ export function createApp(
     return response.json({ state: engine.state });
   });
 
+  app.get('/api/matches/:matchId/replay', (request, response) => {
+    const engine = manager.get(request.params.matchId);
+    if (!engine)
+      return response.status(404).json({ code: 'MATCH_NOT_FOUND', message: 'Match not found' });
+    if (engine.state.debugEdits)
+      return response.status(409).json({
+        code: 'EDITED_MATCH',
+        message: 'Admin-edited matches cannot be replayed from actions alone.',
+      });
+    return response.json(createReplay(engine.setup, engine.state.actionLog));
+  });
+
   app.get('/api/matches/:matchId/legal-actions/:playerId', (request, response) => {
     const engine = manager.get(request.params.matchId);
     if (!engine)
@@ -167,6 +184,7 @@ export function createApp(
   if (services) {
     // Identify the caller before any authenticated route runs.
     app.use(attachUser(services.accounts));
+    app.use('/api/admin/content', createContentRouter(services.publishing, logger));
     app.use(
       '/api/auth',
       createAuthRouter(services.accounts, logger, (userId) =>

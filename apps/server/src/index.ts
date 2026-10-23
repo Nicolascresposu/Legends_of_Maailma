@@ -16,9 +16,17 @@ import { ExpansionService } from './services/expansion-service.js';
 import { EconomyService } from './services/economy-service.js';
 import { PackService } from './services/pack-service.js';
 import { TradeService } from './services/trade-service.js';
+import { ContentPublishingService } from './services/content-publishing-service.js';
+import { fileURLToPath } from 'node:url';
 
 const port = Number(process.env.PORT ?? 3000);
 const logger = createLoggerFromEnv();
+const publishing = new ContentPublishingService(
+  process.env.CONTENT_STORE_DIR ??
+    fileURLToPath(new URL('../../../.maailma-content/', import.meta.url)),
+  process.env.CONTENT_PUBLISHING === 'true' ||
+    (process.env.CONTENT_PUBLISHING !== 'false' && process.env.NODE_ENV !== 'production'),
+);
 const manager = new MatchManager();
 const lobby = new LobbyHub(logger);
 const accounts = new AccountService(prisma);
@@ -41,6 +49,7 @@ const server = createServer(
     trades,
     lobby,
     prisma,
+    publishing,
     databaseReachable: () => databaseReachable(),
   }),
 );
@@ -52,6 +61,11 @@ const sessions = new Map<WebSocket, { matchId: string; playerId: string; log: Lo
 manager.onChange((matchId, events) => {
   const engine = manager.get(matchId);
   if (!engine) return;
+  broadcast(matchId, {
+    type: 'MATCH_CONTENT',
+    version: engine.content.version,
+    cards: engine.presentationCards(),
+  });
   broadcast(matchId, { type: 'GAME_EVENTS', events });
   broadcast(matchId, { type: 'MATCH_STATE', state: engine.state });
   if (engine.state.phase === 'FINISHED') {
@@ -181,6 +195,11 @@ websocketServer.on('connection', (socket) => {
         // opponent taking an open seat rebuilds the match, and the creator —
         // already waiting in the room — must see the seat filled and learn
         // that they may now act.
+        broadcast(message.matchId, {
+          type: 'MATCH_CONTENT',
+          version: engine.content.version,
+          cards: engine.presentationCards(),
+        });
         broadcast(message.matchId, { type: 'MATCH_STATE', state: engine.state });
         for (const playerId of engine.state.playerOrder) {
           sendToPlayer(message.matchId, playerId, {

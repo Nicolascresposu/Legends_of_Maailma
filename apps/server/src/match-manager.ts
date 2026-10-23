@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
   getHeroDefinition,
+  captureCardContent,
   getScenarioDefinition,
   starterDeckFor,
 } from '@maailma/card-definitions';
 import { BasicAIController, GameEngine, validateDeck } from '@maailma/game-engine';
-import type { DebugEdit, GameAction, GameEvent, MatchSetup } from '@maailma/game-model';
+import type {
+  CardContentSnapshot,
+  DebugEdit,
+  GameAction,
+  GameEvent,
+  MatchSetup,
+} from '@maailma/game-model';
 import type { CreateMatchPlayer, CreateMatchRequest } from '@maailma/protocol';
 import { InMemoryMatchRepository, type MatchRepository } from './match-repository.js';
 
@@ -86,7 +93,13 @@ export class MatchManager {
     const players = engine.setup.players.map((existing) =>
       existing.playerId === OPEN_SEAT_ID ? player : existing,
     ) as unknown as CreateMatchRequest['players'];
-    const rebuilt = this.build(engine.setup.scenario.id, engine.setup.seed, players, matchId);
+    const rebuilt = this.build(
+      engine.setup.scenario.id,
+      engine.setup.seed,
+      players,
+      matchId,
+      engine.content,
+    );
     this.matches.save(rebuilt);
     this.openSeats.delete(matchId);
     return rebuilt;
@@ -149,6 +162,7 @@ export class MatchManager {
     seed: number | string,
     requested: CreateMatchRequest['players'],
     matchId: string = randomUUID(),
+    content: CardContentSnapshot = captureCardContent(),
   ): GameEngine {
     const scenario = getScenarioDefinition(scenarioId);
     const sides = [scenario.sideA, scenario.sideB] as const;
@@ -159,12 +173,20 @@ export class MatchManager {
       const heroId = player.heroDefinitionId ?? sides[index]!.heroDefinitionId;
       const classId = getHeroDefinition(heroId).classId;
       const deck = player.deck ? [...player.deck] : starterDeckFor(heroId);
-      const validation = validateDeck(deck, { classId });
+      const validation = validateDeck(deck, {
+        classId,
+        getCardDefinition: (id) => {
+          const card = content.cards[id];
+          if (!card) throw new Error(`Unknown card: ${id}`);
+          return card;
+        },
+      });
       if (!validation.valid) throw new Error(validation.errors.join('; '));
       return { ...structuredClone(player), deck };
     }) as unknown as MatchSetup['players'];
     const setup: MatchSetup = {
       matchId,
+      content,
       scenario: structuredClone(scenario),
       seed,
       players,
@@ -185,7 +207,10 @@ export class MatchManager {
     // new hero must be one that could legally play it too, or switching hero
     // would be a way round the class rule.
     if (setupDeck) {
-      const validation = validateDeck(setupDeck, { classId: hero.classId });
+      const validation = validateDeck(setupDeck, {
+        classId: hero.classId,
+        getCardDefinition: (id) => engine.getCardDefinition(id),
+      });
       if (!validation.valid) {
         throw new Error(`${hero.name} cannot play this deck: ${validation.errors.join('; ')}`);
       }

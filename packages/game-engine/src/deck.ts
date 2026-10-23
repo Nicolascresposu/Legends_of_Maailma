@@ -1,5 +1,5 @@
 import { CLASS_DEFINITIONS, cardFitsClass, getCardDefinition } from '@maailma/card-definitions';
-import type { DeckFormat, Rarity } from '@maailma/game-model';
+import type { CardDefinition, DeckFormat, Rarity } from '@maailma/game-model';
 
 export interface DeckValidationResult {
   valid: boolean;
@@ -40,6 +40,7 @@ export type FormatLegality = (cardId: string, format: DeckFormat) => boolean;
 
 export interface DeckValidationOptions {
   requiredSize?: number;
+  getCardDefinition?: (id: string) => CardDefinition;
   /**
    * The class the deck is played as — its hero's class. Omitted, class is not
    * checked; given, every class card must belong to it.
@@ -58,6 +59,7 @@ export function validateDeck(
   const options: DeckValidationOptions =
     typeof optionsOrSize === 'number' ? { requiredSize: optionsOrSize } : optionsOrSize;
   const requiredSize = options.requiredSize ?? 30;
+  const definitionFor = options.getCardDefinition ?? getCardDefinition;
 
   const errors: string[] = [];
   if (cardIds.length !== requiredSize)
@@ -65,7 +67,7 @@ export function validateDeck(
   const counts = new Map<string, number>();
   for (const cardId of cardIds) {
     try {
-      const definition = getCardDefinition(cardId);
+      const definition = definitionFor(cardId);
       if (!definition.collectible) errors.push(`${definition.name} is not collectible`);
       counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
     } catch {
@@ -73,7 +75,7 @@ export function validateDeck(
     }
   }
   for (const [cardId, count] of counts) {
-    const definition = getCardDefinition(cardId);
+    const definition = definitionFor(cardId);
     const maximum = deckCopyLimit(definition.rarity);
     if (count > maximum) errors.push(`${definition.name} exceeds its ${maximum}-copy limit`);
   }
@@ -83,10 +85,10 @@ export function validateDeck(
   if (options.classId !== undefined) {
     const deckClass = CLASS_DEFINITIONS[options.classId]?.name ?? options.classId;
     const foreign = [...counts.keys()]
-      .filter((cardId) => !cardFitsClass(getCardDefinition(cardId), options.classId!))
+      .filter((cardId) => !cardFitsClass(definitionFor(cardId), options.classId!))
       .sort();
     for (const cardId of foreign) {
-      const definition = getCardDefinition(cardId);
+      const definition = definitionFor(cardId);
       const cardClass = CLASS_DEFINITIONS[definition.classId!]?.name ?? definition.classId;
       errors.push(
         `${definition.name} is a ${cardClass} card and cannot be played in a ${deckClass} deck`,
@@ -100,7 +102,7 @@ export function validateDeck(
   if (format && isLegalInFormat) {
     const illegal = [...counts.keys()].filter((cardId) => !isLegalInFormat(cardId, format)).sort();
     for (const cardId of illegal) {
-      const definition = getCardDefinition(cardId);
+      const definition = definitionFor(cardId);
       errors.push(`${definition.name} is not legal in ${format}`);
     }
   }

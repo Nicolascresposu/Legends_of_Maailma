@@ -17,6 +17,8 @@ The default server address is `http://localhost:3000`; live matches use
   for their side, and each deck is judged as that hero's class. A player sent without a `deck`
   plays the starter deck of their hero's class. Players use `/api/play` instead.
 - `GET /api/matches/:matchId` — current authoritative state (development endpoint).
+- `GET /api/matches/:matchId/replay` — pinned setup, used card definitions/version and actions;
+  returns `409 EDITED_MATCH` for admin-edited matches.
 - `GET /api/matches/:matchId/legal-actions/:playerId` — legal intentions for one side.
 - `POST /api/matches/:matchId/actions` — submit an intention (development/test endpoint).
 
@@ -64,7 +66,11 @@ Submit a game intention without calculated results:
 ```
 
 The connection is bound to its joined player and rejects actions claiming another actor. The
-server responds with `MATCH_STATE`, player-specific `LEGAL_ACTIONS`, `GAME_EVENTS`, `TURN_CHANGED`,
+server sends `MATCH_CONTENT { version, cards }` before joined/rejoined state and after admin edits.
+These are the match's pinned definitions, limited to used cards and transitive summons.
+`MATCH_STATE.contentVersion` identifies the version. Clients keep these definitions separate
+from the current `/api/cards` catalogue. The server also responds with `MATCH_STATE`,
+player-specific `LEGAL_ACTIONS`, `GAME_EVENTS`, `TURN_CHANGED`,
 `MATCH_ENDED`, or `ERROR`. Messages and shared state are plain JSON and contain no Godot-specific
 types.
 
@@ -73,6 +79,10 @@ types.
 Accounts, collections, decks, expansions, the Fragment economy, packs, trading and the social
 features all sit behind a bearer token and are listed in the README. They carry no Godot-specific
 types either: the same endpoints would serve a web client unchanged.
+
+Authenticated admin publishing routes under `/api/admin/content` provide status/history,
+expansion downloads, exact change previews, optimistic version-checked publication and rollback.
+See [Publishing API](publishing.md#api-and-verification) for request bodies and error codes.
 
 Economy failures return a structured `code` alongside their message — `CARD_NOT_CRAFTABLE`,
 `EXPANSION_NOT_RELEASED`, `INSUFFICIENT_FRAGMENTS`, `TRADE_REVISION_CHANGED` and so on — so a

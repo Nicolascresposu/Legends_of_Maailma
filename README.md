@@ -58,7 +58,8 @@ the deck panel shows the server's verdict live — card count, and any card you 
 A deck that is not ready can still be saved; it simply cannot be made active or played. The
 active deck is the one the deck picker lists first.
 
-Card names, costs, keywords, descriptions and flavour are fetched once from `/api/cards`, so the board shows
+Card names, costs, keywords, descriptions and flavour come from `/api/cards`; matches receive
+their pinned definitions over `MATCH_CONTENT`, so the board shows
 real names rather than definition ids. The match log narrates the server's events, and the client
 reconnects automatically if the socket drops.
 
@@ -211,6 +212,13 @@ Client scripts:
 - `src/admin_ui_test.gd` — signs in as an admin, flips the admin UI switch, works on an account in
   the panel, and edits a debug match from the match view. Signs in as the seeded admin unless given
   `--admin-email=` and `--admin-password=`; `--screenshot-dir=` saves what it saw.
+- `src/expansion_creator_test.gd` — headless, needs no server: checks local expansion editing,
+  schema validation, save/import/export, conflict detection, rollback and the admin tab. Uses
+  temporary files; `--screenshot-dir=` (windowed) saves visual previews. See the
+  [creator guide](docs/content.md#godot-expansion-creator).
+- `src/content_publisher_test.gd` — headless with a fake transport: checks reviewed publication,
+  stale drafts, server/account changes, rollback and pinned match data. Local servers support
+  publishing without restarting; see [Publish and test cards](docs/publishing.md).
 - `src/session_test.gd` — remembered accounts: resuming, switching, signing out, forgetting.
 - `src/config_test.gd` — checks address parsing and override precedence.
 

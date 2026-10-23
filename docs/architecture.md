@@ -18,16 +18,35 @@ card-definitions
 game-engine <- protocol <- server / clients
 ```
 
-Definitions are immutable registry data. Runtime instances contain damage, statuses, position,
-summoning sickness, and combat-action exhaustion; no match mutates a definition.
+Each content version has immutable definitions. Publication synchronously swaps the current
+registry bindings; every engine captures a fixed snapshot at creation. Runtime instances contain
+damage, statuses, position, summoning sickness and combat-action exhaustion; no match mutates a
+definition.
 
 Expansions, cards and packs are loaded from `packages/card-definitions/content/<expansion>/`
 JSON files. The Node loader discovers folders in sorted order and validates their shapes against
 `content.schema.json`, then checks IDs, references, printed text and pack slot totals before
 exposing the existing registry exports. Paths are relative to the package, independent of the
-working directory. Content is loaded once per process; a new deployment/restart applies edits.
+working directory. Source JSON initializes the registry; a persisted publication then restores
+the active version. Admin-reviewed publication replaces it without a restart.
 Heroes, classes, scenarios, starter decks, crafting prices and all mechanics remain TypeScript.
 See [Creating expansion content](content.md) for the authoring workflow.
+
+The Godot admin panel's local expansion creator edits those JSON files through draft forms and a
+private preview library. Its bundled schema is generated from the same canonical JSON Schema
+during the build. Local validation checks sibling IDs and references before saving; staged file
+replacement detects stale reads and rolls back write failures. A separate publishing panel sends
+drafts for server validation, previews exact changes and confirms version-checked publication or
+rollback. Save and Publish have separate local-file and server-store responsibilities. The client
+keeps its current collection catalogue separate from pinned match presentation data.
+
+Published snapshots are addressed by a canonical SHA-256 hash. The file-backed activation log
+records actor, time and previous/new versions. A single server process owns the store, which
+persists across restarts. Snapshot files are written before the active pointer is atomically
+replaced. Engines, AI, waiting-seat rebuilds and replay exports use pinned card definitions.
+Match sockets expose only used definitions and transitive summons, keeping unused unreleased
+content out of ordinary match payloads. Heroes and engine code remain code deployments.
+See [Publishing](publishing.md) for the workflow and configuration.
 
 ## Glossary
 

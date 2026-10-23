@@ -38,6 +38,8 @@ const COLOR_HOVER := Color(0.62, 0.82, 1.0)
 var client: MatchClient
 var accounts: AccountClient
 var library := CardLibrary.new()
+## Collection/trading follow the current catalogue; match rendering stays pinned.
+var catalog_library := CardLibrary.new()
 var collection_screen: CollectionScreen
 var trade_screen: TradeScreen
 var game_root: Control
@@ -139,7 +141,11 @@ func _ready() -> void:
 	client.game_events_received.connect(_on_game_events)
 	client.match_ended.connect(_on_match_ended)
 	client.server_error.connect(_on_server_error)
-	client.cards_received.connect(func(payload: Variant) -> void: library.ingest(payload))
+	client.cards_received.connect(func(payload: Variant) -> void:
+		catalog_library.ingest(payload)
+		if client.match_content_version == "":
+			library.ingest(payload))
+	client.match_cards_received.connect(func(cards: Array) -> void: library.ingest(cards))
 	client.request_failed.connect(func(detail: String) -> void: _set_status(detail, true))
 	library.loaded.connect(_on_library_loaded)
 
@@ -157,7 +163,7 @@ func _ready() -> void:
 	# signing in, but a match is only ever entered signed in, with a ready deck.
 	collection_screen = CollectionScreen.new()
 	add_child(collection_screen)
-	collection_screen.setup(accounts, library)
+	collection_screen.setup(accounts, catalog_library)
 	collection_screen.play_requested.connect(_show_match_view)
 	# Keep the two address fields in step: they configure the same thing.
 	collection_screen.server_changed.connect(_on_server_changed)
@@ -166,16 +172,21 @@ func _ready() -> void:
 	trade_screen = TradeScreen.new()
 	trade_screen.visible = false
 	add_child(trade_screen)
-	trade_screen.setup(accounts, library)
+	trade_screen.setup(accounts, catalog_library)
 	trade_screen.closed.connect(_show_collection_view)
 	collection_screen.admin_requested.connect(_show_admin_view)
 
 	admin_screen = AdminScreen.new()
 	admin_screen.visible = false
-	admin_screen.setup(accounts, library)
+	admin_screen.setup(accounts, catalog_library)
 	add_child(admin_screen)
 	admin_screen.closed.connect(_show_collection_view)
 	admin_screen.play_requested.connect(_play_admin_match)
+	admin_screen.content_published.connect(func(_version: String) -> void:
+		client.fetch_cards()
+		accounts.fetch_collection()
+		accounts.fetch_expansions()
+		accounts.fetch_packs())
 
 	# A corner switch between the admin UI and the one every player sees.
 	admin_ui_enabled = _load_admin_ui_enabled()
@@ -193,7 +204,11 @@ func _ready() -> void:
 	# Added last, so it draws over the board it asks about.
 	deck_picker = DeckPicker.new()
 	add_child(deck_picker)
-	deck_picker.setup(library)
+	deck_picker.setup(catalog_library)
+	catalog_library.loaded.connect(func() -> void:
+		collection_screen._render_collection()
+		collection_screen._render_draft()
+		trade_screen._render_all())
 	deck_picker.picked.connect(_on_deck_picked)
 	deck_picker.cancelled.connect(func() -> void:
 		_pending_entry = {}

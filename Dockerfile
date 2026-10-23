@@ -29,6 +29,7 @@ RUN npm ci
 COPY tsconfig.base.json tsconfig.json ./
 COPY prisma prisma
 COPY packages packages
+COPY scripts scripts
 COPY apps/server apps/server
 RUN npx prisma generate && npm run build
 
@@ -56,7 +57,9 @@ COPY --from=build /app/packages/game-model/dist packages/game-model/dist
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/packages/rng/dist packages/rng/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
+RUN mkdir -p /var/lib/maailma/content && chown -R node:node /var/lib/maailma
 USER node
+ENV CONTENT_STORE_DIR=/var/lib/maailma/content
 ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

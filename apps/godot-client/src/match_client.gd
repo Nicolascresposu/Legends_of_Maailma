@@ -14,6 +14,7 @@ signal match_ended(winner_id: String)
 signal server_error(code: String, message: String)
 signal match_created(match_id: String)
 signal cards_received(cards: Variant)
+signal match_cards_received(cards: Array)
 signal request_failed(detail: String)
 
 enum Status { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING }
@@ -25,6 +26,7 @@ const MAX_RECONNECT_ATTEMPTS := 5
 var http_base := ClientConfig.http_base()
 var match_id := ""
 var player_id := ""
+var match_content_version := ""
 
 var _socket: WebSocketPeer = null
 var _status: int = Status.DISCONNECTED
@@ -133,6 +135,7 @@ func _on_cards_completed(result: int, response_code: int, _headers: PackedString
 ## Opens a socket and joins. `select_hero` is only sent for a fresh match: the
 ## server rejects hero changes once play has begun, so rejoining must not ask.
 func join(target_match_id: String, target_player_id: String, hero_id: String, select_hero: bool) -> void:
+	match_content_version = ""
 	match_id = target_match_id
 	player_id = target_player_id
 	_should_reconnect = true
@@ -152,6 +155,7 @@ func _open_socket() -> void:
 	_set_status(Status.CONNECTING if _reconnect_attempts == 0 else Status.RECONNECTING, "Connecting…")
 
 func disconnect_from_match() -> void:
+	match_content_version = ""
 	_should_reconnect = false
 	if _socket != null:
 		_socket.close()
@@ -214,6 +218,11 @@ func _process(delta: float) -> void:
 
 func _dispatch(message: Dictionary) -> void:
 	match str(message.get("type", "")):
+		"MATCH_CONTENT":
+			var cards: Variant = message.get("cards", [])
+			if cards is Array:
+				match_content_version = str(message.get("version", ""))
+				match_cards_received.emit(cards)
 		"MATCH_STATE":
 			var state: Variant = message.get("state", {})
 			if typeof(state) == TYPE_DICTIONARY:

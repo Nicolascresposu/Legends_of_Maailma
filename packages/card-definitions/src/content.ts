@@ -13,7 +13,7 @@ export interface ContentCatalog {
   packs: PackDefinition[];
 }
 
-interface ExpansionFile extends ExpansionDefinition {
+export interface ExpansionFile extends ExpansionDefinition {
   schemaVersion: 1;
 }
 
@@ -37,8 +37,13 @@ const expansionValidator = ajv.compile<ExpansionFile>({
 const cardsValidator = ajv.compile<CardDefinition[]>({ $ref: `${schemaId}#/definitions/cards` });
 const packsValidator = ajv.compile<PackDefinition[]>({ $ref: `${schemaId}#/definitions/packs` });
 
-function readValidated<T>(path: string, validate: ValidateFunction<T>): T {
-  const data = readJson(path);
+export interface ExpansionDocument {
+  expansion: ExpansionFile;
+  cards: CardDefinition[];
+  packs: PackDefinition[];
+}
+
+function validateValue<T>(data: unknown, path: string, validate: ValidateFunction<T>): T {
   if (!validate(data)) {
     const errors = validate.errors?.map((error) => {
       const detail =
@@ -52,7 +57,20 @@ function readValidated<T>(path: string, validate: ValidateFunction<T>): T {
   return data;
 }
 
-/** Load every expansion folder once, before exposing any registry to the engine. */
+/** The same boundary validates disk content and untrusted creator uploads. */
+export function validateExpansionDocument(value: unknown, where = 'draft'): ExpansionDocument {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${where}: expected an expansion document`);
+  }
+  const data = value as Record<string, unknown>;
+  return {
+    expansion: validateValue(data.expansion, join(where, 'expansion.json'), expansionValidator),
+    cards: validateValue(data.cards, join(where, 'cards.json'), cardsValidator),
+    packs: validateValue(data.packs, join(where, 'packs.json'), packsValidator),
+  };
+}
+
+/** Load every expansion folder before exposing any registry to the engine. */
 export function loadContent(
   root: string | URL = new URL('../content/', import.meta.url),
 ): ContentCatalog {
@@ -62,7 +80,24 @@ export function loadContent(
     .map((entry) => entry.name)
     .sort();
   if (folders.length === 0) throw new Error(`${directory}: no expansion folders found`);
+  return parseContentDocuments(
+    folders.map((folder) => {
+      const path = join(directory, folder);
+      return {
+        folder: path,
+        data: {
+          expansion: readJson(join(path, 'expansion.json')),
+          cards: readJson(join(path, 'cards.json')),
+          packs: readJson(join(path, 'packs.json')),
+        },
+      };
+    }),
+  );
+}
 
+export function parseContentDocuments(
+  documents: readonly { folder: string; data: unknown }[],
+): ContentCatalog {
   const catalog: ContentCatalog = { expansions: [], cards: [], packs: [] };
   const seen = {
     expansions: new Map<string, string>(),
@@ -86,18 +121,18 @@ export function loadContent(
     }
   }
 
-  for (const folder of folders) {
-    const path = join(directory, folder);
+  for (const document of documents) {
+    const path = document.folder;
+    const data = validateExpansionDocument(document.data, path);
     const expansionPath = join(path, 'expansion.json');
-    const file = readValidated(expansionPath, expansionValidator);
-    const expansion: ExpansionDefinition = { id: file.id, name: file.name, policy: file.policy };
+    const { id, name, policy } = data.expansion;
+    const expansion: ExpansionDefinition = { id, name, policy };
     register([expansion], catalog.expansions, seen.expansions, expansionPath);
-
     const cardsPath = join(path, 'cards.json');
-    const cards = readValidated(cardsPath, cardsValidator);
+    const cards = data.cards;
     register(cards, catalog.cards, seen.cards, cardsPath);
     const packsPath = join(path, 'packs.json');
-    const packs = readValidated(packsPath, packsValidator);
+    const packs = data.packs;
     register(packs, catalog.packs, seen.packs, packsPath);
     for (const [items, itemPath] of [
       [cards, cardsPath],
@@ -141,6 +176,15 @@ export function loadContent(
   }
   if (errors.length > 0) throw new Error(`Invalid content:\n${errors.join('\n')}`);
   return catalog;
+}
+
+/** Convert a validated catalogue to the creator's portable three-file documents. */
+export function contentDocuments(catalog: ContentCatalog): ExpansionDocument[] {
+  return catalog.expansions.map((expansion) => ({
+    expansion: { schemaVersion: 1, ...expansion },
+    cards: catalog.cards.filter((card) => card.expansionId === expansion.id),
+    packs: catalog.packs.filter((pack) => pack.expansionId === expansion.id),
+  }));
 }
 
 // Paths are relative to this module, so source, compiled code, CLI and Docker agree.

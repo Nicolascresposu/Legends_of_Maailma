@@ -33,6 +33,13 @@ cd deploy && docker compose up -d --build
 Matches in progress live in server memory, so a restart ends them. Accounts, decks and collections
 are in the `db-data` volume and survive rebuilds.
 
+Admin-reviewed content publishing is disabled by default in Compose. To enable it, set
+`CONTENT_PUBLISHING=true` in `deploy/.env` and recreate the server container. The `content-data`
+volume persists snapshots and activation history at `/var/lib/maailma/content`; it is writable
+by the server's `node` user. New matches use published content immediately, while existing matches
+retain their versions. A persisted active publication takes precedence over source JSON after
+image updates. See [Publishing](publishing.md) for review, rollback and development configuration.
+
 Do not run `npm run seed` against this database: it creates accounts with a shared, published
 password.
 

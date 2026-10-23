@@ -4,14 +4,16 @@ extends Control
 ## a test needs, and edit live matches.
 ##
 ## Only ever shown to an admin, and only while the admin UI is switched on.
-## Every button is one call to the admin API; the server does the work,
-## records it, and would refuse any of it from anyone else.
+## Account/match tools call the admin API. The expansion creator edits local
+## JSON drafts/files and publishes reviewed versions through the admin API.
 
 signal closed()
 ## The admin started a debug match they play in themselves: open it.
 signal play_requested(match_id: String)
+signal content_published(version: String)
 
 const AdminMatchTools := preload("res://src/admin_match_tools.gd")
+const ExpansionCreator := preload("res://src/expansion_creator.gd")
 
 var accounts: AccountClient
 var library: CardLibrary
@@ -48,6 +50,7 @@ var _match_list: VBoxContainer
 var _match_label: RichTextLabel
 var _match_tools: Node
 var _match_body: VBoxContainer
+var _expansion_creator: Control
 
 func setup(account_client: AccountClient, card_library: CardLibrary) -> void:
 	accounts = account_client
@@ -85,7 +88,8 @@ func _ready() -> void:
 	header.add_child(_status)
 	var back := Button.new()
 	back.text = "Back"
-	back.pressed.connect(func() -> void: closed.emit())
+	back.pressed.connect(func() -> void:
+		_expansion_creator.confirm_discard(func() -> void: closed.emit()))
 	header.add_child(back)
 
 	var tabs := TabContainer.new()
@@ -93,9 +97,17 @@ func _ready() -> void:
 	root.add_child(tabs)
 	tabs.add_child(_build_accounts_tab())
 	tabs.add_child(_build_matches_tab())
+	_expansion_creator = ExpansionCreator.new()
+	_expansion_creator.setup_publishing(accounts)
+	_expansion_creator.published.connect(func(version: String) -> void:
+		accounts.admin(HTTPClient.METHOD_GET, "/registry", null, "admin:registry")
+		content_published.emit(version))
+	tabs.add_child(_expansion_creator)
 	tabs.tab_changed.connect(func(index: int) -> void:
 		if index == 1:
-			refresh_matches())
+			refresh_matches()
+		elif index == 2:
+			_expansion_creator.opened())
 
 ## Called each time the panel is shown: fresh data, never a stale snapshot.
 func opened() -> void:

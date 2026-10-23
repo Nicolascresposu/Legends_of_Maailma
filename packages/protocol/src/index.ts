@@ -1,5 +1,6 @@
 import type {
   ActionResult,
+  CardDefinition,
   GameAction,
   GameEvent,
   MatchState,
@@ -12,6 +13,7 @@ export type ClientMessage =
   | { type: 'SUBMIT_ACTION'; matchId: string; action: GameAction };
 
 export type ServerMessage =
+  | { type: 'MATCH_CONTENT'; version: string; cards: CardDefinition[] }
   | { type: 'MATCH_STATE'; state: MatchState }
   | { type: 'LEGAL_ACTIONS'; playerId: PlayerId; actions: GameAction[] }
   | { type: 'GAME_EVENTS'; events: GameEvent[] }

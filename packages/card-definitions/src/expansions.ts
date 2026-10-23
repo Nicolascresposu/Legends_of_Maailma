@@ -5,6 +5,8 @@ import type {
 } from '@maailma/game-model';
 import { EXPANSION_POLICY_FLAGS } from '@maailma/game-model';
 import { CONTENT } from './content.js';
+import { EXPANSION_DEFINITIONS } from './registry.js';
+export { EXPANSION_DEFINITIONS } from './registry.js';
 
 /** Shipped JSON policies are defaults; stored server overrides take precedence. */
 const expansions = CONTENT.expansions;
@@ -49,15 +51,6 @@ const definitionErrors = expansions.flatMap(validateExpansionDefinition);
 if (definitionErrors.length > 0) {
   throw new Error(`Invalid expansion definitions: ${definitionErrors.join('; ')}`);
 }
-
-export const EXPANSION_DEFINITIONS: Readonly<Record<string, ExpansionDefinition>> = Object.freeze(
-  Object.fromEntries(
-    expansions.map((expansion) => [
-      expansion.id,
-      Object.freeze({ ...expansion, policy: Object.freeze({ ...expansion.policy }) }),
-    ]),
-  ),
-);
 
 export function getExpansionDefinition(id: string): ExpansionDefinition {
   const definition = EXPANSION_DEFINITIONS[id];

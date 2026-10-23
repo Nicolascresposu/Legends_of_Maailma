@@ -3,6 +3,8 @@ import { RARITIES } from '@maailma/game-model';
 import { isBasicRarity } from './economy.js';
 import { isKnownExpansion } from './expansions.js';
 import { CONTENT } from './content.js';
+import { PACK_DEFINITIONS } from './registry.js';
+export { PACK_DEFINITIONS } from './registry.js';
 
 /**
  * How likely each rarity is in one pack slot.
@@ -77,10 +79,6 @@ const packErrors = packs.flatMap(validatePackDefinition);
 if (packErrors.length > 0) {
   throw new Error(`Invalid pack definitions: ${packErrors.join('; ')}`);
 }
-
-export const PACK_DEFINITIONS: Readonly<Record<string, PackDefinition>> = Object.freeze(
-  Object.fromEntries(packs.map((pack) => [pack.id, Object.freeze(pack)])),
-);
 
 export function getPackDefinition(id: string): PackDefinition {
   const definition = PACK_DEFINITIONS[id];

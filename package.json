@@ -9,7 +9,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b && node packages/card-definitions/dist/validate-content.js",
+    "build": "tsc -b && node packages/card-definitions/dist/validate-content.js && node scripts/sync-content-schema.mjs",
+    "sync:content-schema": "tsc -b packages/card-definitions && node scripts/sync-content-schema.mjs",
     "validate:content": "tsc -b packages/game-model && tsx packages/card-definitions/src/validate-content.ts",
     "clean": "tsc -b --clean",
     "dev": "tsx apps/server/src/index.ts",

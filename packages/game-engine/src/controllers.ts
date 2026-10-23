@@ -1,4 +1,3 @@
-import { getCardDefinition } from '@maailma/card-definitions';
 import type { GameAction, MatchState, PlayerId } from '@maailma/game-model';
 import type { GameEngine } from './engine.js';
 
@@ -52,11 +51,11 @@ export class BasicAIController implements MatchController {
     const side = engine.state.sides[playerId];
     const card = side?.hand.find((entry) => entry.instanceId === action.cardInstanceId);
     if (!card) return false;
-    const definition = getCardDefinition(card.definitionId);
+    const definition = engine.getCardDefinition(card.definitionId);
     if (definition.type !== 'WEAPON') return true;
     const equipped = side!.hero.equippedWeapon;
     if (!equipped) return true;
-    const current = getCardDefinition(equipped.definitionId);
+    const current = engine.getCardDefinition(equipped.definitionId);
     if (current.type !== 'WEAPON') return true;
     return (
       weaponValue(definition.attack, definition.durability, definition.range === 'RANGED') >

@@ -61,6 +61,10 @@ services:
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: json
+      CONTENT_PUBLISHING: ${CONTENT_PUBLISHING:-false}
+      CONTENT_STORE_DIR: /var/lib/maailma/content
+    volumes:
+      - content-data:/var/lib/maailma/content
     # Loopback only by default: frpc on this host reaches it, the LAN does not.
     ports:
       - '${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3000}:3000'
@@ -73,3 +77,4 @@ services:
 
 volumes:
   db-data:
+  content-data:
