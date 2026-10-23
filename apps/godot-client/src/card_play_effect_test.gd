@@ -1,5 +1,9 @@
 extends SceneTree
 
+class Harness extends "res://src/main.gd":
+	func _ready() -> void:
+		pass
+
 ## Checks a played card breaking up and its oval falling into its slot,
 ## without a server.
 ##
@@ -95,6 +99,7 @@ func _init() -> void:
 	_check("a card that is not summoned leaves no oval", not effect._bursts[0].oval.has_area())
 	_advance(effect, 0.6)
 	_check("it crumbles away completely", not effect.is_busy() and landings.is_empty())
+	await _guard_landing_test()
 
 	var shots := _arg("--screenshot-dir=")
 	if shots != "" and DisplayServer.get_name() != "headless":
@@ -105,6 +110,67 @@ func _init() -> void:
 		print("  FAIL: ", failure)
 	print("RESULT: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+func _guard_landing_test() -> void:
+	var main := Harness.new()
+	get_root().add_child(main)
+	main.client = MatchClient.new()
+	main.accounts = AccountClient.new()
+	main.add_child(main.client)
+	main.add_child(main.accounts)
+	var guard := WOLF.duplicate(true)
+	guard["keywords"] = ["GUARD"]
+	main.library.ingest([guard])
+	main._build_interface()
+	main.player_id = "one"
+	main._on_match_state(_guard_state(true))
+	await process_frame
+	_check("an existing Guard is shown fully on reconnect", main._combat_token("g")._guard.modulate.a == 1.0
+		and not main._combat_token("g")._guard.is_processing())
+	var slot_key := Targeting.slot_key("one", "FRONT", 0)
+	for late_state in [false, true]:
+		main._on_match_state(_guard_state(false))
+		var held := await _held_card("wolf", Vector2(200, 520), 0.0)
+		main.play_effect.set_process(false)
+		main.play_effect.play(_card("wolf"), held, _landing(Vector2(200, 120)), slot_key)
+		if not late_state:
+			main._on_match_state(_guard_state(true))
+			await process_frame
+			_check("a Guard arriving before contact waits for the oval", main._combat_token("g").modulate.a == 0.0
+				and main._combat_token("g")._guard.modulate.a == 0.0)
+		_advance(main.play_effect, CardPlayEffect.HOLD + CardPlayEffect.FALL + STEP)
+		if late_state:
+			main._on_match_state(_guard_state(true))
+			await process_frame
+		var token := main._combat_token("g")
+		_check("the landed creature appears before its Guard shield (late=%s)" % late_state,
+			token.modulate.a == 1.0 and token._guard.modulate.a == 0.0 and token._guard.is_processing())
+		# Force the same rebuild legal actions use during the real animation.
+		await create_timer(CreatureToken.GUARD_DELAY + CreatureToken.GUARD_EXPAND).timeout
+		main._render_state()
+		token = main._combat_token("g")
+		_check("a board rebuild resumes the pop (late=%s)" % late_state,
+			token._guard.scale.x > 1.05 and token._guard.modulate.a == 1.0)
+		await create_timer(CreatureToken.GUARD_SETTLE + 0.03).timeout
+		main._render_state()
+		main._on_match_state(_guard_state(true))
+		token = main._combat_token("g")
+		_check("later updates do not replay the shield (late=%s)" % late_state,
+			token._guard.scale == Vector2.ONE and token._guard.modulate.a == 1.0 and not token._guard.is_processing())
+		_advance(main.play_effect, 1.0)
+	main.queue_free()
+	await process_frame
+
+func _guard_state(occupied: bool) -> Dictionary:
+	var creatures := {}
+	if occupied:
+		creatures["g"] = {"instanceId": "g", "definitionId": "wolf", "currentAttack": 2,
+			"currentHealth": 3, "maxHealth": 3, "statuses": []}
+	return {"playerOrder": ["one"], "activePlayerId": "one", "turn": 1, "sides": {
+		"one": {"playerId": "one", "hero": {"currentHealth": 30, "maxHealth": 30},
+			"creatures": creatures, "hand": [], "deck": [], "taika": {"current": 3, "maximum": 3},
+			"battlefield": {"config": {"width": 1}, "slots": {"FRONT": ["g" if occupied else null], "BACK": [null]}}},
+	}}
 
 ## The same drop at several moments side by side, from the card intact to the
 ## oval at rest in its slot.

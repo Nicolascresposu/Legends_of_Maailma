@@ -101,6 +101,7 @@ func resolve(library: CardLibrary, state: Dictionary) -> void:
 				"attack": creature.get("currentAttack", 0),
 				"health": creature.get("currentHealth", 0),
 				"max_health": creature.get("maxHealth", 0),
+				"statuses": creature.get("statuses", []),
 			})
 	_pose()
 

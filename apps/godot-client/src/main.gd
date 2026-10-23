@@ -125,6 +125,8 @@ var _presentation_queue: Array[Dictionary] = []
 var _presenting := false
 var _combat_preparing := false
 var _presentation_generation := 0
+## Entry start times survive board rebuilds; -1 waits for the falling oval.
+var _guard_arrivals: Dictionary = {}
 
 func _ready() -> void:
 	client = MatchClient.new()
@@ -663,7 +665,17 @@ func _on_match_state(new_state: Dictionary) -> void:
 	_queue_presentation("state", new_state)
 
 func _present_match_state(new_state: Dictionary) -> void:
+	if not state.is_empty():
+		for side: Dictionary in new_state.get("sides", {}).values():
+			for id in side.get("creatures", {}):
+				var creature: Dictionary = side["creatures"][id]
+				if CombatEffect._creature(state, str(id)).is_empty() \
+						and library.keywords(str(creature.get("definitionId", ""))).has("GUARD"):
+					_guard_arrivals[str(id)] = -1.0
 	state = new_state
+	for id in _guard_arrivals.keys():
+		if CombatEffect._creature(state, str(id)).is_empty():
+			_guard_arrivals.erase(id)
 	# A new board invalidates what a held card was aiming at; it goes back.
 	if _dragging:
 		_end_drag()
@@ -821,6 +833,7 @@ func _reset_combat_presentation() -> void:
 	_presentation_generation += 1
 	_presentation_queue.clear()
 	_combat_preparing = false
+	_guard_arrivals.clear()
 	combat_effect.cancel()
 
 func _combat_token(entity_id: String) -> CreatureToken:
@@ -1164,6 +1177,7 @@ func _slot_panel(
 		"attack": creature.get("currentAttack", library.base_attack(definition_id)),
 		"health": creature.get("currentHealth", library.base_health(definition_id)),
 		"max_health": creature.get("maxHealth", library.base_health(definition_id)),
+		"statuses": creature.get("statuses", []),
 		"marks": marks,
 	}
 	# In play a creature is its art in a large oval, with its live stats on the
@@ -1178,8 +1192,14 @@ func _slot_panel(
 	panel.set_meta("slot_key", slot_key)
 	if play_effect.is_flying(slot_key):
 		token.modulate.a = 0.0
-	elif play_effect.is_waiting(slot_key):
-		play_effect.release(slot_key)
+		token.guard_entrance(-1.0)
+	else:
+		if play_effect.is_waiting(slot_key):
+			if token._guard.visible and not _guard_arrivals.has(creature_id):
+				_guard_arrivals[creature_id] = -1.0
+			play_effect.release(slot_key)
+		if _guard_arrivals.has(creature_id):
+			_reveal_guard(token, creature_id)
 	if combat_effect.owns(creature_id):
 		token.modulate.a = 0.0
 	# The hover reveal replaces the built-in tooltip for cards in play: it shows
@@ -1706,9 +1726,23 @@ func _hand_entry(card_id: String) -> Dictionary:
 func _on_oval_landed(slot_key: String) -> void:
 	var token := _token_in_slot(board_container, slot_key)
 	if token != null:
+		_reveal_guard(token, str(token.get_parent().get_meta("reveal_key", "")))
 		if not combat_effect.owns(str(token.get_parent().get_meta("reveal_key", ""))):
 			token.modulate.a = 1.0
 		play_effect.release(slot_key)
+
+func _reveal_guard(token: CreatureToken, creature_id: String) -> void:
+	if not token._guard.visible:
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	var started := float(_guard_arrivals.get(creature_id, -1.0))
+	if started < 0.0:
+		started = now
+		_guard_arrivals[creature_id] = started
+	var age := now - started
+	token.guard_entrance(age)
+	if age >= CreatureToken.GUARD_ENTRANCE:
+		_guard_arrivals.erase(creature_id)
 
 func _token_in_slot(node: Node, slot_key: String) -> CreatureToken:
 	for child in node.get_children():

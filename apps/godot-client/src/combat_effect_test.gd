@@ -187,6 +187,34 @@ func _integration_test() -> void:
 	await _frames(2)
 	_check("switching matches cancels pending presentation", not effect.is_busy() and main._presentation_queue.is_empty()
 		and main.game_root.position == Vector2.ZERO)
+	# Ward is a live status on both sides, including the airborne copies.
+	var warded := _state(9, true)
+	for player in ["one", "two"]:
+		var id := "a" if player == "one" else "b"
+		warded["sides"][player]["creatures"][id]["statuses"] = [{"kind": "WARD"}]
+	main._on_match_state(warded)
+	await _frames(2)
+	_check("both battlefield sides show active ward", main._combat_token("a")._ward.visible
+		and main._combat_token("b")._ward.visible)
+	main._on_game_events([ATTACK])
+	main._on_match_state(_state(9, true))
+	await _frames(4)
+	effect.set_process(false)
+	_check("combat copies keep ward until the hit", effect._attacker.token._ward.visible
+		and effect._defender.token._ward.visible)
+	effect._process(CombatEffect.IMPACT_AT)
+	_check("absorbed combat damage removes both shields at impact", not effect._attacker.token._ward.visible
+		and not effect._defender.token._ward.visible and effect._attacker.token._health_value.text == "9"
+		and effect._defender.token._health_value.text == "3")
+	# A status that remains in an authoritative update must stay visible too.
+	effect.resolve(main.library, warded)
+	_check("unconsumed ward survives combat refresh", effect._attacker.token._ward.visible
+		and effect._defender.token._ward.visible)
+	effect.resolve(main.library, _state(9, true))
+	effect._process(1.0)
+	await _frames(2)
+	_check("spent ward stays absent after combat", not main._combat_token("a")._ward.visible
+		and not main._combat_token("b")._ward.visible)
 	main.queue_free()
 	await process_frame
 
