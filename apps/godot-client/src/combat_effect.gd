@@ -13,6 +13,10 @@ const RETURN := 0.24
 const DUST_LIFE := 0.38
 const IMPACT_AT := WINDUP + LUNGE
 const DURATION := IMPACT_AT + DUST_LIFE
+const SHAKE_BASE_PIXELS := 6.0
+const SHAKE_TIME := 0.25
+const HEAVY_ATTACK := 9.0
+const Precession := preload("res://src/token_precession.gd")
 
 class Fighter:
 	var id := ""
@@ -27,6 +31,15 @@ class Dust:
 	var life := 0.0
 	var tint := Color.WHITE
 
+## Live board tokens, independent of the two copies used for the attack.
+class Bystander:
+	var token: CreatureToken
+	var visual: Control
+	var falloff := 1.0
+	var delay := 0.0
+	var frequency := 0.0
+	var phase := 0.0
+
 var _attacker: Fighter
 var _defender: Fighter
 var _direction := Vector2.UP
@@ -35,6 +48,10 @@ var _hit_point := Vector2.ZERO
 var _age := 0.0
 var _hit := false
 var _weight := 0.0
+var _shake_amplitude := 0.0
+var _shake_duration := SHAKE_TIME
+var _heavy := false
+var _bystanders: Array[Bystander] = []
 var _dust: Array[Dust] = []
 var _shake_target: Control
 var _rest_position := Vector2.ZERO
@@ -44,12 +61,20 @@ func _init() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	set_process(false)
 
-## "Bigger" means higher current combat stats, since board tokens share a
-## fixed size. Small creatures have no screen shake; the biggest cap at 6px.
+## Dust and recoil use bounded impact strength based on current Attack only.
 static func weight_for(card: Dictionary) -> float:
 	var attack := float(card.get("attack", 0))
-	var health := float(card.get("max_health", card.get("health", 0)))
-	return clampf((maxf(attack, (attack + health) * 0.5) - 3.0) / 7.0, 0.0, 1.0)
+	return clampf((attack - 3.0) / 7.0, 0.0, 1.0)
+
+## Shake starts above Attack 3 and grows by 3px per Attack: Attack 5 is
+## 100% (6px), Attack 7 is 200% (12px), and higher Attack keeps scaling.
+static func shake_for(card: Dictionary) -> float:
+	var attack := float(card.get("attack", 0))
+	return maxf((attack - 3.0) / 2.0, 0.0) * SHAKE_BASE_PIXELS
+
+## Heavy hits keep shaking twice as long, including attacks above the presets.
+static func shake_duration_for(card: Dictionary) -> float:
+	return SHAKE_TIME * 2.0 if float(card.get("attack", 0)) >= HEAVY_ATTACK else SHAKE_TIME
 
 func play(library: CardLibrary, source_id: String, source_card: Dictionary,
 		source_rect: Rect2, target_id: String, target_card: Dictionary,
@@ -66,6 +91,9 @@ func play(library: CardLibrary, source_id: String, source_card: Dictionary,
 	_contact = _defender.home - _direction * contact_distance
 	_hit_point = _defender.home - _direction * _defender.size * 0.24
 	_weight = weight_for(source_card)
+	_shake_amplitude = shake_for(source_card)
+	_shake_duration = shake_duration_for(source_card)
+	_heavy = float(source_card.get("attack", 0)) >= HEAVY_ATTACK
 	_shake_target = shake_target
 	if is_instance_valid(_shake_target):
 		_rest_position = _shake_target.position
@@ -87,6 +115,49 @@ func has_impacted() -> bool:
 
 func owns(entity_id: String) -> bool:
 	return is_busy() and (entity_id == _attacker.id or entity_id == _defender.id)
+
+## Rebind after board layout: an authoritative update replaces the tokens at
+## impact. New tokens resume the same shockwave instead of starting it again.
+func set_bystanders(tokens: Array[CreatureToken]) -> void:
+	_restore_bystanders()
+	if not is_busy() or not _heavy:
+		return
+	var to_local := get_global_transform().affine_inverse()
+	for token in tokens:
+		if not is_instance_valid(token) or not token.is_inside_tree() \
+				or not token.visible or token.modulate.a <= 0.0:
+			continue
+		var bystander := Bystander.new()
+		bystander.token = token
+		var centre := to_local * token.get_global_rect().get_center()
+		var offset := centre - _hit_point
+		bystander.falloff = 1.0 / (1.0 + offset.length() / 600.0)
+		bystander.delay = minf(offset.length() / 6000.0, 0.05)
+		bystander.frequency = 18.0 + fposmod(centre.x + centre.y, 4.0)
+		bystander.phase = offset.angle()
+		bystander.visual = Precession.new()
+		add_child(bystander.visual)
+		bystander.visual.setup(token)
+		_bystanders.append(bystander)
+	_pose_bystanders()
+
+func _restore_bystanders() -> void:
+	for bystander in _bystanders:
+		bystander.visual.restore()
+		bystander.visual.queue_free()
+	_bystanders.clear()
+
+func _pose_bystanders() -> void:
+	for bystander in _bystanders:
+		if not is_instance_valid(bystander.token):
+			continue
+		var age := maxf(0.0, _age - IMPACT_AT - bystander.delay) if _hit else 0.0
+		var t := clampf(age / (_shake_duration - bystander.delay), 0.0, 1.0)
+		# One deliberate, damped wobble, with inertia as the impact takes hold.
+		var envelope := pow(1.0 - t, 2.0) * bystander.falloff
+		var tilt := 1.15 * envelope * smoothstep(0.0, 0.055, age)
+		var travel := age * (1.0 - 0.3 * t)
+		bystander.visual.pose(tilt, bystander.phase + travel * bystander.frequency)
 
 ## The dying attacker's position is at contact, rather than its home slot.
 func creature_rect(entity_id: String) -> Rect2:
@@ -131,6 +202,7 @@ func _exit_tree() -> void:
 	_restore_shake()
 
 func _restore_shake() -> void:
+	_restore_bystanders()
 	if is_instance_valid(_shake_target):
 		_shake_target.position = _rest_position
 	_shake_target = null
@@ -144,7 +216,7 @@ func _process(delta: float) -> void:
 		impacted.emit()
 	_pose()
 	queue_redraw()
-	if _age >= DURATION:
+	if _age >= maxf(DURATION, IMPACT_AT + _shake_duration):
 		cancel()
 
 func _fighter(library: CardLibrary, id: String, card: Dictionary, rect: Rect2) -> Fighter:
@@ -198,10 +270,11 @@ func _pose() -> void:
 			var alpha := 1.0 - clampf(hit_age / 0.19, 0.0, 1.0) if fighter.dead else 1.0
 			fighter.token.modulate = Color(flash, flash, flash, alpha)
 	if is_instance_valid(_shake_target):
-		var fade := pow(1.0 - clampf(hit_age / 0.25, 0.0, 1.0), 2.0)
-		var amplitude := 6.0 * _weight * fade if _hit else 0.0
+		var fade := pow(1.0 - clampf(hit_age / _shake_duration, 0.0, 1.0), 2.0)
+		var amplitude := _shake_amplitude * fade if _hit else 0.0
 		_shake_target.position = _rest_position + Vector2(
 			cos(hit_age * 105.0), sin(hit_age * 137.0) * 0.65) * amplitude
+	_pose_bystanders()
 
 func _place(fighter: Fighter, centre: Vector2, stretch: Vector2, turn: float) -> void:
 	fighter.token.position = centre - fighter.size * 0.5

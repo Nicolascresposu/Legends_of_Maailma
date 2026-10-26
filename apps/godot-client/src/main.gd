@@ -793,6 +793,7 @@ func _present_game_events(events: Array) -> void:
 		var target_card: Dictionary = target.get_parent().get_meta("reveal_card", {})
 		combat_effect.play(library, source_id, source_card, source_rect,
 			target_id, target_card, target_rect, game_root)
+		_refresh_combat_bystanders()
 		source.modulate.a = 0.0
 		target.modulate.a = 0.0
 		_render_actions()
@@ -888,6 +889,20 @@ func _present_last_breath_deaths(new_state: Dictionary) -> void:
 func _combat_token(entity_id: String) -> CreatureToken:
 	return _find_combat_token(board_container, entity_id)
 
+func _refresh_combat_bystanders() -> void:
+	var tokens: Array[CreatureToken] = []
+	_collect_combat_bystanders(board_container, tokens)
+	combat_effect.set_bystanders(tokens)
+
+func _collect_combat_bystanders(node: Node, tokens: Array[CreatureToken]) -> void:
+	for child in node.get_children():
+		if child is CreatureToken:
+			var entity_id := str(node.get_meta("reveal_key", ""))
+			if not combat_effect.owns(entity_id):
+				tokens.append(child)
+		else:
+			_collect_combat_bystanders(child, tokens)
+
 func _find_combat_token(node: Node, entity_id: String) -> CreatureToken:
 	if node is Control and str(node.get_meta("reveal_key", "")) == entity_id:
 		for child in node.get_children():
@@ -911,6 +926,7 @@ func _on_server_error(code: String, message: String) -> void:
 # --- Rendering --------------------------------------------------------------
 
 func _render_state() -> void:
+	combat_effect.set_bystanders([])
 	_clear(board_container)
 	_drop_zones.clear()
 	if state.is_empty():
@@ -1395,6 +1411,7 @@ func _repaint_highlights() -> void:
 
 ## Records the screen rect of every droppable or draggable control.
 func _rebuild_drop_zones() -> void:
+	_refresh_combat_bystanders()
 	_drop_zones.clear()
 	_collect_zones(board_container)
 	# The board scrolls, and what is scrolled out of view may lie behind the

@@ -27,6 +27,7 @@ func _init() -> void:
 	library.ingest([WOLF, BEAR])
 	await _effect_test()
 	await _integration_test()
+	await _bystander_test()
 	var shots := _arg("--screenshot-dir=")
 	if shots != "" and DisplayServer.get_name() != "headless":
 		await _filmstrip(shots)
@@ -215,6 +216,86 @@ func _integration_test() -> void:
 	await _frames(2)
 	_check("spent ward stays absent after combat", not main._combat_token("a")._ward.visible
 		and not main._combat_token("b")._ward.visible)
+	main.queue_free()
+	await process_frame
+
+func _bystander_test() -> void:
+	var main := Harness.new()
+	get_root().add_child(main)
+	main.client = MatchClient.new()
+	main.accounts = AccountClient.new()
+	main.add_child(main.client)
+	main.add_child(main.accounts)
+	main.library.ingest([WOLF, BEAR])
+	main._build_interface()
+	main.player_id = "one"
+	var board := _state(9, true)
+	for player in ["one", "two"]:
+		var id := "a" if player == "one" else "b"
+		var other := "c" if player == "one" else "d"
+		var side: Dictionary = board["sides"][player]
+		side["battlefield"]["config"]["width"] = 3
+		side["battlefield"]["slots"] = {"FRONT": [id, other, null], "BACK": [null, null, null]}
+		side["creatures"][other] = {"instanceId": other, "definitionId": "wolf",
+			"currentAttack": 2, "currentHealth": 3, "maxHealth": 3}
+	board["sides"]["one"]["creatures"]["a"]["currentAttack"] = 9
+	main._on_match_state(board)
+	await _frames(4)
+	var ally_position: Vector2 = main._combat_token("c").position
+	var enemy_position: Vector2 = main._combat_token("d").position
+	main._on_game_events([ATTACK])
+	main._on_match_state(board.duplicate(true))
+	await _frames(4)
+	var effect: CombatEffect = main.combat_effect
+	effect.set_process(false)
+	_check("heavy combat registers only the two bystanders", effect._bystanders.size() == 2)
+	_check("bystanders stay still before contact", main._combat_token("c").position == ally_position
+		and main._combat_token("d").position == enemy_position and main._combat_token("c").rotation == 0.0)
+	effect._process(CombatEffect.IMPACT_AT + 0.10)
+	await _frames(2)
+	effect._process(0.0)
+	_check("friendly and enemy bystanders precess at impact", effect._bystanders[0].visual.basis.z.z < 0.99
+		and effect._bystanders[1].visual.basis.z.z < 0.99)
+	_check("the complete token is projected without moving its slot", main._combat_token("c").modulate.a == 0.0
+		and main._combat_token("d").modulate.a == 0.0 and main._combat_token("c").position == ally_position
+		and effect._bystanders[0].visual._project(Vector2.ZERO).length() > 0.1)
+	var old_id: int = main._combat_token("c").get_instance_id()
+	main._on_legal_actions("one", [{"type": "END_TURN", "actorId": "one"}])
+	await _frames(2)
+	effect._process(0.0)
+	_check("replacement tokens continue the same shockwave", main._combat_token("c").get_instance_id() != old_id
+		and main._combat_token("c").modulate.a == 0.0 and effect._bystanders.size() == 2
+		and effect._bystanders[0].visual.basis.z.z < 0.99)
+	# Refresh without rebuilding the board too: retired viewport cleanup must
+	# not reveal a token underneath its replacement's projection.
+	main._refresh_combat_bystanders()
+	await _frames(2)
+	_check("replacing a projection keeps the original hidden", main._combat_token("c").modulate.a == 0.0)
+	main._reset_combat_presentation()
+	_check("cancellation restores bystander transforms exactly", main._combat_token("c").position == ally_position
+		and main._combat_token("d").position == enemy_position and main._combat_token("c").rotation == 0.0
+		and main._combat_token("c").pivot_offset == Vector2.ZERO and main._combat_token("c").scale == Vector2.ONE
+		and main._combat_token("c").modulate.a == 1.0)
+	for attack in [8, 10]:
+		board["sides"]["one"]["creatures"]["a"]["currentAttack"] = attack
+		main._on_match_state(board.duplicate(true))
+		main._on_game_events([ATTACK])
+		await _frames(4)
+		effect.set_process(false)
+		effect._process(CombatEffect.IMPACT_AT + 0.10)
+		if attack == 8:
+			_check("Attack 8 leaves the other tokens stationary", effect._bystanders.is_empty()
+				and main._combat_token("c").position == ally_position and main._combat_token("c").rotation == 0.0)
+		else:
+			_check("Attack 10 also precesses the board", main._combat_token("c").modulate.a == 0.0
+				and effect._bystanders[0].visual.basis.z.z < 0.99)
+		effect._process(1.0)
+		await _frames(2)
+		_check("bystanders settle after Attack %d" % attack, main._combat_token("c").position == ally_position
+			and main._combat_token("d").position == enemy_position and main._combat_token("c").rotation == 0.0
+			and main._combat_token("c").scale == Vector2.ONE and main.game_root.position == Vector2.ZERO)
+	_check("the shockwave does not damage other creatures", main.state["sides"]["one"]["creatures"]["c"]["currentHealth"] == 3
+		and main.state["sides"]["two"]["creatures"]["d"]["currentHealth"] == 3)
 	main.queue_free()
 	await process_frame
 

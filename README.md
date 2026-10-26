@@ -197,6 +197,13 @@ Client scripts:
   and text at hand and reveal sizes; `--screenshot-dir=` (windowed) saves what it drew.
 - `src/card_play_effect_test.gd` — headless, needs no server: checks a played card's shards, the
   oval's fall and landing, and a refused play; `--screenshot-dir=` (windowed) saves a filmstrip.
+- `src/combat_preview.gd` — live, needs no server: press 1–5 to compare shake/dust strengths,
+  Space to replay, or adjust Attack. Max Health changes the displayed stats only.
+  Shake starts above 3 Attack: 5 Attack gives 100% (6px), 7 gives 200% (12px).
+  At 9 Attack and above, the shake lasts 0.50s instead of 0.25s.
+  Other minions on both sides precess like settling coins at impact, using a projected
+  3D surface with perspective and rim thickness. The preview includes them.
+  Loop repeats the selected strength.
 - `src/creature_token_test.gd` — headless, needs no server: checks a creature in play's oval,
   stats, keywords and markers; `--screenshot-dir=` (windowed) saves what it drew.
 - `src/hand_view_test.gd` — headless, needs no server: checks the hand's fan, hover, holding and
@@ -233,6 +240,7 @@ godot --headless --path apps/godot-client --script src/card_frame_test.gd
 godot --headless --path apps/godot-client --script src/creature_token_test.gd
 godot --headless --path apps/godot-client --script src/card_play_effect_test.gd
 godot --headless --path apps/godot-client --script src/combat_effect_test.gd
+godot --path apps/godot-client --script src/combat_preview.gd
 godot --headless --path apps/godot-client --script src/hand_view_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd

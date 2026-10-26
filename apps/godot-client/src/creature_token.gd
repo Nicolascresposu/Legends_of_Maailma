@@ -65,6 +65,8 @@ var _attack_value: Label
 var _health_value: Label
 var _keywords: Label
 var _marks: Label
+var _library: CardLibrary
+var _shown_card: Dictionary = {}
 
 ## A token `size` big showing `card`; see `show_card` for its fields.
 static func make(library: CardLibrary, card: Dictionary, token_size: Vector2) -> CreatureToken:
@@ -109,6 +111,8 @@ func _init() -> void:
 ## Shows a creature. `card` carries the hover reveal's fields: definition_id,
 ## and where it is in play, attack, health, max_health, statuses and marks.
 func show_card(library: CardLibrary, card: Dictionary) -> void:
+	_library = library
+	_shown_card = card.duplicate(true)
 	var definition_id := str(card.get("definition_id", ""))
 	_art.texture = CardArt.texture_for(definition_id)
 	_guard.visible = library.keywords(definition_id).has("GUARD")
@@ -144,6 +148,12 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 	_marks.visible = marks != ""
 	_art.modulate = COLOR_RESTING if marks != "" else Color.WHITE
 	_layout()
+
+## A fresh rendering copy for projected effects, including live statuses.
+func visual_copy() -> CreatureToken:
+	var copy := CreatureToken.make(_library, _shown_card, _token_size())
+	copy.ring_color = ring_color
+	return copy
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
