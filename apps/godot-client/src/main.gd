@@ -23,6 +23,12 @@ const SLOT_SIZE := Vector2(104, 138)
 const CARD_SIZE := Vector2(104, 138)
 const ARTIFACT_TILE := Vector2(92, 84)
 const WEAPON_TILE := Vector2(104, 84)
+const HERO_PORTRAIT := Vector2(120, 144)
+const TAIKA_GEM := Vector2(22, 22)
+const COLOR_SPENT_TAIKA := Color(0.28, 0.28, 0.34)
+## Width of the Front/Back label left of each battlefield row.
+const ROW_LABEL_WIDTH := 52
+const HeroPortrait := preload("res://src/hero_portrait.gd")
 const MAX_LOG_LINES := 120
 ## Pointer travel before a press becomes a drag rather than a click.
 const DRAG_THRESHOLD := 10.0
@@ -245,8 +251,6 @@ func _build_interface() -> void:
 	root.add_theme_constant_override("separation", 10)
 	margin.add_child(root)
 
-	root.add_child(_build_status_bar())
-
 	# Admin edits for the match being played. Hidden unless the admin UI is on.
 	admin_bar = PanelContainer.new()
 	var admin_style := StyleBoxFlat.new()
@@ -407,6 +411,8 @@ func _build_side_panel() -> Control:
 	panel.add_theme_constant_override("separation", 8)
 	panel.custom_minimum_size.x = 340
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	panel.add_child(_build_status_bar())
 
 	end_turn_button = Button.new()
 	end_turn_button.text = "End Turn"
@@ -970,89 +976,142 @@ func _render_state() -> void:
 	# Rects are only correct once the containers have laid out.
 	call_deferred("_rebuild_drop_zones")
 
-## Hero, Taika, deck and hand counts for one side. The strip is a drop target:
-## heroes are addressed as "<playerId>:hero" and can be attacked or healed.
+## One side's Hero, laid out as Hearthstone lays it out: the portrait in the
+## middle, its Weapon to its left, and its Artifacts to its right, with Taika,
+## deck and hand counts beside them. The portrait is the drop target — heroes
+## are addressed as "<playerId>:hero" and can be attacked or healed — and, for
+## an armed Hero that can still swing, what is dragged to attack.
 func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 	var hero_id := Targeting.hero_entity_id(side_id)
-	var panel := PanelContainer.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_PASS
-	var is_target := entity_targets.has(hero_id)
-	if is_target:
-		_tint(panel, COLOR_TARGET if _hovered_key != hero_id else COLOR_HOVER)
-	else:
-		_tint(panel, COLOR_FRIENDLY if is_mine else COLOR_ENEMY)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(row)
-
 	var hero: Dictionary = side.get("hero", {})
-	var hero_name := ActionFormatter._hero_display_name(str(hero.get("definitionId", "")))
-	var name_label := Label.new()
-	name_label.text = "%s — %s" % [side_id, hero_name]
-	if is_mine:
-		name_label.text += "  (you)"
-	row.add_child(name_label)
 
-	var health := Label.new()
-	health.text = "♥ %s / %s" % [_num(hero.get("currentHealth", "?")), _num(hero.get("maxHealth", "?"))]
-	row.add_child(health)
+	var strip := HBoxContainer.new()
+	strip.add_theme_constant_override("separation", 14)
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The battlefield rows carry a label on their left; an equal gap here
+	# centres the portrait over the rows' middle column rather than the board.
+	var gutter := Control.new()
+	gutter.custom_minimum_size.x = ROW_LABEL_WIDTH + 8 - 14
+	gutter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_child(gutter)
+	# Both flanks take half the spare width, so the portrait stays centred.
+	var left := HBoxContainer.new()
+	left.alignment = BoxContainer.ALIGNMENT_END
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation", 14)
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_child(left)
 
-	var taika: Dictionary = side.get("taika", {})
-	var taika_label := Label.new()
-	taika_label.text = "Taika %s / %s" % [_num(taika.get("current", 0)), _num(taika.get("maximum", 0))]
-	row.add_child(taika_label)
-
-	var counts := Label.new()
+	var info := VBoxContainer.new()
+	info.alignment = BoxContainer.ALIGNMENT_CENTER
+	info.add_theme_constant_override("separation", 2)
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	left.add_child(info)
+	# Player ids are opaque account ids; which side is whose is all that matters.
+	var owner_label := _info_line(info, "You" if is_mine else "Opponent")
+	owner_label.add_theme_color_override("font_color", COLOR_READY if is_mine else Color(0.90, 0.55, 0.55))
+	info.add_child(_taika_bar(side.get("taika", {})))
 	var deck: Variant = side.get("deck", [])
 	var hand: Variant = side.get("hand", [])
-	counts.text = "Deck %d · Hand %d" % [
+	_info_line(info, "Deck %d · Hand %d" % [
 		(deck as Array).size() if typeof(deck) == TYPE_ARRAY else 0,
 		(hand as Array).size() if typeof(hand) == TYPE_ARRAY else 0,
-	]
-	row.add_child(counts)
-
-	var artifacts: Variant = side.get("artifacts", [])
-	if typeof(artifacts) == TYPE_ARRAY and (artifacts as Array).size() > 0:
-		var artifact_label := Label.new()
-		artifact_label.text = "Artifacts %d" % (artifacts as Array).size()
-		row.add_child(artifact_label)
-		# Artifacts are in play, so they show their art like creatures do.
-		for artifact in (artifacts as Array):
-			if typeof(artifact) == TYPE_DICTIONARY:
-				row.add_child(_artifact_tile(artifact))
+	])
+	if bool(hero.get("powerUsedThisTurn", false)):
+		_info_line(info, "Hero Power used").add_theme_color_override("font_color", Color(0.7, 0.7, 0.74))
 
 	# The equipped Weapon sits with the Hero it arms, not on the battlefield.
 	var equipped: Variant = hero.get("equippedWeapon", null)
 	if typeof(equipped) == TYPE_DICTIONARY:
-		row.add_child(_weapon_tile(equipped as Dictionary))
+		var weapon := _weapon_tile(equipped as Dictionary)
+		weapon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		left.add_child(weapon)
 
-	if bool(hero.get("powerUsedThisTurn", false)):
-		var used := Label.new()
-		used.text = "Hero Power used"
-		used.add_theme_color_override("font_color", Color(0.7, 0.7, 0.74))
-		row.add_child(used)
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel.set_meta("portrait", true)
+	var health := CardFrame._int(hero.get("currentHealth", 0))
+	panel.add_child(HeroPortrait.make(
+		str(hero.get("definitionId", "")),
+		ActionFormatter._hero_display_name(str(hero.get("definitionId", ""))),
+		health,
+		CardFrame._int(hero.get("maxHealth", health)),
+		HERO_PORTRAIT
+	))
+	strip.add_child(panel)
 
-	# An armed Hero with an attack left is a drag source, exactly like a
-	# Creature that can still act. Whether it may actually swing is the
-	# server's call: this only lights up when it has offered a HERO_ATTACK.
+	var right := HBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 6)
+	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_child(right)
+	# Artifacts are in play, so they show their art like creatures do.
+	var artifacts: Variant = side.get("artifacts", [])
+	if typeof(artifacts) == TYPE_ARRAY:
+		for artifact in (artifacts as Array):
+			if typeof(artifact) == TYPE_DICTIONARY:
+				var tile := _artifact_tile(artifact)
+				tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+				right.add_child(tile)
+
+	# The ring round the portrait says what it is to the player: a target, a
+	# Hero that can still swing — whether it may is the server's call, so this
+	# only lights up when it has offered a HERO_ATTACK — or the selection.
+	var is_target := entity_targets.has(hero_id)
+	var ring := Color.TRANSPARENT
+	if is_target:
+		ring = COLOR_TARGET if _hovered_key != hero_id else COLOR_HOVER
 	if is_mine and _entity_can_act(hero_id):
 		panel.set_meta("drag_entity", hero_id)
 		if not is_target and hero_id != selected_entity:
-			_tint(panel, COLOR_READY)
+			ring = COLOR_READY
 	if hero_id == selected_entity:
-		_tint(panel, COLOR_SELECTED)
-
-	if is_target:
-		var prompt := Label.new()
-		prompt.text = "◀ target"
-		prompt.add_theme_color_override("font_color", Color(0.95, 0.98, 1.0))
-		row.add_child(prompt)
+		ring = COLOR_SELECTED
+	_tint(panel, ring)
 
 	panel.set_meta("target_kind", "entity")
 	panel.set_meta("target_id", hero_id)
-	return panel
+	return strip
+
+## Taika as Hearthstone shows mana: the count, then a gem for each point of
+## the maximum, lit while it is still to spend and dark once spent. Taika
+## above the maximum for this turn shows as extra lit gems.
+func _taika_bar(taika: Dictionary) -> Control:
+	var current := CardFrame._int(taika.get("current", 0))
+	var maximum := CardFrame._int(taika.get("maximum", 0))
+	var bar := HBoxContainer.new()
+	bar.alignment = BoxContainer.ALIGNMENT_END
+	bar.add_theme_constant_override("separation", 1)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.tooltip_text = "Taika %d / %d" % [current, maximum]
+	var count := Label.new()
+	count.text = "%d/%d " % [current, maximum]
+	count.add_theme_font_size_override("font_size", 15)
+	count.add_theme_color_override("font_color", Color(0.62, 0.80, 1.0))
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_child(count)
+	var texture := CardFrame._texture(CardFrame.COST_PATH)
+	for index in maxi(current, maximum):
+		var gem := TextureRect.new()
+		gem.texture = texture
+		gem.custom_minimum_size = TAIKA_GEM
+		gem.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		gem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		gem.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		gem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if index >= current:
+			gem.modulate = COLOR_SPENT_TAIKA
+		bar.add_child(gem)
+	return bar
+
+func _info_line(column: VBoxContainer, text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label.add_theme_font_size_override("font_size", 13)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(label)
+	return label
 
 ## The equipped Weapon beside its Hero: name, Attack, Durability, and Ranged
 ## where it applies. Melee is the ordinary case and goes unlabelled.
@@ -1173,7 +1232,7 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 		board_container.add_child(centering)
 		var row_label := Label.new()
 		row_label.text = str(row_name).capitalize()
-		row_label.custom_minimum_size.x = 52
+		row_label.custom_minimum_size.x = ROW_LABEL_WIDTH
 		row_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row_label.add_theme_font_size_override("font_size", 11)
@@ -1539,8 +1598,8 @@ func _on_hover_move(at: Vector2) -> void:
 		zone["rect"] as Rect2
 	)
 
-## The revealable card under a point; the smallest wins, so an artifact tile
-## inside a hero strip is not masked by the strip around it.
+## The revealable card under a point; the smallest wins, so a small tile is
+## never masked by a larger zone around it.
 func _reveal_zone_at(at: Vector2) -> Dictionary:
 	var best: Dictionary = {}
 	var best_area := INF
@@ -1932,8 +1991,7 @@ func _commit_target(key: String) -> bool:
 
 ## The drop zone under a point, restricted to the current selection's targets.
 func _target_zone_at(at: Vector2) -> Dictionary:
-	# Zones overlap — a hero strip spans the width of the board, and creature
-	# panels sit inside it — so every candidate is considered and the smallest
+	# Zones can overlap, so every candidate is considered and the smallest
 	# valid one wins. Returning the first hit would let a wide zone mask a
 	# precise one, or an invalid zone hide a valid one beneath it.
 	var best: Dictionary = {}
@@ -2136,6 +2194,13 @@ func _tint(panel: Control, color: Color) -> void:
 		for child in panel.get_children():
 			if child is CreatureToken:
 				(child as CreatureToken).ring_color = color
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		return
+	if panel.has_meta("portrait"):
+		# So does a Hero's arch, round its gilt frame.
+		for child in panel.get_children():
+			if child is HeroPortrait:
+				child.ring_color = color
 		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		return
 	if panel.has_meta("framed"):
