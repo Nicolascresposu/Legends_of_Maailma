@@ -126,11 +126,6 @@ func _init() -> void:
 	if hero_key == "":
 		print("  [--] no hero-targeting action became available this run; skipped")
 	if hero_key != "":
-		# The board scrolls, and only what is in view can be aimed at: bring
-		# the hero into view, as a player would.
-		var hero_strip := _control_for(main.board_container, hero_key)
-		if hero_strip != null:
-			main.board_area.ensure_control_visible(hero_strip)
 		await process_frame
 		await process_frame
 		main._rebuild_drop_zones()

@@ -107,7 +107,8 @@ var match_input: LineEdit
 var player_input: LineEdit
 var server_input: LineEdit
 var board_container: VBoxContainer
-## The battlefield's scroll area: letting a card go anywhere over it plays it.
+## The battlefield, scaled to fit: letting a card go anywhere over it plays it.
+const BoardFit := preload("res://src/board_fit.gd")
 var board_area: Control
 var hand_view: HandView
 var action_container: VBoxContainer
@@ -244,7 +245,6 @@ func _build_interface() -> void:
 	root.add_theme_constant_override("separation", 10)
 	margin.add_child(root)
 
-	root.add_child(_build_connection_bar())
 	root.add_child(_build_status_bar())
 
 	# Admin edits for the match being played. Hidden unless the admin UI is on.
@@ -273,15 +273,15 @@ func _build_interface() -> void:
 	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	game_row.add_child(left)
 
-	var board_scroll := ScrollContainer.new()
-	board_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	board_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	left.add_child(board_scroll)
+	# The whole battlefield, both Heroes included, is scaled to fit rather
+	# than scrolled, so nothing on it is ever out of view.
+	var board_fit := BoardFit.new()
+	board_fit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left.add_child(board_fit)
 	board_container = VBoxContainer.new()
 	board_container.add_theme_constant_override("separation", 6)
-	board_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	board_scroll.add_child(board_container)
-	board_area = board_scroll
+	board_fit.set_content(board_container)
+	board_area = board_fit
 
 	# Not in a scroll container: a hovered or held card rises out of the hand
 	# over the board, and a scroll container would clip it.
@@ -318,9 +318,14 @@ func _build_interface() -> void:
 	arrow.z_index = HandView.Z_ZOOM + 5
 	game_root.add_child(arrow)
 
-func _build_connection_bar() -> Control:
+## Server, player and match controls, stacked to fit the side panel's width.
+func _build_connection_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.add_theme_constant_override("separation", 6)
+
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", 6)
+	panel.add_child(bar)
 
 	connection_dot = Panel.new()
 	connection_dot.custom_minimum_size = Vector2(14, 14)
@@ -331,7 +336,7 @@ func _build_connection_bar() -> Control:
 	server_input = LineEdit.new()
 	server_input.text = client.http_base
 	server_input.tooltip_text = "Server address"
-	server_input.custom_minimum_size.x = 170
+	server_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(server_input)
 
 	player_input = LineEdit.new()
@@ -341,8 +346,11 @@ func _build_connection_bar() -> Control:
 	bar.add_child(player_input)
 
 	match_input = LineEdit.new()
-	match_input.placeholder_text = "Match ID — paste to join an existing match"
+	match_input.placeholder_text = "Match ID — paste to join"
 	match_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar = HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 6)
+	panel.add_child(bar)
 	bar.add_child(match_input)
 
 	var copy_button := Button.new()
@@ -356,22 +364,30 @@ func _build_connection_bar() -> Control:
 	join_button.pressed.connect(_join_match)
 	bar.add_child(join_button)
 
+	bar = HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 6)
+	panel.add_child(bar)
 	create_pvp_button = Button.new()
+	create_pvp_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	create_pvp_button.text = "Create PvP"
 	create_pvp_button.pressed.connect(_create_match.bind("STANDARD_PVP"))
 	bar.add_child(create_pvp_button)
 
 	create_pve_button = Button.new()
+	create_pve_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	create_pve_button.text = "Create Bandit Ambush"
 	create_pve_button.pressed.connect(_create_match.bind("BANDIT_AMBUSH"))
 	bar.add_child(create_pve_button)
 
+	# Its own row, left free on the right for the corner admin toggle.
+	bar = HBoxContainer.new()
+	panel.add_child(bar)
 	var collection_button := Button.new()
 	collection_button.text = "Collection"
 	collection_button.tooltip_text = "Sign in, browse your cards and build decks."
 	collection_button.pressed.connect(_show_collection_view)
 	bar.add_child(collection_button)
-	return bar
+	return panel
 
 func _build_status_bar() -> Control:
 	var box := VBoxContainer.new()
@@ -408,7 +424,7 @@ func _build_side_panel() -> Control:
 
 	var action_scroll := ScrollContainer.new()
 	action_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	action_scroll.custom_minimum_size.y = 200
+	action_scroll.custom_minimum_size.y = 160
 	panel.add_child(action_scroll)
 	action_container = VBoxContainer.new()
 	action_container.add_theme_constant_override("separation", 4)
@@ -419,9 +435,12 @@ func _build_side_panel() -> Control:
 	log_label = RichTextLabel.new()
 	log_label.bbcode_enabled = true
 	log_label.scroll_following = true
-	log_label.custom_minimum_size.y = 180
+	log_label.custom_minimum_size.y = 120
 	log_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(log_label)
+
+	panel.add_child(_section_title("Match"))
+	panel.add_child(_build_connection_panel())
 	return panel
 
 ## JSON numbers arrive as floats; render whole numbers without a decimal point.
@@ -758,33 +777,9 @@ func _present_game_events(events: Array) -> void:
 		var source_rect := source.get_global_rect()
 		var target_rect := target.get_global_rect()
 		var board_rect := board_area.get_global_rect()
-		# Frame both fighters when they fit; otherwise focus on the defender.
-		# The flight is clipped to the board so a distant back-row attacker can
-		# enter from offscreen without being drawn over the hand or side panel.
-		var span := source_rect.merge(target_rect)
-		if board_area is ScrollContainer:
-			var scroll := board_area as ScrollContainer
-			var focus_y := span if span.size.y <= board_rect.size.y else target_rect
-			var focus_x := span if span.size.x <= board_rect.size.x else target_rect
-			var shift := Vector2(maxf(0.0, focus_x.end.x - board_rect.end.x),
-				maxf(0.0, focus_y.end.y - board_rect.end.y))
-			if focus_y.position.y < board_rect.position.y:
-				shift.y = focus_y.position.y - board_rect.position.y
-			if focus_x.position.x < board_rect.position.x:
-				shift.x = focus_x.position.x - board_rect.position.x
-			scroll.scroll_vertical += ceili(shift.y)
-			scroll.scroll_horizontal += ceili(shift.x)
-			if not shift.is_zero_approx():
-				await get_tree().process_frame
-				if generation != _presentation_generation:
-					return
-				source = _combat_token(source_id)
-				target = _combat_token(target_id)
-				if source == null or target == null:
-					_combat_preparing = false
-					continue
-			source_rect = source.get_global_rect()
-			target_rect = target.get_global_rect()
+		# The board fits the screen, so both fighters are always in view. The
+		# flight is clipped to it so an attacker's run-up is never drawn over
+		# the hand or side panel.
 		_combat_preparing = false
 		combat_effect.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 		combat_effect.position = game_root.get_global_transform().affine_inverse() * board_rect.position
@@ -970,6 +965,8 @@ func _render_state() -> void:
 	board_container.add_child(_hero_strip(player_id, mine, true))
 
 	_render_hand(mine)
+	# Scale the new board to fit now, before any rect is read from it.
+	(board_area as BoardFit).fit()
 	# Rects are only correct once the containers have laid out.
 	call_deferred("_rebuild_drop_zones")
 
@@ -1414,8 +1411,8 @@ func _rebuild_drop_zones() -> void:
 	_refresh_combat_bystanders()
 	_drop_zones.clear()
 	_collect_zones(board_container)
-	# The board scrolls, and what is scrolled out of view may lie behind the
-	# hand: only what can be seen can be aimed at or revealed.
+	# Only what can be seen can be aimed at or revealed: nothing outside the
+	# board, such as what a hand card risen over it hides, counts.
 	var visible_board := board_area.get_global_rect()
 	for key in _drop_zones.keys():
 		var clipped := (_drop_zones[key]["rect"] as Rect2).intersection(visible_board)

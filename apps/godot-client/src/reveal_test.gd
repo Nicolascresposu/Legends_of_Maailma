@@ -54,11 +54,12 @@ func _init() -> void:
 	var at := rect.get_center()
 
 	# On the board a creature is only its art oval; the whole card is what the
-	# reveal is for.
+	# reveal is for. Heroes' weapons and artifacts reveal too, so look only at
+	# creature slots.
 	var creature_zone: Dictionary = {}
 	for candidate_key in main._drop_zones:
 		var candidate: Dictionary = main._drop_zones[candidate_key]
-		if str(candidate.get("kind", "")) == "reveal" and CardFrame.supports(
+		if str(candidate.get("kind", "")) == "reveal" 				and (candidate["control"] as Control).has_meta("token") and CardFrame.supports(
 				main.library, str((candidate["card"] as Dictionary).get("definition_id", ""))):
 			creature_zone = candidate
 			break
