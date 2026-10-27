@@ -5,7 +5,7 @@ class_name ActionFormatter
 ##
 ## The server decides which actions are legal; this only decides how they read.
 
-const GROUP_ORDER := ["Play a card", "Attack", "Reposition", "Hero Power", "Turn"]
+const GROUP_ORDER := ["Play a card", "Attack", "Use a Location", "Reposition", "Hero Power", "Turn"]
 
 ## JSON numbers arrive as floats; render whole numbers without a decimal point.
 static func num(value: Variant) -> String:
@@ -45,6 +45,12 @@ static func entity_name(entity_id: String, state: Dictionary, library: CardLibra
 				var definition_id := str(creature.get("definitionId", entity_id))
 				var display := library.card_name(definition_id) if library != null else definition_id
 				return "%s at %s" % [display, position_text(creature.get("position", {}))]
+			var locations: Variant = (side as Dictionary).get("locations", {})
+			if typeof(locations) == TYPE_DICTIONARY and (locations as Dictionary).has(entity_id):
+				var location: Dictionary = (locations as Dictionary)[entity_id]
+				var location_definition := str(location.get("definitionId", entity_id))
+				var location_name := library.card_name(location_definition) if library != null else location_definition
+				return "%s at %s" % [location_name, position_text(location.get("position", {}))]
 	return entity_id
 
 static func _hero_display_name(definition_id: String) -> String:
@@ -73,6 +79,7 @@ static func group_of(action: Dictionary) -> String:
 	match str(action.get("type", "")):
 		"PLAY_CARD": return "Play a card"
 		"ATTACK", "HERO_ATTACK": return "Attack"
+		"ACTIVATE_LOCATION": return "Use a Location"
 		"MOVE_CREATURE", "SWAP_CREATURES": return "Reposition"
 		"USE_HERO_POWER": return "Hero Power"
 		"END_TURN": return "Turn"
@@ -112,6 +119,11 @@ static func label_for(action: Dictionary, state: Dictionary, player_id: String, 
 			if action.has("targetId"):
 				return "Use Hero Power → " + entity_name(str(action.get("targetId", "")), state, library)
 			return "Use Hero Power"
+		"ACTIVATE_LOCATION":
+			var location := entity_name(str(action.get("locationId", "")), state, library)
+			if action.has("targetId"):
+				return "%s → %s" % [location, entity_name(str(action.get("targetId", "")), state, library)]
+			return location
 		"END_TURN":
 			return "End Turn"
 	return JSON.stringify(action)
@@ -189,6 +201,35 @@ static func event_line(event: Dictionary, state: Dictionary, library: CardLibrar
 			return "%s breaks." % library.card_name(str(event.get("cardDefinitionId", "")))
 		"WEAPON_DESTROYED":
 			return "%s is destroyed." % library.card_name(str(event.get("cardDefinitionId", "")))
+		"LOCATION_PLACED":
+			return "%s is built at %s." % [
+				library.card_name(str(event.get("cardDefinitionId", ""))),
+				position_text(event.get("position", {})),
+			]
+		"LOCATION_ACTIVATED":
+			var used := library.card_name(str(event.get("cardDefinitionId", "")))
+			if event.has("targetId"):
+				return "%s is used on %s." % [used, target]
+			return "%s is used." % used
+		"LOCATION_DURABILITY_CHANGED":
+			# `amount` is a delta, and losing Durability is the ordinary case.
+			if amount < 0:
+				return "%s loses %d Durability." % [
+					library.card_name(str(event.get("cardDefinitionId", ""))), -amount
+				]
+			return "%s gains %d Durability." % [
+				library.card_name(str(event.get("cardDefinitionId", ""))), amount
+			]
+		"LOCATION_DURATION_CHANGED":
+			# `amount` is a delta: the hourglass running down a turn.
+			return "Time runs short for %s." % library.card_name(str(event.get("cardDefinitionId", "")))
+		"LOCATION_REMOVED":
+			# The Location is already gone from state, so name it from the event.
+			var gone := library.card_name(str(event.get("cardDefinitionId", "")))
+			match str(event.get("reason", "")):
+				"SPENT": return "%s crumbles." % gone
+				"EXPIRED": return "%s's time runs out." % gone
+			return "%s is destroyed." % gone
 		"HERO_ATTACK_STARTED":
 			return "%s attacks %s with %s." % [
 				source,

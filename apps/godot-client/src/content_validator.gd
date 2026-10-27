@@ -138,8 +138,13 @@ static func validate(data: Dictionary, context: Array = []) -> Array[String]:
 				var label := keyword.replace("_", " ").to_lower()
 				if not bold.contains(label):
 					errors.append("%s.description: print %s in **bold**" % [path, label.capitalize()])
+			var effects: Array = []
 			for entry: Dictionary in card["effects"]:
-				var effect: Dictionary = entry if card["type"] == "ACTION" else entry["effect"]
+				effects.append(entry if card["type"] == "ACTION" else entry["effect"])
+			if card["type"] == "LOCATION":
+				_location_errors(card, path, errors)
+				effects.append_array(card.get("activation", {}).get("effects", []))
+			for effect: Dictionary in effects:
 				if effect["type"] == "SUMMON" and cards_by_id.get(effect["definitionId"], {}).get("type", "") != "CREATURE":
 					errors.append("%s.effects: SUMMON must reference an existing Creature (%s)" % [path, effect["definitionId"]])
 		for index in draft["packs"].size():
@@ -150,6 +155,27 @@ static func validate(data: Dictionary, context: Array = []) -> Array[String]:
 			if total != int(pack["cardCount"]):
 				errors.append("%spacks.json[%d].cardCount: slots total %d, expected %d" % [prefix, index, total, pack["cardCount"]])
 	return errors
+
+## The checks `validateLocationDefinition` makes on the server: the schema
+## takes each field alone, these take them together.
+static func _location_errors(card: Dictionary, path: String, errors: Array[String]) -> void:
+	var durable := card.has("durability")
+	var activated := card.has("activation")
+	if not durable and not card.has("duration"):
+		errors.append("%s: a Location needs a durability, a duration or both" % path)
+	if durable and not activated:
+		errors.append("%s.activation: a Location with durability needs an activation" % path)
+	if activated and not durable:
+		errors.append("%s.durability: a Location with an activation needs durability to spend" % path)
+	if activated and card["activation"].get("targetMode", "NONE") == "NONE":
+		for effect: Dictionary in card["activation"].get("effects", []):
+			if effect.get("target", "") == "PLAY_TARGET":
+				errors.append("%s.activation.targetMode: an activation aimed at PLAY_TARGET needs a targetMode" % path)
+				break
+	for entry: Dictionary in card["effects"]:
+		if entry.get("trigger", "") not in ["TURN_STARTED", "TURN_ENDED"]:
+			errors.append("%s.effects: a Location's effects trigger on TURN_STARTED or TURN_ENDED" % path)
+			break
 
 static func _markup_errors(text: String, path: String, errors: Array[String]) -> void:
 	var bold := false

@@ -28,7 +28,16 @@ const TAIKA_GEM := Vector2(22, 22)
 const COLOR_SPENT_TAIKA := Color(0.28, 0.28, 0.34)
 ## Width of the Front/Back label left of each battlefield row.
 const ROW_LABEL_WIDTH := 52
+## Width of the Hero beside each side's rows: room for the portrait and a full
+## ten-gem Taika bar beside it.
+const HERO_BLOCK_WIDTH := 410
 const HeroPortrait := preload("res://src/hero_portrait.gd")
+const OpponentHand := preload("res://src/opponent_hand.gd")
+## The player's deck to the right of their rows: one card's size, and how far
+## each of its few stacked cards sits from the next.
+const DECK_PILE := Vector2(64, 96)
+const DECK_DEPTH := 3.0
+const DECK_LAYERS := 3
 const MAX_LOG_LINES := 120
 ## Pointer travel before a press becomes a drag rather than a click.
 const DRAG_THRESHOLD := 10.0
@@ -117,6 +126,7 @@ var board_container: VBoxContainer
 const BoardFit := preload("res://src/board_fit.gd")
 var board_area: Control
 var hand_view: HandView
+var opponent_hand: OpponentHand
 var action_container: VBoxContainer
 var action_hint: Label
 var log_label: RichTextLabel
@@ -277,6 +287,10 @@ func _build_interface() -> void:
 	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	game_row.add_child(left)
 
+	# Across the top from the player's own hand, as the two sit at a table.
+	opponent_hand = OpponentHand.new()
+	left.add_child(opponent_hand)
+
 	# The whole battlefield, both Heroes included, is scaled to fit rather
 	# than scrolled, so nothing on it is ever out of view.
 	var board_fit := BoardFit.new()
@@ -423,7 +437,7 @@ func _build_side_panel() -> Control:
 
 	panel.add_child(_section_title("Available actions"))
 	action_hint = Label.new()
-	action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target."
+	action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target. Click a lit Location to use it."
 	action_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	action_hint.add_theme_font_size_override("font_size", 11)
 	panel.add_child(action_hint)
@@ -930,6 +944,7 @@ func _render_state() -> void:
 	combat_effect.set_bystanders([])
 	_clear(board_container)
 	_drop_zones.clear()
+	opponent_hand.set_counts(0, 0)
 	if state.is_empty():
 		hand_view.clear_cards()
 		return
@@ -963,12 +978,11 @@ func _render_state() -> void:
 	)
 
 	if not opponent.is_empty():
-		board_container.add_child(_hero_strip(opponent_id, opponent, false))
-		_render_side(opponent, ["BACK", "FRONT"], false)
+		_render_half(opponent_id, opponent, ["BACK", "FRONT"], false)
+		opponent_hand.set_counts(_count(opponent.get("hand", [])), _count(opponent.get("deck", [])))
 	var separator := HSeparator.new()
 	board_container.add_child(separator)
-	_render_side(mine, ["FRONT", "BACK"], true)
-	board_container.add_child(_hero_strip(player_id, mine, true))
+	_render_half(player_id, mine, ["FRONT", "BACK"], true)
 
 	_render_hand(mine)
 	# Scale the new board to fit now, before any rect is read from it.
@@ -976,56 +990,136 @@ func _render_state() -> void:
 	# Rects are only correct once the containers have laid out.
 	call_deferred("_rebuild_drop_zones")
 
-## One side's Hero, laid out as Hearthstone lays it out: the portrait in the
-## middle, its Weapon to its left, and its Artifacts to its right, with Taika,
-## deck and hand counts beside them. The portrait is the drop target — heroes
-## are addressed as "<playerId>:hero" and can be attacked or healed — and, for
-## an armed Hero that can still swing, what is dragged to attack.
-func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
+## One player's half of the board: their Hero to the left of their two rows,
+## rather than above or below them, so the board is only as tall as its rows
+## and scales up to fill the height it saves.
+func _render_half(side_id: String, side: Dictionary, rows: Array, is_mine: bool) -> void:
+	var line := HBoxContainer.new()
+	line.alignment = BoxContainer.ALIGNMENT_CENTER
+	line.add_theme_constant_override("separation", 16)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	board_container.add_child(line)
+	line.add_child(_hero_block(side_id, side, is_mine))
+	var field := VBoxContainer.new()
+	field.add_theme_constant_override("separation", 6)
+	field.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(field)
+	_render_side(field, side, rows, is_mine)
+	# Your deck sits to the right of your rows, as Hearthstone's does. The
+	# opponent's is counted on their hand, so their side keeps the room empty
+	# and both sides' rows still line up.
+	if is_mine:
+		line.add_child(_deck_pile(_count(side.get("deck", []))))
+	else:
+		var room := Control.new()
+		room.custom_minimum_size.x = DECK_PILE.x + DECK_DEPTH * DECK_LAYERS
+		room.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_child(room)
+
+## The player's deck: a short stack of card backs, thinner as it runs down,
+## with how many cards are left on it.
+func _deck_pile(count: int) -> Control:
+	var pile := Control.new()
+	pile.custom_minimum_size = DECK_PILE + Vector2.ONE * DECK_DEPTH * DECK_LAYERS
+	pile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pile.mouse_filter = Control.MOUSE_FILTER_PASS
+	pile.tooltip_text = "%d card%s left in your deck" % [count, "" if count == 1 else "s"]
+	var layers := clampi(ceili(count / 10.0), 0, DECK_LAYERS)
+	if layers == 0:
+		# An empty deck leaves its place on the table.
+		var place := Panel.new()
+		place.position = Vector2(0, DECK_DEPTH * DECK_LAYERS)
+		place.size = DECK_PILE
+		place.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_tint(place, COLOR_EMPTY)
+		pile.add_child(place)
+	var texture := CardFrame._texture(OpponentHand.BACK_PATH)
+	for layer in layers:
+		# Each card further down sits a step lower and to the left.
+		var depth := DECK_DEPTH * (DECK_LAYERS - layers + layer)
+		var back := TextureRect.new()
+		back.texture = texture
+		# Free of the texture's own size first, or it would be its minimum.
+		back.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		back.stretch_mode = TextureRect.STRETCH_SCALE
+		back.position = Vector2(depth, DECK_DEPTH * DECK_LAYERS - depth)
+		back.size = DECK_PILE
+		back.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if layer < layers - 1:
+			back.modulate = Color(0.55, 0.55, 0.6)
+		pile.add_child(back)
+
+	var badge := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.09, 0.10, 0.13, 0.92)
+	style.border_color = Color(0.85, 0.74, 0.44)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(4)
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	badge.add_theme_stylebox_override("panel", style)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var label := Label.new()
+	label.text = str(count)
+	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_color_override("font_color", Color(0.92, 0.93, 0.96) if count > 0 else Color(0.90, 0.55, 0.55))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(label)
+	# Centred on the top card, wherever the stack's height leaves it.
+	var on_top := CenterContainer.new()
+	on_top.position = Vector2(DECK_DEPTH * DECK_LAYERS, 0)
+	on_top.size = DECK_PILE
+	on_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	on_top.add_child(badge)
+	pile.add_child(on_top)
+	return pile
+
+## One side's Hero: the portrait with its Taika to its left,
+## and its Weapon and Artifacts in a line beside it — the Weapon level with the
+## portrait it arms, the Artifacts trailing off from it. The portrait keeps to
+## the outer edge of the board, as when the Heroes faced each other across it.
+## Every block is HERO_BLOCK_WIDTH wide, so both sides' rows line up column
+## for column. The portrait is the drop target — heroes are addressed as
+## "<playerId>:hero" and can be attacked or healed — and, for an armed Hero that
+## can still swing, what is dragged to attack.
+func _hero_block(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 	var hero_id := Targeting.hero_entity_id(side_id)
 	var hero: Dictionary = side.get("hero", {})
 
-	var strip := HBoxContainer.new()
-	strip.add_theme_constant_override("separation", 14)
-	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# The battlefield rows carry a label on their left; an equal gap here
-	# centres the portrait over the rows' middle column rather than the board.
-	var gutter := Control.new()
-	gutter.custom_minimum_size.x = ROW_LABEL_WIDTH + 8 - 14
-	gutter.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	strip.add_child(gutter)
-	# Both flanks take half the spare width, so the portrait stays centred.
-	var left := HBoxContainer.new()
-	left.alignment = BoxContainer.ALIGNMENT_END
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 14)
-	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	strip.add_child(left)
+	var block := VBoxContainer.new()
+	block.custom_minimum_size.x = HERO_BLOCK_WIDTH
+	block.alignment = BoxContainer.ALIGNMENT_CENTER
+	block.add_theme_constant_override("separation", 8)
+	block.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var hero_row := HBoxContainer.new()
+	hero_row.alignment = BoxContainer.ALIGNMENT_END
+	hero_row.add_theme_constant_override("separation", 14)
+	hero_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var gear := HFlowContainer.new()
+	gear.alignment = FlowContainer.ALIGNMENT_END
+	gear.add_theme_constant_override("h_separation", 6)
+	gear.add_theme_constant_override("v_separation", 6)
+	gear.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if is_mine:
+		block.add_child(gear)
+		block.add_child(hero_row)
+	else:
+		block.add_child(hero_row)
+		block.add_child(gear)
 
 	var info := VBoxContainer.new()
 	info.alignment = BoxContainer.ALIGNMENT_CENTER
 	info.add_theme_constant_override("separation", 2)
 	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	left.add_child(info)
+	hero_row.add_child(info)
 	# Player ids are opaque account ids; which side is whose is all that matters.
 	var owner_label := _info_line(info, "You" if is_mine else "Opponent")
 	owner_label.add_theme_color_override("font_color", COLOR_READY if is_mine else Color(0.90, 0.55, 0.55))
 	info.add_child(_taika_bar(side.get("taika", {})))
-	var deck: Variant = side.get("deck", [])
-	var hand: Variant = side.get("hand", [])
-	_info_line(info, "Deck %d · Hand %d" % [
-		(deck as Array).size() if typeof(deck) == TYPE_ARRAY else 0,
-		(hand as Array).size() if typeof(hand) == TYPE_ARRAY else 0,
-	])
 	if bool(hero.get("powerUsedThisTurn", false)):
 		_info_line(info, "Hero Power used").add_theme_color_override("font_color", Color(0.7, 0.7, 0.74))
-
-	# The equipped Weapon sits with the Hero it arms, not on the battlefield.
-	var equipped: Variant = hero.get("equippedWeapon", null)
-	if typeof(equipped) == TYPE_DICTIONARY:
-		var weapon := _weapon_tile(equipped as Dictionary)
-		weapon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		left.add_child(weapon)
 
 	var panel := PanelContainer.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -1038,21 +1132,23 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 		CardFrame._int(hero.get("maxHealth", health)),
 		HERO_PORTRAIT
 	))
-	strip.add_child(panel)
+	hero_row.add_child(panel)
 
-	var right := HBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 6)
-	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	strip.add_child(right)
 	# Artifacts are in play, so they show their art like creatures do.
 	var artifacts: Variant = side.get("artifacts", [])
 	if typeof(artifacts) == TYPE_ARRAY:
 		for artifact in (artifacts as Array):
 			if typeof(artifact) == TYPE_DICTIONARY:
-				var tile := _artifact_tile(artifact)
-				tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-				right.add_child(tile)
+				gear.add_child(_artifact_tile(artifact))
+	# The equipped Weapon sits with the Hero it arms, not on the battlefield:
+	# last in the line, so centred over or under the portrait.
+	var equipped: Variant = hero.get("equippedWeapon", null)
+	if typeof(equipped) == TYPE_DICTIONARY:
+		var under_portrait := CenterContainer.new()
+		under_portrait.custom_minimum_size.x = HERO_PORTRAIT.x
+		under_portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		under_portrait.add_child(_weapon_tile(equipped as Dictionary))
+		gear.add_child(under_portrait)
 
 	# The ring round the portrait says what it is to the player: a target, a
 	# Hero that can still swing — whether it may is the server's call, so this
@@ -1071,7 +1167,7 @@ func _hero_strip(side_id: String, side: Dictionary, is_mine: bool) -> Control:
 
 	panel.set_meta("target_kind", "entity")
 	panel.set_meta("target_id", hero_id)
-	return strip
+	return block
 
 ## Taika as Hearthstone shows mana: the count, then a gem for each point of
 ## the maximum, lit while it is still to spend and dark once spent. Taika
@@ -1103,6 +1199,9 @@ func _taika_bar(taika: Dictionary) -> Control:
 			gem.modulate = COLOR_SPENT_TAIKA
 		bar.add_child(gem)
 	return bar
+
+func _count(cards: Variant) -> int:
+	return (cards as Array).size() if typeof(cards) == TYPE_ARRAY else 0
 
 func _info_line(column: VBoxContainer, text: String) -> Label:
 	var label := Label.new()
@@ -1210,7 +1309,7 @@ func _artifact_tile(artifact: Dictionary) -> Control:
 	column.add_child(durability)
 	return panel
 
-func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
+func _render_side(parent: Control, side: Dictionary, rows: Array, is_mine: bool) -> void:
 	var battlefield: Dictionary = side.get("battlefield", {})
 	var config: Dictionary = battlefield.get("config", {})
 	var width := int(config.get("width", 0))
@@ -1219,6 +1318,7 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 	var owner_id := str(side.get("playerId", ""))
 	var slots: Dictionary = battlefield.get("slots", {})
 	var creatures: Dictionary = side.get("creatures", {})
+	var locations: Dictionary = side.get("locations", {})
 	for row_name in rows:
 		var grid := GridContainer.new()
 		grid.columns = width
@@ -1229,7 +1329,7 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 		centering.alignment = BoxContainer.ALIGNMENT_CENTER
 		centering.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		centering.add_theme_constant_override("separation", 8)
-		board_container.add_child(centering)
+		parent.add_child(centering)
 		var row_label := Label.new()
 		row_label.text = str(row_name).capitalize()
 		row_label.custom_minimum_size.x = ROW_LABEL_WIDTH
@@ -1245,7 +1345,7 @@ func _render_side(side: Dictionary, rows: Array, is_mine: bool) -> void:
 			if typeof(row_slots) == TYPE_ARRAY and column < (row_slots as Array).size():
 				occupant = (row_slots as Array)[column]
 			grid.add_child(
-				_slot_panel(owner_id, str(row_name), column, occupant, creatures, is_mine)
+				_slot_panel(owner_id, str(row_name), column, occupant, creatures, locations, is_mine)
 			)
 
 func _slot_panel(
@@ -1254,6 +1354,7 @@ func _slot_panel(
 	column: int,
 	occupant: Variant,
 	creatures: Dictionary,
+	locations: Dictionary,
 	is_mine: bool
 ) -> Control:
 	var panel := PanelContainer.new()
@@ -1279,6 +1380,9 @@ func _slot_panel(
 		else:
 			_tint(panel, COLOR_EMPTY)
 		return panel
+
+	if locations.has(str(occupant)):
+		return _location_slot(panel, owner_id, row_name, column, locations[str(occupant)], is_mine)
 
 	var creature_id := str(occupant)
 	var creature: Dictionary = creatures.get(creature_id, {})
@@ -1344,6 +1448,59 @@ func _slot_panel(
 	# Your own creatures can start a drag; enemies can only be dropped onto.
 	if is_mine:
 		panel.set_meta("drag_entity", creature_id)
+	return panel
+
+## A Location in its slot, drawn as its arch: dark while closed, lit while the
+## server says it can be used. Using one is like attacking with a creature —
+## a click uses one that needs no target, and one that does aims an arrow.
+func _location_slot(
+	panel: PanelContainer,
+	owner_id: String,
+	row_name: String,
+	column: int,
+	location: Dictionary,
+	is_mine: bool
+) -> Control:
+	var location_id := str(location.get("instanceId", ""))
+	var definition_id := str(location.get("definitionId", location_id))
+	var closed := bool(location.get("closed", false))
+	var shown := {
+		"definition_id": definition_id,
+		"closed": closed,
+		# The engine reopens it at its owner's turn start, so an enemy Location
+		# stays closed until its own turn comes round.
+		"marks": "closed" if closed else "",
+	}
+	# Only the measures it has: no hourglass means no duration, and so on.
+	if location.has("turnsRemaining"):
+		shown["duration"] = location["turnsRemaining"]
+	if location.has("currentDurability"):
+		shown["durability"] = location["currentDurability"]
+	panel.set_meta("token", true)
+	var token := LocationToken.make(library, shown, SLOT_SIZE)
+	panel.add_child(token)
+	# A Location just placed is still falling in as its card's arch.
+	var slot_key := Targeting.slot_key(owner_id, row_name, column)
+	panel.set_meta("slot_key", slot_key)
+	if play_effect.is_flying(slot_key):
+		token.modulate.a = 0.0
+	elif play_effect.is_waiting(slot_key):
+		play_effect.release(slot_key)
+	panel.set_meta("reveal_key", location_id)
+	panel.set_meta("reveal_card", shown)
+
+	if location_id == selected_entity:
+		_tint(panel, COLOR_SELECTED)
+	elif is_mine and _entity_can_act(location_id):
+		_tint(panel, COLOR_READY)
+	else:
+		_tint(panel, COLOR_FRIENDLY if is_mine else COLOR_ENEMY)
+	# Nothing may target a Location, but it is still something to aim at, so
+	# hovering one with an arrow reads as a miss rather than empty board.
+	panel.set_meta("target_kind", "entity")
+	panel.set_meta("target_id", location_id)
+	if is_mine:
+		panel.set_meta("drag_entity", location_id)
 	return panel
 
 func _render_hand(side: Dictionary) -> void:
@@ -1820,17 +1977,20 @@ func _play_card_effect(card_id: String, landing_slot: String) -> void:
 	# A fresh copy of the card for the effect to break up: the hand keeps its
 	# own, to bring back if the server refuses the play.
 	var copy := _hand_card(card, available)
+	# A Location lands as its arch, a creature as its oval.
+	var is_location := library.card_type(str(card.get("definitionId", ""))) == "LOCATION"
+	var piece := LocationToken.ARCH if is_location else CreatureToken.OVAL
 	var landing := Rect2()
 	if landing_slot != "" and _drop_zones.has(landing_slot):
 		var slot: Variant = _drop_zones[landing_slot].get("control", null)
 		if slot is Control and is_instance_valid(slot):
-			# Where the token's oval will be, once the creature is in the slot.
+			# Where the token's art will be, once the card is in the slot.
 			var area := (slot as Control).get_global_rect()
-			landing = Rect2(
-				area.position + CreatureToken.OVAL.position * area.size,
-				CreatureToken.OVAL.size * area.size
-			)
-	play_effect.play(copy, held, landing, landing_slot if landing.has_area() else "")
+			landing = Rect2(area.position + piece.position * area.size, piece.size * area.size)
+	play_effect.play(
+		copy, held, landing, landing_slot if landing.has_area() else "",
+		LocationToken.OUTLINE if is_location else []
+	)
 
 ## The card with `card_id` in the player's hand, as the state has it, or {}.
 func _hand_entry(card_id: String) -> Dictionary:
@@ -1848,8 +2008,10 @@ func _hand_entry(card_id: String) -> Dictionary:
 func _on_oval_landed(slot_key: String) -> void:
 	var token := _token_in_slot(board_container, slot_key)
 	if token != null:
-		_reveal_guard(token, str(token.get_parent().get_meta("reveal_key", "")))
-		if not combat_effect.owns(str(token.get_parent().get_meta("reveal_key", ""))):
+		var entity_id := str(token.get_parent().get_meta("reveal_key", ""))
+		if token is CreatureToken:
+			_reveal_guard(token as CreatureToken, entity_id)
+		if not combat_effect.owns(entity_id):
 			token.modulate.a = 1.0
 		play_effect.release(slot_key)
 
@@ -1866,11 +2028,12 @@ func _reveal_guard(token: CreatureToken, creature_id: String) -> void:
 	if age >= CreatureToken.GUARD_ENTRANCE:
 		_guard_arrivals.erase(creature_id)
 
-func _token_in_slot(node: Node, slot_key: String) -> CreatureToken:
+## The creature or Location token showing in `slot_key`, or null.
+func _token_in_slot(node: Node, slot_key: String) -> Control:
 	for child in node.get_children():
 		if child is Control and str((child as Control).get_meta("slot_key", "")) == slot_key:
 			for inner in child.get_children():
-				if inner is CreatureToken:
+				if inner is CreatureToken or inner is LocationToken:
 					return inner
 		var found := _token_in_slot(child, slot_key)
 		if found != null:
@@ -2050,7 +2213,7 @@ func _render_actions() -> void:
 		action_hint.text = Targeting.prompt_for(_selection_actions(), player_id) \
 			+ "  Right-click or press Escape to cancel."
 	else:
-		action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target."
+		action_hint.text = "Drag a card onto the board, or drag one of your creatures onto a target. Click a lit Location to use it."
 
 	# The list mirrors what dragging offers, and stays usable as a fallback.
 	var visible := _selection_actions() if (selected_card != "" or selected_entity != "") \
@@ -2189,11 +2352,13 @@ func _append_log(line: String) -> void:
 
 func _tint(panel: Control, color: Color) -> void:
 	if panel.has_meta("token"):
-		# A creature's oval carries the colour as a ring of its own; a
-		# rectangle behind it would show at the corners.
+		# A creature's oval carries the colour as a ring of its own, as does a
+		# Location's arch; a rectangle behind either would show at the corners.
 		for child in panel.get_children():
 			if child is CreatureToken:
 				(child as CreatureToken).ring_color = color
+			elif child is LocationToken:
+				(child as LocationToken).ring_color = color
 		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		return
 	if panel.has_meta("portrait"):

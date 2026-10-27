@@ -65,6 +65,15 @@ Submit a game intention without calculated results:
 }
 ```
 
+A Location is used with `ACTIVATE_LOCATION`, naming it and, when its activation is aimed, a
+target: `{ "type": "ACTIVATE_LOCATION", "actorId": "a", "locationId": "location_9",
+"targetId": "b:hero" }`. Locations in play are in each side's `locations`, keyed by instance id,
+with `position`, `closed`, and whichever of `currentDurability`/`maxDurability` and
+`turnsRemaining` the Location has; its id also fills its battlefield slot. They are announced by
+`LOCATION_PLACED`, `LOCATION_ACTIVATED`, `LOCATION_DURABILITY_CHANGED`,
+`LOCATION_DURATION_CHANGED` (each a delta in `amount`) and `LOCATION_REMOVED`, whose `reason` is
+`SPENT`, `EXPIRED` or `DESTROYED_BY_EFFECT`.
+
 The connection is bound to its joined player and rejects actions claiming another actor. The
 server sends `MATCH_CONTENT { version, cards }` before joined/rejoined state and after admin edits.
 These are the match's pinned definitions, limited to used cards and transitive summons.

@@ -325,6 +325,9 @@ func _fill(card: Dictionary) -> void:
 	# Weapon explains it here even though it carries no keyword list.
 	if is_weapon and library.is_ranged_weapon(definition_id):
 		explained.append(CardLibrary.keyword_line("RANGED", true))
+	# A Location's hourglass and shield are not keywords, but they say how it
+	# plays as much as any keyword does.
+	explained.append_array(library.location_lines(definition_id))
 	_keywords.text = "\n".join(explained)
 	_keywords.visible = not explained.is_empty()
 
@@ -351,6 +354,13 @@ func _stats_text(definition_id: String, card: Dictionary) -> String:
 		var weapon_attack: Variant = card.get("attack", library.base_attack(definition_id))
 		var left: Variant = card.get("durability", library.base_durability(definition_id))
 		return "⚔ %s   ◈ %s" % [_num(weapon_attack), _num(left)]
+	if library.card_type(definition_id) == "LOCATION":
+		var measures: Array[String] = []
+		if library.has_duration(definition_id):
+			measures.append("⧗ %s" % _num(card.get("duration", library.base_duration(definition_id))))
+		if library.has_durability(definition_id):
+			measures.append("◈ %s" % _num(card.get("durability", library.base_durability(definition_id))))
+		return "   ".join(measures)
 	if card.has("durability"):
 		return "◈ %s" % _num(card["durability"])
 	if not card.has("attack") and not card.has("health"):

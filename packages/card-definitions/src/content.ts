@@ -2,9 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv, type SchemaObject, type ValidateFunction } from 'ajv';
-import type { CardDefinition, Effect, ExpansionDefinition } from '@maailma/game-model';
+import type { CardDefinition, ExpansionDefinition } from '@maailma/game-model';
+import { cardEffects } from '@maailma/game-model';
 import { isKnownClass } from './classes.js';
 import { validateCardDescription } from './descriptions.js';
+import { validateLocationDefinition } from './locations.js';
 import type { PackDefinition } from './packs.js';
 
 export interface ContentCatalog {
@@ -156,9 +158,10 @@ export function parseContentDocuments(
       errors.push(`${path}: ${card.id}: unknown class "${card.classId}"`);
     }
     errors.push(...validateCardDescription(card).map((error) => `${path}: ${error}`));
-    const effects: Effect[] =
-      card.type === 'ACTION' ? card.effects : card.effects.map((entry) => entry.effect);
-    for (const effect of effects) {
+    if (card.type === 'LOCATION') {
+      errors.push(...validateLocationDefinition(card).map((error) => `${path}: ${error}`));
+    }
+    for (const effect of cardEffects(card)) {
       if (effect.type === 'SUMMON' && byId.get(effect.definitionId)?.type !== 'CREATURE') {
         errors.push(
           `${path}: ${card.id}: SUMMON must reference an existing Creature, got "${effect.definitionId}"`,

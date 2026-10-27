@@ -35,10 +35,19 @@ const ARTIFACT := {
 	"id": "totem", "name": "Totem", "type": "ARTIFACT", "cost": 2,
 	"durability": 3, "tags": [], "description": "At the end of your turn, heal 1.",
 }
-## Locations are not in the game yet; this one stands in for the first.
+## A Location with both measures, and one with each alone.
 const LOCATION := {
 	"id": "old_keep", "name": "The Old Keep", "type": "LOCATION", "cost": 3,
-	"tags": [], "description": "Friendly Creatures here have +1 Health.",
+	"durability": 2, "duration": 3,
+	"tags": [], "description": "Give adjacent friendly Creatures +1 Health.",
+}
+const TIMED_LOCATION := {
+	"id": "spring", "name": "Spring", "type": "LOCATION", "cost": 2, "duration": 2,
+	"tags": [], "description": "At the start of your turn, restore 2 Health to your Hero.",
+}
+const SHIELDED_LOCATION := {
+	"id": "tower", "name": "Tower", "type": "LOCATION", "cost": 2, "durability": 3,
+	"tags": [], "description": "Deal 1 damage to an enemy character.",
 }
 const UNKNOWN := {
 	"id": "mystery", "name": "Mystery", "type": "SOMETHING_NEW", "cost": 0,
@@ -55,7 +64,9 @@ func _init() -> void:
 	await process_frame
 	print("== card frame test ==")
 	var library := CardLibrary.new()
-	library.ingest([WOLF, NO_ART, WORDY, SPELL, WEAPON, ARTIFACT, LOCATION, UNKNOWN])
+	library.ingest([
+		WOLF, NO_ART, WORDY, SPELL, WEAPON, ARTIFACT, LOCATION, TIMED_LOCATION, SHIELDED_LOCATION, UNKNOWN,
+	])
 
 	_check("creatures are framed", CardFrame.supports(library, "wolf"))
 	_check("spells are framed", CardFrame.supports(library, "firebolt"))
@@ -105,8 +116,13 @@ func _init() -> void:
 	# An Artifact in play with nothing left, beside one as printed.
 	var spent := CardFrame.make(library, {"definition_id": "totem", "durability": 0}, BOARD_WIDTH)
 	third_row.add_child(spent)
-	var location := CardFrame.make(library, {"definition_id": "old_keep"}, BOARD_WIDTH)
+	# A Location in play, used once and a turn older.
+	var location := CardFrame.make(library, {"definition_id": "old_keep", "durability": 1, "duration": 2}, BOARD_WIDTH)
 	third_row.add_child(location)
+	var timed := CardFrame.make(library, {"definition_id": "spring"}, BOARD_WIDTH)
+	third_row.add_child(timed)
+	var shielded := CardFrame.make(library, {"definition_id": "tower"}, BOARD_WIDTH)
+	third_row.add_child(shielded)
 	var revealed_artifact := CardFrame.make(library, {"definition_id": "totem"}, REVEAL_WIDTH, true)
 	third_row.add_child(revealed_artifact)
 	var revealed_location := CardFrame.make(library, {"definition_id": "old_keep"}, REVEAL_WIDTH, true)
@@ -186,9 +202,30 @@ func _init() -> void:
 		revealed_artifact._durability.texture == CardFrame._texture(CardFrame.DURABILITY_PATH))
 	_check("a location is drawn on the location frame",
 		location._frame.texture != null and location._frame.texture == CardFrame._texture(CardFrame.LOCATION_FRAME_PATH))
-	_check("a location shows no stats",
+	_check("a location shows no Attack or Health",
 		not location._attack_value.visible and not location._health_value.visible
-		and not location._durability_value.visible and not location._durability.visible)
+		and not location._attack.visible and not location._health.visible)
+	_check("a location with both measures shows the hourglass and the shield",
+		location._hourglass.visible and location._duration_value.visible
+		and location._durability.visible and location._durability_value.visible)
+	_check("the hourglass image loads",
+		location._hourglass.texture != null and location._hourglass.texture == CardFrame._texture(CardFrame.HOURGLASS_PATH))
+	_check("the hourglass is on the left and the shield on the right",
+		location._hourglass.get_rect().get_center().x < location.size.x * 0.5
+		and location._durability.get_rect().get_center().x > location.size.x * 0.5)
+	_check("a location in play shows what it has left",
+		location._duration_value.text == "2" and location._durability_value.text == "1")
+	_check("a location worn down is coloured as hurt",
+		location._duration_value.get_theme_color("font_color") == CardFrame.COLOR_HURT
+		and location._durability_value.get_theme_color("font_color") == CardFrame.COLOR_HURT)
+	_check("a location in hand shows its printed measures",
+		revealed_location._duration_value.text == "3" and revealed_location._durability_value.text == "2")
+	_check("a location with only a duration shows only the hourglass",
+		timed._hourglass.visible and timed._duration_value.text == "2"
+		and not timed._durability.visible and not timed._durability_value.visible)
+	_check("a location with only Durability shows only the shield",
+		shielded._durability.visible and shielded._durability_value.text == "3"
+		and not shielded._hourglass.visible and not shielded._duration_value.visible)
 	_check("a detailed location prints its description",
 		revealed_location._text.get_parsed_text().contains("+1 Health"))
 

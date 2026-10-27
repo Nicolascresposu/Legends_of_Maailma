@@ -42,7 +42,8 @@ func _init() -> void:
 	var left := hand.rest_rect("a")
 	var middle := hand.rest_rect("b")
 	var right := hand.rest_rect("c")
-	_check("a small hand sits side by side", left.end.x <= middle.position.x + 1.0)
+	_check("a small hand is held together, edges just overlapping",
+		left.end.x > middle.position.x and left.end.x - middle.position.x < HandView.CARD_SIZE.x * 0.2)
 	_check("the fan is centred",
 		absf((middle.get_center().x - hand.global_position.x) - hand.size.x * 0.5) < 1.0)
 	_check("the outer cards drop below the middle one",

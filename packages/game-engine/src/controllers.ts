@@ -35,6 +35,7 @@ export class BasicAIController implements MatchController {
       legal.find((action) => this.wantsToPlay(engine, playerId, action)) ??
       legal.find((action) => action.type === 'ATTACK') ??
       legal.find((action) => action.type === 'HERO_ATTACK') ??
+      legal.find((action) => action.type === 'ACTIVATE_LOCATION') ??
       legal.find((action) => action.type === 'USE_HERO_POWER') ??
       legal.find((action) => action.type === 'MOVE_CREATURE') ??
       legal.find((action) => action.type === 'SWAP_CREATURES') ??

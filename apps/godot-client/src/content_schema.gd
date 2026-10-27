@@ -683,6 +683,114 @@ const SCHEMA = {
 						"effects"
 					],
 					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"name": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"cost": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"source": {
+							"enum": [
+								"CORE",
+								"CHRONICLE"
+							]
+						},
+						"expansionId": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"rarity": {
+							"enum": [
+								"BASIC",
+								"COMMON",
+								"RARE",
+								"EPIC",
+								"LEGENDARY"
+							]
+						},
+						"collectible": {
+							"type": "boolean"
+						},
+						"classId": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"description": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"flavour": {
+							"type": "string",
+							"pattern": "\\S"
+						},
+						"type": {
+							"const": "LOCATION"
+						},
+						"durability": {
+							"type": "integer",
+							"minimum": 1
+						},
+						"duration": {
+							"type": "integer",
+							"minimum": 1
+						},
+						"activation": {
+							"type": "object",
+							"properties": {
+								"targetMode": {
+									"enum": [
+										"NONE",
+										"FRIENDLY_CHARACTER",
+										"ENEMY_CHARACTER",
+										"ANY_CHARACTER",
+										"FRIENDLY_CREATURE",
+										"ENEMY_CREATURE"
+									]
+								},
+								"effects": {
+									"type": "array",
+									"items": {
+										"$ref": "#/definitions/effect"
+									},
+									"minItems": 1
+								}
+							},
+							"required": [
+								"targetMode",
+								"effects"
+							],
+							"additionalProperties": false
+						},
+						"effects": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/triggeredEffect"
+							}
+						}
+					},
+					"required": [
+						"id",
+						"name",
+						"cost",
+						"source",
+						"expansionId",
+						"rarity",
+						"collectible",
+						"description",
+						"type",
+						"effects"
+					],
+					"additionalProperties": false
 				}
 			],
 			"type": "object",

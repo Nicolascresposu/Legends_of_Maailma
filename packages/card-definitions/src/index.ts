@@ -15,6 +15,7 @@ export * from './classes.js';
 export * from './descriptions.js';
 export * from './expansions.js';
 export * from './economy.js';
+export * from './locations.js';
 export * from './packs.js';
 export * from './registry.js';
 export {

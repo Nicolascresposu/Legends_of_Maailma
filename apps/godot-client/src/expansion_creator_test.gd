@@ -23,6 +23,7 @@ func _init() -> void:
 	print("== expansion creator ==")
 	_test_files()
 	await _test_ui()
+	await _test_art()
 	await _test_admin()
 	if checks < 50:
 		failures.append("Test aborted before the file and UI checks completed")
@@ -60,7 +61,7 @@ func _test_files() -> void:
 		var context: Array = shipped["entries"].filter(func(other: Dictionary) -> bool: return other["folder"] != entry["folder"])
 		_check("validates shipped " + str(entry["folder"]), Validator.validate(entry["data"], context).is_empty())
 		total += entry["data"]["cards"].size()
-	_check("loads all 29 cards", total == 29)
+	_check("loads all 32 cards", total == 32)
 	var root := test_root.path_join("content")
 	DirAccess.make_dir_recursive_absolute(root)
 	var data := _fixture()
@@ -259,6 +260,85 @@ func _test_ui() -> void:
 		creator._card_index = 0
 		creator._refresh_entities("cards")
 		_check("renders " + variant + " preview", creator._preview.get_child_count() >= 2)
+
+func _test_art() -> void:
+	# Art is written to a scratch folder, never the client's own art/cards/.
+	var art_dir := test_root.path_join("art")
+	DirAccess.make_dir_recursive_absolute(art_dir)
+	CardArt.art_dir = art_dir
+	CardArt.clear_cache()
+	# Saved art goes in a folder named after the expansion's content folder.
+	var expansion_art := art_dir.path_join("test")
+	var picture := Image.create(8, 4, false, Image.FORMAT_RGBA8)
+	picture.fill(Color.RED)
+	var pick := test_root.path_join("picked art.png")
+	picture.save_png(pick)
+	var not_image := test_root.path_join("notes.txt")
+	FileAccess.open(not_image, FileAccess.WRITE).store_string("not an image")
+	var root := test_root.path_join("art-content")
+	DirAccess.make_dir_recursive_absolute(root)
+	Files.save(root, "test", _fixture())
+	var art_creator = Creator.new()
+	get_root().add_child(art_creator)
+	await process_frame
+	art_creator.open_root(root)
+	_check("a card without art previews without a picture", _preview_art(art_creator) == null)
+	art_creator._tabs.current_tab = 1
+	await process_frame
+	await process_frame
+	var remove_button: Button = art_creator._preview.find_children("*", "Button", true, false).filter(func(button: Button) -> bool: return button.text == "Remove art")[0]
+	# The window's bottom-right corner holds the Admin UI switch.
+	_check("art buttons stay clear of the window's bottom corner", remove_button.get_global_rect().end.y < get_root().get_visible_rect().size.y - 80)
+	_check("rejects a file that is not an image", not art_creator.choose_art(not_image) and not art_creator.dirty)
+	_check("choosing art stages it", art_creator.choose_art(pick) and art_creator.dirty)
+	_check("staged art shows in the preview", _preview_art(art_creator) != null)
+	_check("staged art writes nothing before Save", not FileAccess.file_exists(expansion_art.path_join("test_wolf.png")))
+	art_creator.confirm_discard(func() -> void: pass)
+	art_creator._discard.hide()
+	art_creator._discard.confirmed.emit()
+	_check("discard drops staged art", _preview_art(art_creator) == null and not FileAccess.file_exists(expansion_art.path_join("test_wolf.png")))
+	art_creator.choose_art(pick)
+	art_creator.save_draft()
+	_check("Save copies art under the card ID", not art_creator.dirty and FileAccess.file_exists(expansion_art.path_join("test_wolf.png")))
+	_check("saved art is used wherever the card is drawn", CardArt.texture_for("test_wolf") != null)
+	CardArt.clear_cache()
+	_check("art not yet imported by the editor still loads", CardArt.texture_for("test_wolf") != null)
+	var fields: Control = art_creator._card_form.get_child(0).get_child(1)
+	_edit_text(fields, "id", "test_grey_wolf")
+	_check("a renamed card keeps previewing its art", _preview_art(art_creator) != null)
+	art_creator.save_draft()
+	_check("Save moves art to the renamed card ID", FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")) and not FileAccess.file_exists(expansion_art.path_join("test_wolf.png")))
+	art_creator.duplicate_entity("cards")
+	art_creator.save_draft()
+	_check("a duplicated card keeps its original's art", FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".png")) and FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")))
+	var jpeg := test_root.path_join("replacement.jpg")
+	picture.save_jpg(jpeg)
+	art_creator.choose_art(jpeg)
+	art_creator.save_draft()
+	_check("new art in another format replaces the old file", FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".jpg")) and not FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".png")))
+	art_creator._card_index = 0
+	art_creator._render_entity("cards")
+	art_creator.clear_art()
+	_check("removing art stages it", art_creator.dirty and _preview_art(art_creator) == null and FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")))
+	art_creator.save_draft()
+	_check("Save deletes removed art", not FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")) and CardArt.texture_for("test_grey_wolf") == null)
+	art_creator.queue_free()
+	await process_frame
+	picture.save_png(art_dir.path_join("loose_card.png"))
+	CardArt.clear_cache()
+	_check("art directly in the art folder is still found", CardArt.texture_for("loose_card") != null and CardArt.relative(CardArt.path_for("loose_card")) == "loose_card.png")
+	CardArt.link("loose_card", pick, "test")
+	_check("relinked art moves into its expansion folder", FileAccess.file_exists(expansion_art.path_join("loose_card.png")) and not FileAccess.file_exists(art_dir.path_join("loose_card.png")))
+	CardArt.clear_cache()
+	_check("art in an expansion folder is found by card ID alone", CardArt.relative(CardArt.path_for("loose_card")) == "test/loose_card.png")
+	CardArt.art_dir = CardArt.ART_DIR
+	CardArt.clear_cache()
+
+func _preview_art(target: Control) -> Texture2D:
+	for child in target._preview.get_children():
+		if child is CardFrame:
+			return child._art.texture
+	return null
 
 func _edit_text(form: Control, field: String, text: String) -> void:
 	var row := form.get_node(field)

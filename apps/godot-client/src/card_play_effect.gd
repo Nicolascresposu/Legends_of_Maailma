@@ -4,7 +4,8 @@ class_name CardPlayEffect
 ## The moment a card leaves the hand for good, drawn the way Hearthstone draws a
 ## minion landing. The card crumbles away from its edges in a quick burst of
 ## shards; a Creature's art oval is left behind and drops into the slot it was
-## played to, lands with a bump and a puff of dust, and becomes its token.
+## played to, lands with a bump and a puff of dust, and becomes its token. A
+## Location's art arch lands the same way.
 ##
 ## Pure presentation, like the arrow and the reveal: it takes no input and
 ## knows nothing of the rules. `main.gd` hands it a fresh copy of the played
@@ -83,6 +84,9 @@ class Burst:
 	var oval := Rect2()
 	## Where the oval lands, as a global rect.
 	var landing := Rect2()
+	## The surviving piece's outline as fractions of its rect, in order round
+	## it; empty for an ellipse.
+	var shape: Array = []
 	var slot_key := ""
 	var landed := false
 	## When the oval started to fade, by `age`; -1 while it has not.
@@ -99,12 +103,14 @@ func _init() -> void:
 ## Breaks up `card`, a fresh copy of the played card that this now owns, where
 ## `held` (the card as the hand drew it) is. Given a `landing` rect (global),
 ## a Creature's oval survives and drops onto it, and `landed` is emitted with
-## `slot_key` when it is down.
-func play(card: Control, held: Control, landing := Rect2(), slot_key := "") -> void:
+## `slot_key` when it is down. `shape` outlines the piece that survives, as
+## fractions of the art window; empty for a Creature's oval.
+func play(card: Control, held: Control, landing := Rect2(), slot_key := "", shape: Array = []) -> void:
 	var burst := Burst.new()
 	burst.card_size = held.size
 	burst.to_global = held.get_global_transform()
 	burst.slot_key = slot_key
+	burst.shape = shape
 
 	burst.viewport = SubViewport.new()
 	burst.viewport.transparent_bg = true
@@ -283,7 +289,7 @@ func _draw_oval(burst: Burst, texture: Texture2D, to_local: Transform2D) -> void
 	var centre: Vector2 = pose["centre"]
 	var oval_size: Vector2 = pose["size"]
 	var turn: float = pose["turn"]
-	var unit := CreatureToken._ellipse(Rect2(-0.5, -0.5, 1.0, 1.0))
+	var unit := _outline(burst, Rect2(-0.5, -0.5, 1.0, 1.0))
 	var points := PackedVector2Array()
 	var uvs := PackedVector2Array()
 	var texture_size := Vector2(burst.viewport.size)
@@ -317,7 +323,7 @@ func _cut(burst: Burst) -> Array[Shard]:
 
 	var oval_points := PackedVector2Array()
 	if burst.oval.has_area():
-		oval_points = CreatureToken._ellipse(burst.oval, 48)
+		oval_points = _outline(burst, burst.oval)
 	var texture_size := Vector2(burst.viewport.size)
 	var shards: Array[Shard] = []
 	for row in SHARD_ROWS:
@@ -362,6 +368,15 @@ func _shard(points: PackedVector2Array, card_size: Vector2, texture_size: Vector
 	shard.delay = STAGGER * (1.0 - outward) + randf() * 0.02
 	shard.life = randf_range(SHARD_LIFE_MIN, SHARD_LIFE_MAX)
 	return shard
+
+## The surviving piece's outline fitted to `rect`: its shape, or an ellipse.
+func _outline(burst: Burst, rect: Rect2) -> PackedVector2Array:
+	if burst.shape.is_empty():
+		return CreatureToken._ellipse(rect, 48)
+	var points := PackedVector2Array()
+	for unit: Vector2 in burst.shape:
+		points.append(rect.position + unit * rect.size)
+	return points
 
 func _frame_in(node: Node) -> CardFrame:
 	for child in node.get_children():

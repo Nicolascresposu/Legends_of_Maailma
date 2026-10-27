@@ -80,8 +80,8 @@ func _build_object() -> void:
 		value = default_value(rule)
 	var required: Array = rule.get("required", [])
 	var keys: Array = rule.get("properties", {}).keys()
-	if rule.get("properties", {}).get("type", {}).get("const", "") in ["CREATURE", "ACTION", "ARTIFACT", "WEAPON"]:
-		keys = ["id", "name", "cost", "attack", "health", "durability", "range", "targetMode", "rarity", "source", "expansionId", "classId", "collectible", "tags", "keywords", "description", "flavour", "effects"]
+	if rule.get("properties", {}).get("type", {}).get("const", "") in ["CREATURE", "ACTION", "ARTIFACT", "WEAPON", "LOCATION"]:
+		keys = ["id", "name", "cost", "attack", "health", "durability", "duration", "range", "targetMode", "activation", "rarity", "source", "expansionId", "classId", "collectible", "tags", "keywords", "description", "flavour", "effects"]
 	for key: String in keys:
 		if not rule["properties"].has(key):
 			continue

@@ -8,6 +8,8 @@ const Frame := preload("res://src/card_frame.gd")
 const Library := preload("res://src/card_library.gd")
 const SETTINGS := "user://expansion_creator.cfg"
 const Publisher := preload("res://src/content_publisher.gd")
+## A card's art choice that deletes its art on Save.
+const REMOVE_ART := "<remove>"
 signal published(version: String)
 var _publishing_accounts: AccountClient
 var _publisher: Control
@@ -48,6 +50,11 @@ var _discard: ConfirmationDialog
 var _discard_action: Callable
 var _overwrite: ConfirmationDialog
 var _overwrite_action: Callable
+var _art_dialog: FileDialog
+## One entry per draft card: the ID its art is saved under ("from", empty for a
+## new card) and the art chosen since ("pick": an image path, REMOVE_ART, or
+## empty to keep it). Art files are written only on Save.
+var _card_art: Array = []
 
 func _ready() -> void:
 	name = "Expansions"
@@ -144,6 +151,13 @@ func _ready() -> void:
 	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	_file_dialog.dir_selected.connect(_directory_selected)
 	add_child(_file_dialog)
+	_art_dialog = FileDialog.new()
+	_art_dialog.title = "Choose card art"
+	_art_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_art_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_art_dialog.filters = PackedStringArray(["*.png, *.webp, *.jpg, *.jpeg, *.svg ; Images"])
+	_art_dialog.file_selected.connect(func(path: String) -> void: choose_art(path))
+	add_child(_art_dialog)
 	_discard = ConfirmationDialog.new()
 	_discard.title = "Unsaved expansion"
 	_discard.dialog_text = "Discard this expansion's unsaved changes?"
@@ -278,6 +292,7 @@ func _set_draft(data: Dictionary, path: String, stamp: String, unsaved: bool) ->
 	_current_expansion_id = str(draft["expansion"]["id"])
 	_card_index = 0 if not draft["cards"].is_empty() else -1
 	_pack_index = 0 if not draft["packs"].is_empty() else -1
+	_card_art = draft["cards"].map(func(card: Dictionary) -> Dictionary: return {"from": str(card["id"]), "pick": ""})
 	_clear(_metadata)
 	var form = Form.new()
 	form.setup(Validator.definition("expansion"), draft["expansion"])
@@ -371,6 +386,8 @@ func add_entity(kind: String) -> void:
 			{"count": 1, "weights": {"RARE": 80, "EPIC": 17, "LEGENDARY": 3}},
 		]}
 	draft[kind].append(item)
+	if kind == "cards":
+		_art_entry(draft[kind].size() - 1)
 	_set_selected(kind, draft[kind].size() - 1)
 	_refresh_entities(kind)
 	_mark_dirty()
@@ -383,6 +400,9 @@ func duplicate_entity(kind: String) -> void:
 	item["id"] = _unique_id(kind, str(item["id"]) + "_copy")
 	item["name"] = str(item["name"]) + " (copy)"
 	draft[kind].append(item)
+	if kind == "cards":
+		# The copy starts with the same picture, saved under its own ID.
+		_art_entry(draft[kind].size() - 1).merge({"pick": _art_source(index), "texture": _art_texture(index)}, true)
 	_set_selected(kind, draft[kind].size() - 1)
 	_refresh_entities(kind)
 	_mark_dirty()
@@ -397,6 +417,8 @@ func _confirm_remove(kind: String) -> void:
 	add_child(dialog)
 	dialog.confirmed.connect(func() -> void:
 		draft[kind].remove_at(index)
+		if kind == "cards" and index < _card_art.size():
+			_card_art.remove_at(index)
 		_set_selected(kind, mini(index, draft[kind].size() - 1))
 		_refresh_entities(kind)
 		_mark_dirty()
@@ -478,7 +500,23 @@ func _render_preview() -> void:
 	var heading := Label.new()
 	heading.text = "Card preview"
 	_preview.add_child(heading)
-	_preview.add_child(Frame.make(_preview_library, {"definition_id": str(card.get("id", ""))}, 230, true))
+	var frame = Frame.make(_preview_library, {"definition_id": str(card.get("id", ""))}, 230, true)
+	_preview.add_child(frame)
+	# The art controls sit right under the card: the column's foot is behind
+	# the window's corner Admin UI switch.
+	var texture := _art_texture(_card_index)
+	frame.show_art(texture)
+	var art_row := HBoxContainer.new()
+	_preview.add_child(art_row)
+	_button(art_row, "Choose art…", _choose_art)
+	var remove := _button(art_row, "Remove art", clear_art)
+	remove.disabled = texture == null
+	var art_note := Label.new()
+	art_note.text = _art_status(_card_index)
+	art_note.add_theme_font_size_override("font_size", 12)
+	art_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	art_note.custom_minimum_size.x = 225
+	_preview.add_child(art_note)
 	var flavour := RichTextLabel.new()
 	flavour.bbcode_enabled = true
 	flavour.fit_content = true
@@ -490,6 +528,107 @@ func _render_preview() -> void:
 	details.text = "%s · %s\n%s" % [card.get("rarity", ""), card.get("classId", "Neutral"), card.get("id", "")]
 	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_preview.add_child(details)
+
+## Stages `path` as the selected card's art; it is copied into place on Save.
+func choose_art(path: String) -> bool:
+	if draft.is_empty() or _card_index < 0:
+		return false
+	var texture := CardArt.load_image(path)
+	if texture == null:
+		_say("%s is not a PNG, WebP, JPEG or SVG image." % path.get_file(), true)
+		return false
+	_art_entry(_card_index).merge({"pick": path, "texture": texture}, true)
+	_mark_dirty()
+	_render_preview()
+	return true
+
+## Stages removing the selected card's art; the file is deleted on Save.
+func clear_art() -> void:
+	if draft.is_empty() or _card_index < 0:
+		return
+	_art_entry(_card_index).merge({"pick": REMOVE_ART, "texture": null}, true)
+	_mark_dirty()
+	_render_preview()
+
+func _choose_art() -> void:
+	var source := _art_source(_card_index)
+	_art_dialog.current_dir = ProjectSettings.globalize_path(source.get_base_dir() if source != "" else CardArt.art_dir)
+	_art_dialog.popup_centered(Vector2i(850, 550))
+
+## The art state of a draft card, made on first use for cards added directly.
+func _art_entry(index: int) -> Dictionary:
+	while _card_art.size() <= index:
+		_card_art.append({"from": "", "pick": ""})
+	return _card_art[index]
+
+## The image file the card will show once saved, or "" for none.
+func _art_source(index: int) -> String:
+	var entry := _art_entry(index)
+	if entry["pick"] == REMOVE_ART:
+		return ""
+	if entry["pick"] != "":
+		return entry["pick"]
+	var path := CardArt.path_for(str(draft["cards"][index].get("id", "")))
+	return path if path != "" else CardArt.path_for(entry["from"])
+
+## The art the card will show once saved, or null for none.
+func _art_texture(index: int) -> Texture2D:
+	var entry := _art_entry(index)
+	if entry["pick"] == REMOVE_ART:
+		return null
+	if entry["pick"] != "":
+		return entry.get("texture")
+	var texture := CardArt.texture_for(str(draft["cards"][index].get("id", "")))
+	return texture if texture != null else CardArt.texture_for(entry["from"])
+
+func _art_status(index: int) -> String:
+	var entry := _art_entry(index)
+	var id := str(draft["cards"][index].get("id", ""))
+	if entry["pick"] == REMOVE_ART:
+		return "Art is deleted when you save."
+	if entry["pick"] != "":
+		return "%s is copied to art/cards/%s/%s.%s when you save." % [entry["pick"].get_file(), _art_folder(), id, entry["pick"].get_extension().to_lower()]
+	var path := CardArt.path_for(id)
+	if path != "":
+		return "Art: art/cards/" + CardArt.relative(path)
+	path = CardArt.path_for(entry["from"])
+	if path != "":
+		return "Art: art/cards/%s, moved to %s/%s.%s when you save." % [CardArt.relative(path), _art_folder(), id, path.get_extension()]
+	return "No art. Choose an image to use as this card's art."
+
+## Art is kept in a folder named after the expansion's content folder, as
+## art/cards/<folder>/<card_id>.png.
+func _art_folder() -> String:
+	return _folder_input.text.strip_edges()
+
+## Writes the staged art changes under each card's current ID. Returns
+## validation-style issues, so selecting one opens its card.
+func _apply_art() -> Array[String]:
+	var errors: Array[String] = []
+	var ids: Array = draft["cards"].map(func(card: Dictionary) -> String: return str(card["id"]))
+	for index in draft["cards"].size():
+		var entry := _art_entry(index)
+		var id: String = ids[index]
+		var from: String = entry["from"]
+		# Art under an ID this card has left is moved or dropped, unless
+		# another card has since taken that ID.
+		var moved := from != "" and from != id and not ids.has(from)
+		var error := ""
+		if entry["pick"] == REMOVE_ART:
+			CardArt.unlink(id)
+			if moved:
+				CardArt.unlink(from)
+		elif entry["pick"] != "":
+			error = CardArt.link(id, entry["pick"], _art_folder())
+			if error == "" and moved:
+				CardArt.unlink(from)
+		elif moved and CardArt.path_for(id) == "":
+			error = CardArt.rename(from, id, _art_folder())
+		if error != "":
+			errors.append("cards.json[%d] art: %s" % [index, error])
+		else:
+			_card_art[index] = {"from": id, "pick": ""}
+	return errors
 
 func _mark_dirty() -> void:
 	dirty = true
@@ -538,7 +677,9 @@ func _finish_save(result: Dictionary) -> void:
 		return
 	source_path = result["path"]
 	source_stamp = result["stamp"]
-	dirty = false
+	var art_errors := _apply_art()
+	# A failed art copy leaves the draft unsaved, so Save can be retried.
+	dirty = not art_errors.is_empty()
 	_folder_input.editable = false
 	_entries = Files.catalog(content_root)["entries"]
 	for index in _entries.size():
@@ -547,6 +688,9 @@ func _finish_save(result: Dictionary) -> void:
 	_refresh_expansions()
 	_update_location()
 	_say("Saved " + source_path + ". Use Preview publish to apply it to the running server.")
+	if not art_errors.is_empty():
+		_show_errors(art_errors)
+	_render_preview()
 
 func export_folder(path: String) -> void:
 	if not validate_draft():

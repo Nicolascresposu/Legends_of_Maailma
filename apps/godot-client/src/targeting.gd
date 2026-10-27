@@ -8,7 +8,8 @@ class_name Targeting
 ## from that, this reports which board slots accept a drop, which entities can
 ## be targeted, and which action to send once the player commits.
 
-## Hero entity ids are "<playerId>:hero"; creatures use their instance id.
+## Hero entity ids are "<playerId>:hero"; creatures and Locations use their
+## instance id.
 const HERO_SUFFIX := ":hero"
 
 static func hero_entity_id(player_id: String) -> String:
@@ -37,7 +38,8 @@ static func actions_for_card(legal_actions: Array, card_instance_id: String) -> 
 			out.append(action)
 	return out
 
-## Actions that originate from a board entity (attacks, moves, swaps).
+## Actions that originate from a board entity (attacks, moves, swaps, and a
+## Location's activations).
 ##
 ## A HERO_ATTACK names no attacker: the acting side's Hero is implied. So it
 ## belongs to the selection when the selected entity is that side's Hero.
@@ -53,7 +55,8 @@ static func actions_for_entity(legal_actions: Array, entity_id: String) -> Array
 			continue
 		if str(action.get("attackerId", "")) == entity_id \
 				or str(action.get("creatureId", "")) == entity_id \
-				or str(action.get("firstCreatureId", "")) == entity_id:
+				or str(action.get("firstCreatureId", "")) == entity_id \
+				or str(action.get("locationId", "")) == entity_id:
 			out.append(action)
 	return out
 

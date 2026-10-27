@@ -16,10 +16,16 @@ class_name HandView
 ## pointer never moves itself out from beneath it.
 
 const CARD_SIZE := Vector2(104, 138)
-const HEIGHT := 164.0
-## Largest distance between neighbouring cards' centres. A hand too wide for the
-## view at this spacing closes up, and the cards overlap.
-const MAX_SPACING := 110.0
+## The strip the hand takes from the screen. Resting cards stand a little
+## taller than it and hang into the margin below, so the whole of each card is
+## in view while the board keeps as much height as it can.
+const HEIGHT := 130.0
+## Where a resting card's top edge sits below the top of the strip.
+const REST_TOP := 4.0
+## Largest distance between neighbouring cards' centres: a little under a
+## card's width, so even a small hand is held together with its edges tucked
+## under one another. A hand too wide for the view closes up further.
+const MAX_SPACING := 94.0
 const MIN_SPACING := 18.0
 const SIDE_PAD := 8.0
 ## The whole fan turns through at most FAN_ARC radians (about 18°), and one card
@@ -27,7 +33,7 @@ const SIDE_PAD := 8.0
 const FAN_ARC := 0.32
 const FAN_STEP := 0.07
 ## How far the outermost cards sit below the middle one.
-const ARC_DROP := 16.0
+const ARC_DROP := 10.0
 
 ## A hovered card straightens and rises, and its neighbours make room for it.
 const HOVER_LIFT := 18.0
@@ -416,7 +422,7 @@ func _rest(index: int, count: int) -> Array:
 	# hand curves as much as a full one.
 	var reach := maxf((count - 1) * 0.5, 1.0)
 	var drop := ARC_DROP * pow(from_middle / reach, 2.0)
-	var center := Vector2(size.x * 0.5 + from_middle * spacing, _height() * 0.5 + 4.0 + drop)
+	var center := Vector2(size.x * 0.5 + from_middle * spacing, REST_TOP + CARD_SIZE.y * 0.5 + drop)
 	return [center, from_middle * step]
 
 func _park_center() -> Vector2:

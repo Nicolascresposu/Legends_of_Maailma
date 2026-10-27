@@ -246,8 +246,49 @@ export interface WeaponDefinition extends CardDefinitionBase {
   effects: EffectDefinition[];
 }
 
+/**
+ * What a Location does when its owner activates it: an Action's effects, aimed
+ * the way an Action is aimed.
+ */
+export interface LocationActivation {
+  targetMode: TargetMode;
+  effects: Effect[];
+}
+
+/**
+ * A Location stands on one of its owner's battlefield tiles, as a Creature
+ * does, but never fights: it cannot attack, move, be attacked or be targeted.
+ *
+ * It lasts by one measure or both. `durability` is how many times it can be
+ * activated — each use spends one, and the last crumbles it — and makes it
+ * activatable at all. `duration` is how many of its owner's turns it stands:
+ * it counts down as each of those turns starts, and the Location expires at 0.
+ * A Location with only a duration does its work through triggered `effects`.
+ */
+export interface LocationDefinition extends CardDefinitionBase {
+  type: 'LOCATION';
+  durability?: number;
+  duration?: number;
+  /** Present exactly when `durability` is. */
+  activation?: LocationActivation;
+  effects: EffectDefinition[];
+}
+
 export type CardDefinition =
-  CreatureDefinition | ActionDefinition | ArtifactDefinition | WeaponDefinition;
+  | CreatureDefinition
+  | ActionDefinition
+  | ArtifactDefinition
+  | WeaponDefinition
+  | LocationDefinition;
+
+/** Every effect a card can produce, whatever triggers it. */
+export function cardEffects(card: CardDefinition): Effect[] {
+  if (card.type === 'ACTION') return card.effects;
+  const triggered = card.effects.map((entry) => entry.effect);
+  return card.type === 'LOCATION' && card.activation
+    ? [...triggered, ...card.activation.effects]
+    : triggered;
+}
 
 export type StatusKind = 'ROOTED' | 'HIDDEN' | 'REVEALED' | 'WARD' | 'ATTACK_MODIFIER';
 
@@ -300,6 +341,30 @@ export interface WeaponInstance {
   statuses: StatusInstance[];
 }
 
+/** Why a Location left the battlefield. */
+export type LocationRemovalReason = 'SPENT' | 'EXPIRED' | 'DESTROYED_BY_EFFECT';
+
+/**
+ * A Location in play. Either measure is absent when its definition has none:
+ * a Location without Durability cannot be activated, one without a duration
+ * stands until its Durability runs out.
+ */
+export interface LocationInstance {
+  instanceId: EntityId;
+  definitionId: string;
+  ownerId: PlayerId;
+  position: Position;
+  currentDurability?: number;
+  maxDurability?: number;
+  /** Owner turns left, the current one included. */
+  turnsRemaining?: number;
+  /**
+   * Activated since its owner's turn last started. A closed Location cannot be
+   * activated; it opens again at the start of its owner's next turn.
+   */
+  closed: boolean;
+}
+
 export interface HeroPowerDefinition {
   id: string;
   name: string;
@@ -350,6 +415,8 @@ export interface MatchSide {
   taika: { current: number; maximum: number; cap: number };
   battlefield: Battlefield;
   creatures: Record<EntityId, CreatureInstance>;
+  /** Locations share the battlefield's tiles with Creatures. */
+  locations: Record<EntityId, LocationInstance>;
   artifacts: ArtifactInstance[];
   deck: string[];
   hand: CardInstance[];
@@ -367,6 +434,7 @@ export interface ScenarioSideDefinition {
   maxTaika: number;
   startingCards?: string[];
   startingCreatures?: Array<{ definitionId: string; position: Position }>;
+  startingLocations?: Array<{ definitionId: string; position: Position }>;
   startingArtifacts?: string[];
   /** A Weapon the Hero begins the match holding — for PvE bosses. */
   startingWeapon?: string;
@@ -499,6 +567,14 @@ export interface HeroAttackAction {
   targetId: EntityId;
 }
 
+/** Uses one of the actor's open Locations, spending a point of its Durability. */
+export interface ActivateLocationAction {
+  type: 'ACTIVATE_LOCATION';
+  actorId: PlayerId;
+  locationId: EntityId;
+  targetId?: EntityId;
+}
+
 export interface EndTurnAction {
   type: 'END_TURN';
   actorId: PlayerId;
@@ -511,6 +587,7 @@ export type GameAction =
   | MoveCreatureAction
   | SwapCreaturesAction
   | UseHeroPowerAction
+  | ActivateLocationAction
   | EndTurnAction;
 
 export type GameEventType =
@@ -537,6 +614,11 @@ export type GameEventType =
   | 'WEAPON_DURABILITY_CHANGED'
   | 'WEAPON_BROKEN'
   | 'WEAPON_DESTROYED'
+  | 'LOCATION_PLACED'
+  | 'LOCATION_ACTIVATED'
+  | 'LOCATION_DURABILITY_CHANGED'
+  | 'LOCATION_DURATION_CHANGED'
+  | 'LOCATION_REMOVED'
   | 'HERO_ATTACK_STARTED'
   | 'HERO_ATTACK_RESOLVED'
   | 'STATUS_APPLIED'

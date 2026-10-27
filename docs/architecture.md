@@ -70,7 +70,10 @@ The terms the code, the docs and the card text use, and use only in these senses
   without a deck.
 - **Deck picking** — every match is entered with one of the player's own ready decks, chosen at
   the moment of entering, and the player plays as that deck's hero.
-- **Card type** — Creature, Action, Artifact or Weapon.
+- **Card type** — Creature, Action, Artifact, Weapon or Location.
+- **Location** — a card that takes one of its owner's battlefield tiles and never fights. Its
+  **Durability** (the shield) is how many times it can be activated; its **duration** (the
+  hourglass) is how many of its owner's turns it stands. It has either or both.
 
 ## Battlefield and combat
 
@@ -82,6 +85,16 @@ Attack, move, and swap all consume the same per-Creature combat action. Melee at
 the front row; Ranged ignores that restriction and same-column front shielding. Both obey
 orthogonal Guard protection. Any living Guard blocks Creature attacks against its Hero, while
 ordinary Creatures never do.
+
+A Location occupies a tile as a Creature does, so nothing can be summoned or moved onto it, but it
+cannot attack, move, be attacked or be targeted, and it shields nothing: a melee attack reaches
+the back-row Creature behind it. `ACTIVATE_LOCATION` uses one: it spends a point of Durability,
+resolves the Location's activation (aimed by its `targetMode`, as an Action is), and closes it
+until the start of its owner's next turn. It crumbles (`LOCATION_REMOVED`, reason `SPENT`) once
+its last point is spent, after everything the activation set off has resolved. A Location's
+duration counts down at the start of each of its owner's turns, before anything else that turn;
+at 0 it expires (reason `EXPIRED`) and its turn-start effects do not fire. Its triggered effects
+answer `TURN_STARTED` and `TURN_ENDED`, and "adjacent" effects reach out from its tile.
 
 ## Deterministic resolution
 

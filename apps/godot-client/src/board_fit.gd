@@ -1,8 +1,12 @@
 extends Control
 
-## Shows its content whole: scaled down, never up, until it fits both ways,
+## Shows its content whole: scaled until it fits both ways, up to MAX_SCALE,
 ## and centred in what is left. The battlefield fits the screen this way
-## instead of scrolling, so both Heroes are always in view.
+## instead of scrolling, so both Heroes are always in view, and grows to use
+## a large window rather than sitting small in the middle of it.
+
+## Past this the art is stretched further than it was drawn for.
+const MAX_SCALE := 1.4
 
 var content: Control
 
@@ -24,7 +28,7 @@ func fit() -> void:
 	var needed := content.get_combined_minimum_size()
 	var factor := 1.0
 	if needed.x > 0.0 and needed.y > 0.0:
-		factor = minf(1.0, minf(size.x / needed.x, size.y / needed.y))
+		factor = minf(MAX_SCALE, minf(size.x / needed.x, size.y / needed.y))
 	content.scale = Vector2(factor, factor)
 	# Full width at its own scale, so rows centred in it stay centred here.
 	content.size = Vector2(size.x / factor, needed.y)

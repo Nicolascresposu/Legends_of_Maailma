@@ -12,6 +12,9 @@ import type {
   EntityId,
   GameAction,
   GameEvent,
+  LocationDefinition,
+  LocationInstance,
+  LocationRemovalReason,
   MatchSetup,
   MatchSide,
   MatchState,
@@ -24,6 +27,7 @@ import type {
   WeaponRange,
   WeaponRemovalReason,
 } from '@maailma/game-model';
+import { cardEffects } from '@maailma/game-model';
 import { SeededRng, normalizeSeed } from '@maailma/rng';
 import {
   adjacentPositions,
@@ -96,21 +100,21 @@ export class GameEngine {
     for (const side of [this.setup.scenario.sideA, this.setup.scenario.sideB]) {
       for (const id of side.startingCards ?? []) ids.add(id);
       for (const creature of side.startingCreatures ?? []) ids.add(creature.definitionId);
+      for (const location of side.startingLocations ?? []) ids.add(location.definitionId);
       for (const id of side.startingArtifacts ?? []) ids.add(id);
       if (side.startingWeapon) ids.add(side.startingWeapon);
     }
     for (const side of Object.values(this.state.sides)) {
       for (const card of side.hand) ids.add(card.definitionId);
       for (const card of Object.values(side.creatures)) ids.add(card.definitionId);
+      for (const card of Object.values(side.locations)) ids.add(card.definitionId);
       for (const card of side.artifacts) ids.add(card.definitionId);
       if (side.hero.equippedWeapon) ids.add(side.hero.equippedWeapon.definitionId);
     }
     const pending = [...ids];
     for (let index = 0; index < pending.length; index++) {
       const card = this.getCardDefinition(pending[index]!);
-      const effects =
-        card.type === 'ACTION' ? card.effects : card.effects.map((entry) => entry.effect);
-      for (const effect of effects) {
+      for (const effect of cardEffects(card)) {
         if (effect.type === 'SUMMON' && !ids.has(effect.definitionId)) {
           ids.add(effect.definitionId);
           pending.push(effect.definitionId);
@@ -262,8 +266,7 @@ export class GameEngine {
     for (const card of side.hand) {
       const definition = this.getCardDefinition(card.definitionId);
       if (definition.cost > side.taika.current) continue;
-      const positions =
-        definition.type === 'CREATURE' ? emptyPositions(side.battlefield) : [undefined];
+      const positions = occupiesTile(definition) ? emptyPositions(side.battlefield) : [undefined];
       const targetMode = cardTargetMode(definition);
       const targets =
         targetMode === 'NONE' ? [undefined] : this.targetsForMode(playerId, targetMode);
@@ -335,6 +338,24 @@ export class GameEngine {
       ];
       for (const targetId of candidates) {
         const action: GameAction = { type: 'HERO_ATTACK', actorId: playerId, targetId };
+        if (this.isLegal(action)) actions.push(action);
+      }
+    }
+
+    for (const location of Object.values(side.locations).sort(byInstanceId)) {
+      const activation = this.locationDefinition(location).activation;
+      if (!activation) continue;
+      const targets =
+        activation.targetMode === 'NONE'
+          ? [undefined]
+          : this.targetsForMode(playerId, activation.targetMode);
+      for (const targetId of targets) {
+        const action: GameAction = {
+          type: 'ACTIVATE_LOCATION',
+          actorId: playerId,
+          locationId: location.instanceId,
+          ...(targetId ? { targetId } : {}),
+        };
         if (this.isLegal(action)) actions.push(action);
       }
     }
@@ -414,6 +435,9 @@ export class GameEngine {
       for (const initial of scenarioSide.startingCreatures ?? []) {
         this.summonCreature(side, initial.definitionId, initial.position, false);
       }
+      for (const initial of scenarioSide.startingLocations ?? []) {
+        this.placeLocation(side, initial.definitionId, initial.position);
+      }
       for (const definitionId of scenarioSide.startingArtifacts ?? []) {
         this.createArtifact(side, definitionId);
       }
@@ -453,6 +477,7 @@ export class GameEngine {
       },
       battlefield: createBattlefield(this.setup.scenario.battlefield),
       creatures: {},
+      locations: {},
       artifacts: [],
       deck,
       hand: [],
@@ -483,6 +508,8 @@ export class GameEngine {
         return this.validateSwap(action);
       case 'USE_HERO_POWER':
         return this.validateHeroPower(action.actorId, action.targetId);
+      case 'ACTIVATE_LOCATION':
+        return this.validateActivateLocation(action);
       case 'END_TURN':
         return;
     }
@@ -494,8 +521,8 @@ export class GameEngine {
     rule(card, 'CARD_NOT_IN_HAND', 'The selected card is not in hand');
     const definition = this.getCardDefinition(card.definitionId);
     rule(side.taika.current >= definition.cost, 'INSUFFICIENT_TAIKA', 'Not enough Taika');
-    if (definition.type === 'CREATURE') {
-      rule(action.position, 'POSITION_REQUIRED', 'A Creature requires a destination tile');
+    if (occupiesTile(definition)) {
+      rule(action.position, 'POSITION_REQUIRED', `A ${typeLabel(definition)} requires a tile`);
       rule(
         isPositionValid(side.battlefield, action.position),
         'INVALID_POSITION',
@@ -598,11 +625,16 @@ export class GameEngine {
         'An adjacent Guard protects this Creature',
       );
     }
-    // Ranged reaches past the front line; melee must wait for it to clear.
+    // Ranged reaches past the front line; melee must wait for it to clear. Only
+    // a Creature holds the line: a Location in front shields nothing.
     if (profile.range === 'MELEE' && target.position.row === 'BACK') {
       const defender = this.side(target.ownerId);
+      const inFront = entityAt(defender.battlefield, {
+        row: 'FRONT',
+        column: target.position.column,
+      });
       rule(
-        entityAt(defender.battlefield, { row: 'FRONT', column: target.position.column }) === null,
+        inFront === null || !defender.creatures[inFront],
         'BACK_ROW_PROTECTED',
         'The Creature in front shields this back-row Creature',
       );
@@ -671,6 +703,26 @@ export class GameEngine {
     this.validateTargetMode(actorId, power.targetMode, targetId);
   }
 
+  private validateActivateLocation(
+    action: Extract<GameAction, { type: 'ACTIVATE_LOCATION' }>,
+  ): void {
+    const location = this.side(action.actorId).locations[action.locationId];
+    rule(location, 'LOCATION_NOT_CONTROLLED', 'Location is not controlled by the acting side');
+    const activation = this.locationDefinition(location).activation;
+    rule(
+      activation && location.currentDurability !== undefined,
+      'NOT_ACTIVATABLE',
+      'This Location cannot be activated',
+    );
+    rule(location.currentDurability > 0, 'LOCATION_SPENT', 'This Location has no Durability left');
+    rule(
+      !location.closed,
+      'LOCATION_CLOSED',
+      'This Location was already used; it opens again at the start of your next turn',
+    );
+    this.validateTargetMode(action.actorId, activation.targetMode, action.targetId);
+  }
+
   private validateTargetMode(actorId: PlayerId, mode: TargetMode, targetId?: EntityId): void {
     if (mode === 'NONE') {
       rule(!targetId, 'UNEXPECTED_TARGET', 'This action does not take a target');
@@ -715,6 +767,9 @@ export class GameEngine {
       case 'USE_HERO_POWER':
         this.useHeroPower(action);
         break;
+      case 'ACTIVATE_LOCATION':
+        this.activateLocation(action);
+        break;
       case 'END_TURN':
         this.endTurn(action.actorId);
         break;
@@ -753,6 +808,15 @@ export class GameEngine {
       }
     } else if (definition.type === 'WEAPON') {
       this.equipWeapon(side, definition.id);
+    } else if (definition.type === 'LOCATION') {
+      const location = this.placeLocation(side, definition.id, action.position!);
+      this.enqueueEvent({
+        type: 'LOCATION_PLACED',
+        actorId: side.playerId,
+        sourceId: location.instanceId,
+        cardDefinitionId: definition.id,
+        position: clonePosition(location.position),
+      });
     } else {
       const artifact = this.createArtifact(side, definition.id);
       this.enqueueEvent({
@@ -903,6 +967,39 @@ export class GameEngine {
     this.enqueueEffect(power.effect, side.playerId, heroEntityId(side.playerId), action.targetId);
   }
 
+  /**
+   * Uses a Location: it closes, spends a point of Durability, and its
+   * activation resolves. Only once everything that set off has resolved does
+   * a Location on its last point crumble, so an effect that reaches out from
+   * it — "adjacent Creatures" — still finds it standing.
+   */
+  private activateLocation(action: Extract<GameAction, { type: 'ACTIVATE_LOCATION' }>): void {
+    const side = this.side(action.actorId);
+    const location = side.locations[action.locationId]!;
+    const activation = this.locationDefinition(location).activation!;
+    location.closed = true;
+    location.currentDurability! -= 1;
+    this.enqueueEvent({
+      type: 'LOCATION_ACTIVATED',
+      actorId: side.playerId,
+      sourceId: location.instanceId,
+      cardDefinitionId: location.definitionId,
+      ...(action.targetId ? { targetId: action.targetId } : {}),
+    });
+    this.enqueueEvent({
+      type: 'LOCATION_DURABILITY_CHANGED',
+      actorId: side.playerId,
+      sourceId: location.instanceId,
+      cardDefinitionId: location.definitionId,
+      amount: -1,
+    });
+    for (const effect of activation.effects) {
+      this.enqueueEffect(effect, side.playerId, location.instanceId, action.targetId);
+    }
+    this.drainQueue();
+    if (location.currentDurability! <= 0) this.removeLocation(side, location, 'SPENT');
+  }
+
   private endTurn(actorId: PlayerId): void {
     this.enqueueEvent({ type: 'TURN_ENDED', actorId });
     const nextId = this.opponentId(actorId);
@@ -925,6 +1022,21 @@ export class GameEngine {
       creature.statuses = creature.statuses.filter(
         (status) => status.duration === undefined || status.duration > 0,
       );
+    }
+    // A Location reopens on its owner's turn, and its hourglass runs down a
+    // turn — before anything else happens, so one that expires does no more.
+    for (const location of Object.values(next.locations).sort(byInstanceId)) {
+      location.closed = false;
+      if (location.turnsRemaining === undefined) continue;
+      location.turnsRemaining -= 1;
+      this.enqueueEvent({
+        type: 'LOCATION_DURATION_CHANGED',
+        actorId: nextId,
+        sourceId: location.instanceId,
+        cardDefinitionId: location.definitionId,
+        amount: -1,
+      });
+      if (location.turnsRemaining <= 0) this.removeLocation(next, location, 'EXPIRED');
     }
     this.drawCard(next, true);
     this.enqueueEvent({ type: 'TAIKA_CHANGED', actorId: nextId, amount: next.taika.current });
@@ -984,6 +1096,10 @@ export class GameEngine {
         ...Object.values(side.creatures).map((creature) => ({
           id: creature.instanceId,
           definition: this.getCardDefinition(creature.definitionId),
+        })),
+        ...Object.values(side.locations).map((location) => ({
+          id: location.instanceId,
+          definition: this.getCardDefinition(location.definitionId),
         })),
         ...side.artifacts.map((artifact) => ({
           id: artifact.instanceId,
@@ -1082,6 +1198,11 @@ export class GameEngine {
             creature.currentHealth = 0;
             break;
           }
+          const location = this.findLocation(targetId);
+          if (location) {
+            this.removeLocation(this.side(location.ownerId), location, 'DESTROYED_BY_EFFECT');
+            break;
+          }
           // A Weapon may be named directly, so "destroy a Weapon" needs no
           // second effect type once such a card exists.
           const armed = this.state.playerOrder
@@ -1150,12 +1271,15 @@ export class GameEngine {
         return equipped ? [equipped.instanceId] : [];
       }
       case 'ADJACENT_FRIENDLY_CREATURES': {
-        const source = sourceId ? this.findCreature(sourceId) : undefined;
+        // A Location reaches its neighbours from its tile as a Creature does.
+        const source = sourceId
+          ? (this.findCreature(sourceId) ?? this.findLocation(sourceId))
+          : undefined;
         if (!source) return [];
         const side = this.side(ownerId);
         return adjacentPositions(side.battlefield, source.position)
           .map((position) => entityAt(side.battlefield, position))
-          .filter((id): id is string => id !== null);
+          .filter((id): id is string => id !== null && Boolean(side.creatures[id]));
       }
     }
   }
@@ -1348,6 +1472,67 @@ export class GameEngine {
     side.creatures[creature.instanceId] = creature;
     setEntityAt(side.battlefield, position, creature.instanceId);
     return creature;
+  }
+
+  private placeLocation(
+    side: MatchSide,
+    definitionId: string,
+    position: Position,
+  ): LocationInstance {
+    const definition = this.getCardDefinition(definitionId);
+    if (definition.type !== 'LOCATION') throw new Error(`${definitionId} is not a Location`);
+    if (!isPositionValid(side.battlefield, position) || entityAt(side.battlefield, position)) {
+      throw new Error('Invalid Location position');
+    }
+    const location: LocationInstance = {
+      instanceId: this.nextId('location'),
+      definitionId,
+      ownerId: side.playerId,
+      position: clonePosition(position),
+      ...(definition.durability === undefined
+        ? {}
+        : { currentDurability: definition.durability, maxDurability: definition.durability }),
+      ...(definition.duration === undefined ? {} : { turnsRemaining: definition.duration }),
+      closed: false,
+    };
+    side.locations[location.instanceId] = location;
+    setEntityAt(side.battlefield, position, location.instanceId);
+    return location;
+  }
+
+  /** Takes a Location off its tile, recording why it left. */
+  private removeLocation(
+    side: MatchSide,
+    location: LocationInstance,
+    reason: LocationRemovalReason,
+  ): void {
+    if (!side.locations[location.instanceId]) return;
+    setEntityAt(side.battlefield, location.position, null);
+    delete side.locations[location.instanceId];
+    side.discard.push(location.definitionId);
+    this.enqueueEvent({
+      type: 'LOCATION_REMOVED',
+      actorId: side.playerId,
+      sourceId: location.instanceId,
+      cardDefinitionId: location.definitionId,
+      position: clonePosition(location.position),
+      reason,
+    });
+  }
+
+  private locationDefinition(location: LocationInstance): LocationDefinition {
+    const definition = this.getCardDefinition(location.definitionId);
+    if (definition.type !== 'LOCATION')
+      throw new Error('Location instance references a non-Location definition');
+    return definition;
+  }
+
+  private findLocation(entityId: EntityId): LocationInstance | undefined {
+    for (const playerId of this.state.playerOrder) {
+      const location = this.side(playerId).locations[entityId];
+      if (location) return location;
+    }
+    return undefined;
   }
 
   /**
@@ -1598,6 +1783,15 @@ function validateSetup(setup: MatchSetup, definitionFor: (id: string) => CardDef
   }
 }
 
-function byInstanceId(first: CreatureInstance, second: CreatureInstance): number {
+/** Creatures and Locations are put on a tile when played; nothing else is. */
+function occupiesTile(definition: CardDefinition): boolean {
+  return definition.type === 'CREATURE' || definition.type === 'LOCATION';
+}
+
+function typeLabel(definition: CardDefinition): string {
+  return definition.type.charAt(0) + definition.type.slice(1).toLowerCase();
+}
+
+function byInstanceId(first: { instanceId: EntityId }, second: { instanceId: EntityId }): number {
   return first.instanceId.localeCompare(second.instanceId, undefined, { numeric: true });
 }

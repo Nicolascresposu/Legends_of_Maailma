@@ -159,6 +159,10 @@ export class ContentPublishingService {
             if (cards.get(creature.definitionId)?.type !== 'CREATURE')
               errors.push(`${creature.definitionId}: scenario requires a Creature`);
           }
+          for (const location of side.startingLocations ?? []) {
+            if (cards.get(location.definitionId)?.type !== 'LOCATION')
+              errors.push(`${location.definitionId}: scenario requires a Location`);
+          }
           for (const id of side.startingArtifacts ?? []) {
             if (cards.get(id)?.type !== 'ARTIFACT')
               errors.push(`${id}: scenario requires an Artifact`);

@@ -115,22 +115,28 @@ would be obfuscation rather than protection.
 Art is a client asset, looked up by convention from the card id the server already sends:
 
 ```text
-apps/godot-client/art/cards/<card_id>.png
+apps/godot-client/art/cards/<expansion_folder>/<card_id>.png
 ```
 
-`wolf.png` is the art for the card `wolf`. Nothing references art in the shared model or the
+`core/wolf.png` is the art for the card `wolf` in the `core` expansion; the folder is the
+expansion's content folder under `packages/card-definitions/content/`. The folder only keeps art
+tidy: art is found by card id in any expansion folder, or directly in `art/cards/`, where older
+art still sits. Nothing references art in the shared model or the
 engine, which the architecture keeps free of UI concepts, and no server change is involved.
 `.webp`, `.jpg` and `.svg` are also accepted, tried in that order after PNG.
 
 A card with no art file still renders, with its name and stats and no picture, so art can be
-added one card at a time. Images are cropped to fill their space rather than stretched.
+added one card at a time. The expansion creator's **Choose art…** copies any image into place
+under the card's id; a file it has just copied is read directly until the Godot editor imports it. Images are cropped to fill their space rather than stretched.
 
 Every card is drawn as a printed card in hand and in the hover reveal, on its type's frame from
 `art/assets/` (`creature_default.png`, `spell_default.png`, `weapon_default.png`,
-`artifact_default.png`, and `location_default.png`, ready for when Locations exist): the card's art
-in the frame's window, the name on the ribbon, cost on the Taika gem, its stats — a Creature's
-Attack and Health on their badges, a Weapon's Attack and Durability in its roundels, an Artifact's
-Durability on its shield — and keywords in the text box (the full rules text on the large reveal).
+`artifact_default.png`, and `location_default.png`): the card's art in the frame's window, the
+name on the ribbon, cost on the Taika gem, its stats — a Creature's Attack and Health on their
+badges, a Weapon's Attack and Durability in its roundels, an Artifact's Durability on its shield,
+a Location's duration on the hourglass (`hourglass.png`) at the lower left and its Durability on
+the shield at the lower right, for whichever of the two it has — and keywords in the text box (the
+full rules text on the large reveal).
 `src/card_frame.gd` places every part as a fraction of each frame, so the regions there are what to
 adjust if the frame art changes shape.
 
@@ -141,6 +147,12 @@ selected or a target. `src/creature_token.gd` draws it. Both ovals are taller th
 so creature art should be authored with its subject in the centre; the sides of wider art are
 cropped away. Live stats are coloured as they drift from the printed card — green when buffed, red
 when damaged or reduced — and a hand card's cost turns red when it cannot be paid for yet.
+
+A Location takes a slot the same way, drawn as its art in the pointed arch of its frame, with the
+hourglass at the arch's foot on the left and the Durability shield on the right. Played, it drops
+into its slot as that arch. Click a lit Location to use it; one that needs a target aims an arrow,
+as a creature's attack does. A used Location is drawn dark and marked "closed" until its owner's
+next turn. `src/location_token.gd` draws it.
 
 Other cards in hand, and artifacts and weapons in play, are laid out as title, art banner, then
 stats; art for them reads best authored wider than tall (roughly 2:1). The collection browser
@@ -206,8 +218,13 @@ Client scripts:
   Loop repeats the selected strength.
 - `src/creature_token_test.gd` — headless, needs no server: checks a creature in play's oval,
   stats, keywords and markers; `--screenshot-dir=` (windowed) saves what it drew.
+- `src/location_token_test.gd` — headless, needs no server: checks a Location in play's arch,
+  hourglass, shield and closed state, and how activations are offered, labelled and logged;
+  `--screenshot-dir=` (windowed) saves what it drew.
 - `src/hand_view_test.gd` — headless, needs no server: checks the hand's fan, hover, holding and
   playing; `--screenshot-dir=` (windowed) saves what it drew.
+- `src/opponent_hand_test.gd` — headless, needs no server: checks the opponent's face-down hand
+  fans as the player's does, mirrored, and hangs off the top of the view.
 - `src/collection_test.gd` — registers an account and builds a deck end to end.
 - `src/economy_test.gd` — reads a balance, opens a pack, crafts, disenchants, and checks that a
   refusal is explained rather than merely relayed.
@@ -238,10 +255,12 @@ godot --path apps/godot-client --script src/reveal_test.gd
 godot --headless --path apps/godot-client --script src/reveal_layout_test.gd
 godot --headless --path apps/godot-client --script src/card_frame_test.gd
 godot --headless --path apps/godot-client --script src/creature_token_test.gd
+godot --headless --path apps/godot-client --script src/location_token_test.gd
 godot --headless --path apps/godot-client --script src/card_play_effect_test.gd
 godot --headless --path apps/godot-client --script src/combat_effect_test.gd
 godot --path apps/godot-client --script src/combat_preview.gd
 godot --headless --path apps/godot-client --script src/hand_view_test.gd
+godot --headless --path apps/godot-client --script src/opponent_hand_test.gd
 godot --path apps/godot-client --script src/collection_test.gd
 godot --path apps/godot-client --script src/economy_test.gd
 godot --headless --path apps/godot-client --script src/trade_test.gd
@@ -623,7 +642,7 @@ replays the original outcome instead of spending twice.
 Accounts, decks, collections, Fragments and trades are PostgreSQL-backed. Active matches still use
 `MatchRepository`, implemented in memory so a Redis-backed store can replace it later. Expansion
 policies and accounts are managed through the admin API and the client's admin panel. Progression, complex boss
-scripting, dynamic battlefield resizing, Locations, and production matchmaking remain outside this
+scripting, dynamic battlefield resizing, and production matchmaking remain outside this
 milestone, as do an auction house, real-money purchases and Fragment transfers between players.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/protocol.md](docs/protocol.md) for the

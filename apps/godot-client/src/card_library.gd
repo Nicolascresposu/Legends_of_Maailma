@@ -34,6 +34,13 @@ const WEAPON_KEYWORD_TEXT := {
 	"RANGED": "Hero attacks with this Weapon can target Creatures in either row and ignore front-row shielding. Ranged attacks against Creatures do not receive retaliation. Guard still applies.",
 }
 
+## A Location's two measures, explained like keywords: the shield on its right
+## and the hourglass on its left. A Location may have either or both.
+const LOCATION_TEXT := {
+	"DURABILITY": "Click this Location to use it. Each use spends 1 Durability and closes it until the start of your next turn. At 0 it crumbles.",
+	"DURATION": "Counts down at the start of your turn. At 0 the Location expires.",
+}
+
 ## The glossary line for a keyword: its name, then what it does.
 ##
 ## RANGED appears in both glossaries and means different things: on a Creature
@@ -189,6 +196,30 @@ func base_health(definition_id: String) -> int:
 func base_durability(definition_id: String) -> int:
 	return int(get_card(definition_id).get("durability", 0))
 
+## Owner turns a Location stands; 0 for one with no hourglass.
+func base_duration(definition_id: String) -> int:
+	return int(get_card(definition_id).get("duration", 0))
+
+## Whether a Location can be activated: only one with Durability can.
+func has_durability(definition_id: String) -> bool:
+	return get_card(definition_id).has("durability")
+
+## Whether a Location runs on an hourglass.
+func has_duration(definition_id: String) -> bool:
+	return get_card(definition_id).has("duration")
+
+## The glossary lines for a Location's measures, in the order they are drawn:
+## hourglass on the left, shield on the right.
+func location_lines(definition_id: String) -> Array[String]:
+	var lines: Array[String] = []
+	if card_type(definition_id) != "LOCATION":
+		return lines
+	if has_duration(definition_id):
+		lines.append("Duration — " + LOCATION_TEXT["DURATION"])
+	if has_durability(definition_id):
+		lines.append("Durability — " + LOCATION_TEXT["DURABILITY"])
+	return lines
+
 ## "MELEE" or "RANGED" for a Weapon, "" for anything else.
 ##
 ## Read straight from the server's definition: the client never guesses reach
@@ -223,6 +254,13 @@ func tooltip(definition_id: String) -> String:
 		if is_ranged_weapon(definition_id):
 			lines.append("")
 			lines.append(keyword_line("RANGED", true))
+	elif kind == "LOCATION":
+		var measures: Array[String] = []
+		if has_duration(definition_id):
+			measures.append("%d turns" % base_duration(definition_id))
+		if has_durability(definition_id):
+			measures.append("%d Durability" % base_durability(definition_id))
+		lines.append("Location — " + " · ".join(measures))
 	elif kind != "":
 		lines.append(kind.capitalize())
 	var tag_list := tags(definition_id)

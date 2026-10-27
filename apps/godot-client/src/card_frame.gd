@@ -21,6 +21,8 @@ const HEALTH_PATH := "res://art/assets/health.png"
 const DURABILITY_PATH := "res://art/assets/durability.png"
 ## The shield, cracked: an Artifact with no Durability left.
 const DURABILITY_ZERO_PATH := "res://art/assets/durability_zero.png"
+## A Location's duration: the turns it has left run out of the hourglass.
+const HOURGLASS_PATH := "res://art/assets/hourglass.png"
 
 ## The frame images' width over their height: the Creature and Spell frames
 ## share this canvas. Every card is laid out at this shape, so cards of all
@@ -36,10 +38,14 @@ const COST_WIDTH := 0.27
 const ATTACK_WIDTH := 0.24
 const HEALTH_WIDTH := 0.2
 const DURABILITY_WIDTH := 0.25
+## The hourglass stands in the middle half of a square image, so it is drawn
+## wider than it looks; its number sits on the glass's waist.
+const HOURGLASS_WIDTH := 0.26
 const COST_CENTRE := Vector2(0.5, 0.485)
 const ATTACK_CENTRE := Vector2(0.49, 0.566)
 const HEALTH_CENTRE := Vector2(0.487, 0.609)
 const DURABILITY_CENTRE := Vector2(0.5, 0.47)
+const HOURGLASS_CENTRE := Vector2(0.5, 0.5)
 
 ## Regions of the Creature frame, as fractions of its width and height: the
 ## art oval, the name on the ribbon beneath it, and the text box below that.
@@ -121,8 +127,8 @@ const ARTIFACT_COST_AT := Vector2(0.115, 0.085)
 const ARTIFACT_DURABILITY_AT := Vector2(0.86, 0.885)
 
 ## Regions of the Location frame: a pointed-arch art window, the name plate,
-## and the text box. Locations are not in the game yet; the frame is ready for
-## when the server sends one.
+## and the text box, with the hourglass at the box's lower left and the
+## Durability shield at its lower right — whichever of the two it has.
 const LOCATION_BODY := Rect2(0.008, 0.001, 0.984, 0.984)
 const LOCATION_ART := Rect2(0.19, 0.114, 0.615, 0.438)
 const LOCATION_ART_OUTLINE := [
@@ -133,8 +139,11 @@ const LOCATION_ART_OUTLINE := [
 	Vector2(0.344, 0.039),
 ]
 const LOCATION_NAME_BAND := Rect2(0.19, 0.584, 0.62, 0.058)
-const LOCATION_TEXT_BOX := Rect2(0.14, 0.69, 0.72, 0.19)
+## Kept clear of the hourglass and the shield.
+const LOCATION_TEXT_BOX := Rect2(0.21, 0.69, 0.58, 0.18)
 const LOCATION_COST_AT := Vector2(0.115, 0.085)
+const LOCATION_DURATION_AT := Vector2(0.135, 0.885)
+const LOCATION_DURABILITY_AT := Vector2(0.865, 0.885)
 
 ## Each framed card type's frame and where its parts go on it. The body is
 ## the card's visible extent within its image, which the ring hugs; the
@@ -207,10 +216,12 @@ var _cost: TextureRect
 var _attack: TextureRect
 var _health: TextureRect
 var _durability: TextureRect
+var _hourglass: TextureRect
 var _cost_value: Label
 var _attack_value: Label
 var _health_value: Label
 var _durability_value: Label
+var _duration_value: Label
 
 ## The text the box shows, kept plain as well so it can be measured.
 var _text_bbcode := ""
@@ -279,15 +290,18 @@ func _init() -> void:
 	add_child(_health)
 	_durability = _image(DURABILITY_PATH)
 	add_child(_durability)
+	_hourglass = _image(HOURGLASS_PATH)
+	add_child(_hourglass)
 	# The numbers go on last so no badge is drawn over another's number.
 	_cost_value = _number()
 	_attack_value = _number()
 	_health_value = _number()
 	_durability_value = _number()
+	_duration_value = _number()
 
 ## Shows a card. `card` carries the same presentation fields as the hover
 ## reveal: definition_id, and where the card is in play, attack, health,
-## max_health, durability and marks. A card with none of the live fields shows
+## max_health, durability, duration and marks. A card with none of the live fields shows
 ## its printed stats. `unaffordable` colours the cost, for a hand card the
 ## player cannot pay for yet.
 func show_card(library: CardLibrary, card: Dictionary) -> void:
@@ -306,16 +320,22 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 
 	# A Creature's Attack and Health sit on badges; a Weapon's Attack and
 	# Durability in its frame's roundels; an Artifact's Durability on its
-	# shield; a Spell or Location has none.
+	# shield; a Location's duration on its hourglass and its Durability on its
+	# shield, for whichever of the two it has; a Spell has none.
 	var is_creature := _kind == "CREATURE"
 	var is_weapon := _kind == "WEAPON"
 	var is_artifact := _kind == "ARTIFACT"
+	var is_location := _kind == "LOCATION"
+	var shielded := is_artifact or (is_location and library.has_durability(definition_id))
+	var timed := is_location and library.has_duration(definition_id)
 	_attack.visible = is_creature
 	_health.visible = is_creature
-	_durability.visible = is_artifact
+	_durability.visible = shielded
+	_hourglass.visible = timed
 	_attack_value.visible = is_creature or is_weapon
 	_health_value.visible = is_creature
-	_durability_value.visible = is_weapon or is_artifact
+	_durability_value.visible = is_weapon or shielded
+	_duration_value.visible = timed
 
 	var base_attack := library.base_attack(definition_id)
 	var attack := _int(card.get("attack", base_attack))
@@ -327,12 +347,17 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 		var max_health := _int(card.get("max_health", maxi(health, base_health)))
 		_health_value.text = str(health)
 		_tint_number(_health_value, health_color(health, max_health, base_health))
-	elif is_weapon or is_artifact:
+	elif is_weapon or shielded:
 		var base_durability := library.base_durability(definition_id)
 		var durability := _int(card.get("durability", base_durability))
 		_durability_value.text = str(durability)
 		_tint_number(_durability_value, durability_color(durability, base_durability))
 		_durability.texture = _texture(DURABILITY_ZERO_PATH if durability <= 0 else DURABILITY_PATH)
+	if timed:
+		var base_duration := library.base_duration(definition_id)
+		var duration := _int(card.get("duration", base_duration))
+		_duration_value.text = str(duration)
+		_tint_number(_duration_value, durability_color(duration, base_duration))
 
 	if detailed:
 		_text_bbcode = library.description_bbcode(definition_id)
@@ -361,6 +386,11 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 		_text_bbcode = "\n".join(bbcode_lines)
 	_layout()
 
+## Shows `texture` in the art window in place of the card's own art, for art
+## that has been chosen but not saved yet.
+func show_art(texture: Texture2D) -> void:
+	_art.texture = texture
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		_layout()
@@ -374,7 +404,9 @@ func draw_outline(canvas: CanvasItem, offset: Vector2, color: Color, width: floa
 	if color.a <= 0.0 and shadow <= 0:
 		return
 	var durability_path := _durability.texture.resource_path if _durability.texture != null else ""
-	var key := "%s:%s:%s:%s:%s" % [_kind, _card_size(), width, shadow, durability_path]
+	# A Location's outline depends on which of its two badges it shows.
+	var badges := "%s%s" % [int(_durability.visible), int(_hourglass.visible)]
+	var key := "%s:%s:%s:%s:%s:%s" % [_kind, _card_size(), width, shadow, durability_path, badges]
 	if not _outline_layers.has(key):
 		_outline_layers[key] = _bake_outline(width, shadow)
 	var layers: Dictionary = _outline_layers[key]
@@ -390,7 +422,7 @@ func draw_outline(canvas: CanvasItem, offset: Vector2, color: Color, width: floa
 func _bake_outline(width: float, shadow: int) -> Dictionary:
 	var contours: Array[PackedVector2Array] = []
 	var bounds := Rect2(Vector2.ZERO, _card_size())
-	for image: TextureRect in [_frame, _cost, _attack, _health, _durability]:
+	for image: TextureRect in [_frame, _cost, _attack, _health, _durability, _hourglass]:
 		if not image.visible or image.texture == null:
 			continue
 		var points := PackedVector2Array()
@@ -506,6 +538,9 @@ func _layout() -> void:
 		_place_number(_durability_value, frame.position + WEAPON_DURABILITY_AT * frame.size, roundel, number_size)
 	elif _kind == "ARTIFACT":
 		_badge(_durability, _durability_value, ARTIFACT_DURABILITY_AT, DURABILITY_WIDTH, DURABILITY_CENTRE, frame, number_size)
+	elif _kind == "LOCATION":
+		_badge(_hourglass, _duration_value, LOCATION_DURATION_AT, HOURGLASS_WIDTH, HOURGLASS_CENTRE, frame, number_size)
+		_badge(_durability, _durability_value, LOCATION_DURABILITY_AT, DURABILITY_WIDTH, DURABILITY_CENTRE, frame, number_size)
 
 ## Where the frame image is drawn within the card: all of it for a frame of
 ## the card's own shape, otherwise as large as fits, centred.

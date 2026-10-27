@@ -410,5 +410,63 @@
     "collectible": true,
     "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
     "flavour": "Dwarven smiths forge hammers to outlast the hands that swing them."
+  },
+  {
+    "id": "border_watchtower",
+    "name": "Border Watchtower",
+    "type": "LOCATION",
+    "cost": 2,
+    "durability": 3,
+    "activation": {
+      "targetMode": "ENEMY_CHARACTER",
+      "effects": [{ "type": "DEAL_DAMAGE", "amount": 1, "target": "PLAY_TARGET" }]
+    },
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "Deal 1 damage to an enemy character.",
+    "flavour": "Three arrows, then the archer runs out of excuses to stay."
+  },
+  {
+    "id": "healing_spring",
+    "name": "Healing Spring",
+    "type": "LOCATION",
+    "cost": 3,
+    "duration": 3,
+    "effects": [
+      {
+        "trigger": "TURN_STARTED",
+        "effect": { "type": "HEAL", "amount": 2, "target": "OWNER_HERO" }
+      }
+    ],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "At the start of your turn, restore 2 Health to your Hero.",
+    "flavour": "It runs a little lower every season, and nobody says why."
+  },
+  {
+    "id": "war_camp",
+    "name": "War Camp",
+    "type": "LOCATION",
+    "cost": 3,
+    "durability": 2,
+    "duration": 3,
+    "activation": {
+      "targetMode": "NONE",
+      "effects": [
+        { "type": "BUFF", "attack": 1, "health": 1, "target": "ADJACENT_FRIENDLY_CREATURES" }
+      ]
+    },
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "RARE",
+    "collectible": true,
+    "description": "Give adjacent friendly Creatures +1/+1.",
+    "flavour": "Pitched for one night. Still standing three wars later."
   }
 ]
