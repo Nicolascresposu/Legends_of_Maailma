@@ -2,9 +2,15 @@ import type { LocationDefinition, Trigger } from '@maailma/game-model';
 
 /**
  * Triggers a Location can answer. It is placed rather than summoned and
- * crumbles rather than dies, so Arrival and Last Breath would never fire.
+ * crumbles rather than dies, so Arrival and Last Breath would never fire —
+ * but it stands beside Creatures, so it can answer theirs.
  */
-const LOCATION_TRIGGERS: readonly Trigger[] = ['TURN_STARTED', 'TURN_ENDED'];
+const LOCATION_TRIGGERS: readonly Trigger[] = [
+  'TURN_STARTED',
+  'TURN_ENDED',
+  'FRIENDLY_CREATURE_SUMMONED',
+  'FRIENDLY_CREATURE_DIED',
+];
 
 /**
  * Rejects a Location whose measures disagree with what it does.

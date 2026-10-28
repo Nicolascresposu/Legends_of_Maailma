@@ -84,6 +84,16 @@ func _init() -> void:
 	_check("the card reveals after the dwell", main.reveal.is_revealing())
 	_check("the reveal is visible", main.reveal.visible)
 
+	# The calls above stand in for the pointer; a real one arrives through the
+	# GUI, and nothing on the board may stop it before the match view sees it.
+	main._hover_at = Vector2.ZERO
+	var motion := InputEventMouseMotion.new()
+	motion.position = at
+	motion.global_position = at
+	# In the view's own coordinates: a headless window is far smaller than it.
+	get_root().push_input(motion, true)
+	_check("a pointer over the board reaches the match view", main._hover_at.is_equal_approx(at))
+
 	# The reveal must show the hovered card, and show it in full: the rules
 	# text is the thing a small board panel cannot fit.
 	var definition_id := str((zone["card"] as Dictionary).get("definition_id", ""))

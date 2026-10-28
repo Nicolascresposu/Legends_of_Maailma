@@ -237,7 +237,7 @@ describe('collection and Fragments', () => {
     expect((await call('PUT', `/users/${player.id}/collection/nope`, { quantity: 1 })).status).toBe(
       404,
     );
-    const absurd = await call('PUT', `/users/${player.id}/collection/wolf`, { quantity: 1000 });
+    const absurd = await call('PUT', `/users/${player.id}/collection/chicken`, { quantity: 1000 });
     expect(absurd.status).toBe(400);
     expect(absurd.body.code).toBe('INVALID_QUANTITY');
   });
@@ -257,10 +257,10 @@ describe('collection and Fragments', () => {
   it('resets a collection to the starter cards', async () => {
     const target = await register('reset');
     await call('PUT', `/users/${target.id}/collection/darek_voln`, { quantity: 1 });
-    await call('PUT', `/users/${target.id}/collection/wolf`, { quantity: 9 });
+    await call('PUT', `/users/${target.id}/collection/chicken`, { quantity: 9 });
     await call('POST', `/users/${target.id}/collection/reset`);
     expect(await owned(target.id, 'darek_voln')).toBe(0);
-    expect(await owned(target.id, 'wolf')).toBe(STARTER_COLLECTION.get('wolf'));
+    expect(await owned(target.id, 'chicken')).toBe(STARTER_COLLECTION.get('chicken'));
   });
 
   it('sets and adjusts Fragments, never below zero', async () => {
@@ -337,7 +337,7 @@ describe('matches', () => {
     const target = await register('debugmatch');
     // Legendaries the player has never owned: ownership is what is skipped.
     const cardIds = [
-      ...starterDeckFor('healer').filter((id) => id !== 'wolf'),
+      ...starterDeckFor('healer').filter((id) => id !== 'chicken'),
       'darek_voln',
       'lio_varga',
     ];
@@ -444,15 +444,15 @@ describe('editing a live match', () => {
     expect(unknown.body.code).toBe('UNKNOWN_CARD');
     const nobody = await call('POST', `/matches/${matchId}/hand`, {
       playerId: 'nobody',
-      cardId: 'wolf',
+      cardId: 'chicken',
     });
     expect(nobody.body.code).toBe('UNKNOWN_PLAYER');
     while (engine.state.sides[target.id]!.hand.length < 10) {
-      await call('POST', `/matches/${matchId}/hand`, { playerId: target.id, cardId: 'wolf' });
+      await call('POST', `/matches/${matchId}/hand`, { playerId: target.id, cardId: 'chicken' });
     }
     const full = await call('POST', `/matches/${matchId}/hand`, {
       playerId: target.id,
-      cardId: 'wolf',
+      cardId: 'chicken',
     });
     expect(full.status).toBe(409);
     expect(full.body.code).toBe('HAND_FULL');
@@ -528,7 +528,7 @@ describe('editing a live match', () => {
     const result = await call(
       'POST',
       `/matches/${matchId}/hand`,
-      { playerId: player.id, cardId: 'wolf' },
+      { playerId: player.id, cardId: 'chicken' },
       player,
     );
     expect(result.status).toBe(404);

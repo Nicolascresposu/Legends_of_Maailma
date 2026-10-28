@@ -2,6 +2,7 @@ import express from 'express';
 import type { Logger } from '../logger.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
+import { matchRandomPool, type ExpansionService } from '../services/expansion-service.js';
 import { DeckNotPlayableError } from '../services/collection-service.js';
 import type { SocialService } from '../services/social-service.js';
 import type { MatchManager } from '../match-manager.js';
@@ -18,6 +19,7 @@ import { requireUser, respondAccountError } from './auth-routes.js';
 export function createSocialRouter(
   social: SocialService,
   decks: DeckService,
+  expansions: ExpansionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -124,7 +126,7 @@ export function createSocialRouter(
   });
 
   router.post('/challenges/:challengeId/accept', (request, response, next) => {
-    acceptChallenge(request, social, decks, manager, lobby, logger)
+    acceptChallenge(request, social, decks, expansions, manager, lobby, logger)
       .then((payload) => response.json(payload))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
@@ -170,6 +172,7 @@ async function acceptChallenge(
   request: express.Request,
   social: SocialService,
   decks: DeckService,
+  expansions: ExpansionService,
   manager: MatchManager,
   lobby: LobbyHub,
   logger: Logger,
@@ -202,23 +205,27 @@ async function acceptChallenge(
     throw error;
   }
 
-  const engine = manager.create({
-    scenarioId: challenge.scenarioId,
-    players: [
-      {
-        playerId: challenge.challengerId,
-        deck: challengerDeck.cardIds,
-        heroDefinitionId: challengerDeck.heroId,
-        controller: 'HUMAN',
-      },
-      {
-        playerId: opponentId,
-        deck: opponentDeck.cardIds,
-        heroDefinitionId: opponentDeck.heroId,
-        controller: 'HUMAN',
-      },
-    ],
-  });
+  const randomPool = matchRandomPool(await expansions.policies());
+  const engine = manager.create(
+    {
+      scenarioId: challenge.scenarioId,
+      players: [
+        {
+          playerId: challenge.challengerId,
+          deck: challengerDeck.cardIds,
+          heroDefinitionId: challengerDeck.heroId,
+          controller: 'HUMAN',
+        },
+        {
+          playerId: opponentId,
+          deck: opponentDeck.cardIds,
+          heroDefinitionId: opponentDeck.heroId,
+          controller: 'HUMAN',
+        },
+      ],
+    },
+    { randomPool },
+  );
 
   const updated = await social.markAccepted(challenge.id, engine.state.matchId);
   logger.info('Challenge accepted', {

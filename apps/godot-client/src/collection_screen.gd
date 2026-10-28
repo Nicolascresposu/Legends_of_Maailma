@@ -16,7 +16,13 @@ signal closed()
 ## The player pointed the client at a different server.
 signal server_changed(http_base: String)
 
-const CARD_TILE := Vector2(190, 104)
+## Cards on one page of the collection, laid out in rows of `PAGE_COLUMNS`.
+const CARDS_PER_PAGE := 8
+const PAGE_COLUMNS := 4
+const PAGE_GAP := 14.0
+## The cost filter's last button stands for this cost and above.
+const MAX_COST_FILTER := 7
+const CRAFT_CARD_WIDTH := 260.0
 
 ## Each hero's class, which decides the class cards a deck may hold.
 ##
@@ -42,6 +48,17 @@ var selected_format := "STANDARD"
 var fragments := 0
 ## Packs currently openable, as the server last reported them.
 var available_packs: Array = []
+## The crafting view: every card, owned or not, and a click crafts rather
+## than adds to the deck.
+var crafting := false
+## The collection page showing, from 0.
+var page := 0
+## Only cards of this cost are shown; -1 for every cost, and
+## `MAX_COST_FILTER` for that cost and above.
+var cost_filter := -1
+var search := ""
+## The card open in the crafting panel, or "" when it is closed.
+var crafting_card_id := ""
 
 var _root: VBoxContainer
 var _auth_box: VBoxContainer
@@ -58,7 +75,17 @@ var _name_input: LineEdit
 var _password_input: LineEdit
 var _auth_status: Label
 var _who_label: Label
-var _card_list: VBoxContainer
+## Holds the page's cards, placed by hand so they keep the card's shape.
+var _page_grid: Control
+var _page_label: Label
+var _prev_page: Button
+var _next_page: Button
+var _crafting_button: Button
+var _mode_hint: Label
+var _cost_buttons: Array[Button] = []
+var _search_input: LineEdit
+var _craft_overlay: Control
+var _craft_box: HBoxContainer
 var _deck_list: VBoxContainer
 var _draft_list: VBoxContainer
 var _draft_name: LineEdit
@@ -108,6 +135,8 @@ func _build() -> void:
 	_main_box = _build_main()
 	_root.add_child(_main_box)
 	_main_box.visible = false
+	# Last, so it draws over the page it opens from.
+	add_child(_build_craft_overlay())
 
 func _build_auth() -> Control:
 	_auth_box = VBoxContainer.new()
@@ -317,13 +346,65 @@ func _build_main() -> HBoxContainer:
 	_economy_status.add_theme_font_size_override("font_size", 11)
 	left.add_child(_economy_status)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_child(scroll)
-	_card_list = VBoxContainer.new()
-	_card_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_card_list.add_theme_constant_override("separation", 4)
-	scroll.add_child(_card_list)
+	# Which cards the pages hold: the view, a cost, a name.
+	var filters := HBoxContainer.new()
+	filters.add_theme_constant_override("separation", 4)
+	left.add_child(filters)
+	_crafting_button = Button.new()
+	_crafting_button.text = "Crafting"
+	_crafting_button.toggle_mode = true
+	_crafting_button.tooltip_text = "Show every card, owned or not, to craft or disenchant."
+	_crafting_button.toggled.connect(_set_crafting)
+	filters.add_child(_crafting_button)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	filters.add_child(spacer)
+	for cost in range(MAX_COST_FILTER + 1):
+		var button := Button.new()
+		button.text = "%d+" % cost if cost == MAX_COST_FILTER else str(cost)
+		button.toggle_mode = true
+		button.custom_minimum_size.x = 30
+		button.tooltip_text = "Only cards costing %s Taika" % button.text
+		button.pressed.connect(_set_cost_filter.bind(cost))
+		filters.add_child(button)
+		_cost_buttons.append(button)
+	_search_input = LineEdit.new()
+	_search_input.placeholder_text = "Search"
+	_search_input.custom_minimum_size.x = 140
+	_search_input.clear_button_enabled = true
+	_search_input.text_changed.connect(func(text: String) -> void:
+		search = text.strip_edges()
+		page = 0
+		_render_collection())
+	filters.add_child(_search_input)
+
+	_mode_hint = Label.new()
+	_mode_hint.add_theme_font_size_override("font_size", 11)
+	_mode_hint.add_theme_color_override("font_color", Color(0.66, 0.69, 0.76))
+	left.add_child(_mode_hint)
+
+	# The page, with an arrow either side to turn it; the wheel turns it too.
+	var book := HBoxContainer.new()
+	book.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	book.add_theme_constant_override("separation", 6)
+	left.add_child(book)
+	_prev_page = _page_arrow("‹", "Previous page", -1)
+	book.add_child(_prev_page)
+	_page_grid = Control.new()
+	_page_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_page_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_grid.clip_contents = true
+	_page_grid.resized.connect(_layout_page)
+	_page_grid.gui_input.connect(_on_page_input)
+	book.add_child(_page_grid)
+	_next_page = _page_arrow("›", "Next page", 1)
+	book.add_child(_next_page)
+
+	_page_label = Label.new()
+	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_page_label.add_theme_font_size_override("font_size", 12)
+	left.add_child(_page_label)
+	_update_mode_hint()
 
 	# --- Deck being built ---
 	var right := VBoxContainer.new()
@@ -489,99 +570,304 @@ func _on_signed_out() -> void:
 	collection = []
 	decks = []
 	draft.clear()
+	close_crafting()
 
 # --- Collection -------------------------------------------------------------
 
 func _on_collection_loaded(cards: Array) -> void:
 	collection = cards
 	_render_collection()
+	_render_crafting()
 
-func _render_collection() -> void:
-	_clear(_card_list)
+## The cards the pages hold, cheapest first and then by name, as a
+## Hearthstone collection is ordered.
+##
+## Building a deck shows the cards owned that its class may hold; the
+## crafting view shows every card, owned or not, of every class.
+func visible_entries() -> Array:
+	var shown: Array = []
+	var needle := search.to_lower()
 	for entry in collection:
 		if typeof(entry) != TYPE_DICTIONARY:
 			continue
-		_card_list.add_child(_collection_row(entry))
+		var card_id := str(entry.get("cardId", ""))
+		if not crafting and (int(entry.get("owned", 0)) <= 0 or not _fits_deck_class(entry)):
+			continue
+		var cost := library.cost(card_id)
+		if cost_filter >= 0 and (cost < cost_filter if cost_filter == MAX_COST_FILTER else cost != cost_filter):
+			continue
+		if needle != "" and not library.card_name(card_id).to_lower().contains(needle):
+			continue
+		shown.append(entry)
+	shown.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_id := str(a.get("cardId", ""))
+		var b_id := str(b.get("cardId", ""))
+		if library.cost(a_id) != library.cost(b_id):
+			return library.cost(a_id) < library.cost(b_id)
+		return library.card_name(a_id).naturalnocasecmp_to(library.card_name(b_id)) < 0)
+	return shown
 
-func _collection_row(entry: Dictionary) -> Control:
-	var card_id := str(entry.get("cardId", ""))
+func page_count() -> int:
+	return maxi(1, ceili(visible_entries().size() / float(CARDS_PER_PAGE)))
+
+## The cards on the page showing, in order.
+func page_cards() -> Array[CollectionCard]:
+	var cards: Array[CollectionCard] = []
+	for child in _page_grid.get_children():
+		if child is CollectionCard:
+			cards.append(child)
+	return cards
+
+func _render_collection() -> void:
+	_clear(_page_grid)
+	var shown := visible_entries()
+	var pages := maxi(1, ceili(shown.size() / float(CARDS_PER_PAGE)))
+	page = clampi(page, 0, pages - 1)
+	for entry in shown.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE):
+		var card_id := str(entry.get("cardId", ""))
+		var tile := CollectionCard.make(library, card_id, int(entry.get("owned", 0)), _look_for(entry))
+		tile.tooltip_text = _card_tooltip(entry)
+		tile.clicked.connect(_on_card_clicked.bind(card_id))
+		_page_grid.add_child(tile)
+	if shown.is_empty():
+		var empty := Label.new()
+		empty.text = "No cards here." if crafting else "No cards here. Cards you own appear here; Crafting shows the rest."
+		empty.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		empty.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		empty.grow_vertical = Control.GROW_DIRECTION_BOTH
+		_page_grid.add_child(empty)
+	_page_label.text = "Page %d / %d" % [page + 1, pages]
+	_prev_page.disabled = page <= 0
+	_next_page.disabled = page >= pages - 1
+	_layout_page()
+
+## Places the page's cards in a grid as large as the space allows, keeping the
+## card's shape, with the whole grid centred.
+func _layout_page() -> void:
+	var cards := page_cards()
+	if cards.is_empty() or _page_grid.size.x <= 0.0:
+		return
+	var rows := ceili(CARDS_PER_PAGE / float(PAGE_COLUMNS))
+	var cell := Vector2(
+		(_page_grid.size.x - PAGE_GAP * (PAGE_COLUMNS - 1)) / PAGE_COLUMNS,
+		(_page_grid.size.y - PAGE_GAP * (rows - 1)) / rows - CollectionCard.COUNT_HEIGHT
+	)
+	var width := floorf(minf(cell.x, cell.y * CardFrame.ASPECT))
+	if width <= 0.0:
+		return
+	var card_size := Vector2(width, roundf(width / CardFrame.ASPECT))
+	var step := card_size + Vector2(PAGE_GAP, PAGE_GAP + CollectionCard.COUNT_HEIGHT)
+	var block := step * Vector2(PAGE_COLUMNS, rows) - Vector2(PAGE_GAP, PAGE_GAP)
+	var origin := ((_page_grid.size - block) * 0.5).floor()
+	for index in cards.size():
+		var at := origin + step * Vector2(index % PAGE_COLUMNS, floorf(index / float(PAGE_COLUMNS)))
+		cards[index].place(at, card_size)
+
+func _page_arrow(text: String, tip: String, direction: int) -> Button:
+	var arrow := Button.new()
+	arrow.text = text
+	arrow.tooltip_text = tip
+	arrow.custom_minimum_size = Vector2(34, 0)
+	arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	arrow.add_theme_font_size_override("font_size", 28)
+	arrow.pressed.connect(turn_page.bind(direction))
+	return arrow
+
+func turn_page(direction: int) -> void:
+	var target := clampi(page + direction, 0, page_count() - 1)
+	if target == page:
+		return
+	page = target
+	_render_collection()
+
+func _on_page_input(event: InputEvent) -> void:
+	var wheel := event as InputEventMouseButton
+	if wheel == null or not wheel.pressed:
+		return
+	if wheel.button_index == MOUSE_BUTTON_WHEEL_UP:
+		turn_page(-1)
+		_page_grid.accept_event()
+	elif wheel.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		turn_page(1)
+		_page_grid.accept_event()
+
+func _set_crafting(on: bool) -> void:
+	crafting = on
+	if _crafting_button.button_pressed != on:
+		_crafting_button.set_pressed_no_signal(on)
+	page = 0
+	if not on:
+		close_crafting()
+	_update_mode_hint()
+	_render_collection()
+
+## Shows only cards of `cost`; choosing the cost already chosen shows them all.
+func _set_cost_filter(cost: int) -> void:
+	cost_filter = -1 if cost_filter == cost else cost
+	for index in _cost_buttons.size():
+		_cost_buttons[index].set_pressed_no_signal(index == cost_filter)
+	page = 0
+	_render_collection()
+
+func _update_mode_hint() -> void:
+	if crafting:
+		_mode_hint.text = "Crafting: click a card to craft or disenchant it. Glowing cards can be crafted now."
+	else:
+		_mode_hint.text = "Left-click a card to add it to the deck, right-click to take it out."
+
+## How a card is drawn. Building a deck, a card is darkened once every copy
+## the deck may take is in it; crafting, an unowned card glows blue if it can
+## be crafted now and is greyed if it cannot.
+func _look_for(entry: Dictionary) -> CollectionCard.Look:
 	var owned := int(entry.get("owned", 0))
-	var limit := int(entry.get("copyLimit", 2))
-	var in_deck := int(draft.get(card_id, 0))
+	if crafting:
+		if owned > 0:
+			return CollectionCard.Look.NORMAL
+		return CollectionCard.Look.CRAFTABLE if _can_craft(entry) else CollectionCard.Look.LOCKED
+	return CollectionCard.Look.NORMAL if _addable(entry) > 0 else CollectionCard.Look.SPENT
 
+## Whether a copy can be crafted right now: the expansion allows it, the card
+## is not Basic, and the balance covers it. The server still decides.
+func _can_craft(entry: Dictionary) -> bool:
+	return str(entry.get("rarity", "")) != "BASIC" \
+		and bool(entry.get("craftable", false)) \
+		and fragments >= int(entry.get("craftCost", 0))
+
+## Copies of a card a click could still add to the deck: those owned, up to
+## its copy limit, that are not in it yet — none for another class's card.
+func _addable(entry: Dictionary) -> int:
+	if not _fits_deck_class(entry):
+		return 0
+	var card_id := str(entry.get("cardId", ""))
+	var allowed := mini(int(entry.get("owned", 0)), int(entry.get("copyLimit", 2)))
+	return allowed - int(draft.get(card_id, 0))
+
+func _card_tooltip(entry: Dictionary) -> String:
+	var card_id := str(entry.get("cardId", ""))
+	return "%s\n\n%s\nOwned %d · in deck %d" % [
+		library.tooltip(card_id),
+		_card_marks(entry),
+		int(entry.get("owned", 0)),
+		int(draft.get(card_id, 0)),
+	]
+
+## Building a deck, a left click adds a copy and a right click takes one out;
+## crafting, a left click opens the card's crafting panel.
+func _on_card_clicked(button_index: int, card_id: String) -> void:
+	var entry := _entry_for(card_id)
+	if entry.is_empty():
+		return
+	if crafting:
+		if button_index == MOUSE_BUTTON_LEFT:
+			open_crafting(card_id)
+		return
+	if button_index == MOUSE_BUTTON_LEFT:
+		if _addable(entry) > 0:
+			_add_card(card_id, int(entry.get("copyLimit", 2)))
+	elif button_index == MOUSE_BUTTON_RIGHT and draft.has(card_id):
+		_remove_card(card_id)
+
+# --- Crafting panel ---------------------------------------------------------
+
+func _build_craft_overlay() -> Control:
+	_craft_overlay = Control.new()
+	_craft_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_craft_overlay.visible = false
+	# A click on the dimmed page around the panel closes it.
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+			close_crafting())
+	_craft_overlay.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_craft_overlay.add_child(center)
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	# Unowned cards stay visible but read as locked.
-	style.bg_color = Color(0.17, 0.28, 0.22) if owned > 0 else Color(0.20, 0.17, 0.19)
-	style.set_corner_radius_all(4)
-	style.set_content_margin_all(6)
+	style.bg_color = Color(0.09, 0.10, 0.13, 0.97)
+	style.border_color = Color(0.85, 0.74, 0.44)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(18)
 	panel.add_theme_stylebox_override("panel", style)
+	center.add_child(panel)
+	_craft_box = HBoxContainer.new()
+	_craft_box.add_theme_constant_override("separation", 18)
+	panel.add_child(_craft_box)
+	return _craft_overlay
 
+func open_crafting(card_id: String) -> void:
+	crafting_card_id = card_id
+	_render_crafting()
+
+func close_crafting() -> void:
+	crafting_card_id = ""
+	_render_crafting()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _craft_overlay.visible and event.is_action_pressed("ui_cancel"):
+		close_crafting()
+		get_viewport().set_input_as_handled()
+
+## Draws the open card large, with what is owned and the buttons to craft
+## and disenchant it; redrawn as the collection and balance change under it.
+func _render_crafting() -> void:
+	_clear(_craft_box)
+	var entry := _entry_for(crafting_card_id) if crafting_card_id != "" else {}
+	_craft_overlay.visible = not entry.is_empty()
+	if entry.is_empty():
+		return
+	var card_id := crafting_card_id
+	var frame := CardFrame.make(library, {"definition_id": card_id}, CRAFT_CARD_WIDTH, true)
+	_craft_box.add_child(frame)
+
+	var side := VBoxContainer.new()
+	side.custom_minimum_size.x = 240
+	side.alignment = BoxContainer.ALIGNMENT_CENTER
+	side.add_theme_constant_override("separation", 10)
+	_craft_box.add_child(side)
+	var title := Label.new()
+	title.text = library.card_name(card_id)
+	title.add_theme_font_size_override("font_size", 20)
+	side.add_child(title)
+	var marks := Label.new()
+	marks.text = _card_marks(entry)
+	marks.add_theme_color_override("font_color", Color(0.66, 0.69, 0.76))
+	side.add_child(marks)
+	# Rules too long for the card's box are printed here in full.
+	if not frame.rules_fit:
+		var rules := RichTextLabel.new()
+		rules.bbcode_enabled = true
+		rules.fit_content = true
+		rules.text = library.description_bbcode(card_id)
+		side.add_child(rules)
+	var owned := Label.new()
+	owned.text = "You own %d · a deck may hold %d" % [
+		int(entry.get("owned", 0)), int(entry.get("copyLimit", 2)),
+	]
+	side.add_child(owned)
+	side.add_child(_craft_controls(entry))
+	var balance := Label.new()
+	balance.text = "%d Fragments" % fragments
+	balance.add_theme_font_size_override("font_size", 12)
+	balance.add_theme_color_override("font_color", Color(0.66, 0.69, 0.76))
+	side.add_child(balance)
+	var close := Button.new()
+	close.text = "Close"
+	close.pressed.connect(close_crafting)
+	side.add_child(close)
+
+## The Craft and Disenchant buttons for a card, each enabled only where the
+## server's policies and the balance allow.
+func _craft_controls(entry: Dictionary) -> HBoxContainer:
+	var card_id := str(entry.get("cardId", ""))
+	var owned := int(entry.get("owned", 0))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
-	panel.add_child(row)
-
-	# The collection is a list of rows, so art reads better as a thumbnail here
-	# than as the banner used on a card tile.
-	var art := CardArt.texture_for(card_id)
-	if art != null:
-		var thumb := TextureRect.new()
-		thumb.texture = art
-		thumb.custom_minimum_size = Vector2(52, 34)
-		thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		thumb.clip_contents = true
-		thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		# An unowned card's art is dimmed alongside its text.
-		if owned == 0:
-			thumb.modulate = Color(0.55, 0.55, 0.60)
-		row.add_child(thumb)
-
-	var label := Label.new()
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var kind := library.card_type(card_id)
-	var stats := ""
-	if kind == "CREATURE":
-		stats = "  %d/%d" % [library.base_attack(card_id), library.base_health(card_id)]
-	label.text = "%s   %d Taika%s   %s" % [
-		library.card_name(card_id), library.cost(card_id), stats, _card_marks(entry),
-	]
-	if owned == 0:
-		label.modulate = Color(0.70, 0.70, 0.74)
-	row.add_child(label)
-	var fits := _fits_deck_class(entry)
-
-	var owned_label := Label.new()
-	owned_label.text = "owned %d/%d" % [owned, limit]
-	owned_label.add_theme_font_size_override("font_size", 11)
-	row.add_child(owned_label)
-
-	var in_deck_label := Label.new()
-	in_deck_label.text = "in deck %d" % in_deck
-	in_deck_label.add_theme_font_size_override("font_size", 11)
-	row.add_child(in_deck_label)
-
-	var add := Button.new()
-	add.text = "+"
-	add.tooltip_text = library.tooltip(card_id)
-	# A card may be added up to its copy limit even when unowned: the deck is
-	# saved either way, and readiness explains what is missing. Another class's
-	# card is different — no amount of collecting makes it legal here.
-	add.disabled = in_deck >= limit or not fits
-	if not fits:
-		add.tooltip_text = "%s is a %s card; this is a %s deck." % [
-			library.card_name(card_id),
-			_class_name(str(entry.get("classId", ""))),
-			_class_name(_deck_class()),
-		]
-	add.pressed.connect(_add_card.bind(card_id, limit))
-	row.add_child(add)
-
-	var remove := Button.new()
-	remove.text = "−"
-	remove.disabled = in_deck <= 0
-	remove.pressed.connect(_remove_card.bind(card_id))
-	row.add_child(remove)
 
 	# Crafting and disenchanting are offered only where the server says the
 	# expansion currently allows them. This is presentation: the server refuses
@@ -619,7 +905,7 @@ func _collection_row(entry: Dictionary) -> Control:
 		dust.tooltip_text = "You own none of this card"
 	dust.pressed.connect(func() -> void: accounts.disenchant_card(card_id, 1))
 	row.add_child(dust)
-	return panel
+	return row
 
 ## "[Wizard · Common]": a card's class, if it has one, and its rarity.
 func _card_marks(entry: Dictionary) -> String:
@@ -661,6 +947,8 @@ func _add_card(card_id: String, limit: int) -> void:
 	_render_draft()
 
 func _remove_card(card_id: String) -> void:
+	if not draft.has(card_id):
+		return
 	var current := int(draft.get(card_id, 0))
 	if current <= 1:
 		draft.erase(card_id)
@@ -680,8 +968,12 @@ func draft_card_ids() -> Array:
 func _render_draft() -> void:
 	_clear(_draft_list)
 	var total := 0
+	# In cost order, as the collection's pages are.
 	var keys := draft.keys()
-	keys.sort()
+	keys.sort_custom(func(a: Variant, b: Variant) -> bool:
+		if library.cost(str(a)) != library.cost(str(b)):
+			return library.cost(str(a)) < library.cost(str(b))
+		return library.card_name(str(a)).naturalnocasecmp_to(library.card_name(str(b))) < 0)
 	for card_id in keys:
 		var count := int(draft[card_id])
 		total += count
@@ -910,8 +1202,9 @@ func _clear(node: Node) -> void:
 func _on_fragments_changed(balance: int) -> void:
 	fragments = balance
 	_fragments_label.text = "%d Fragments" % balance
-	# Affordability is drawn from the balance, so the rows follow it.
+	# Affordability is drawn from the balance, so the cards follow it.
 	_render_collection()
+	_render_crafting()
 
 func _on_economy_result(operation: String, result: Dictionary) -> void:
 	match operation:

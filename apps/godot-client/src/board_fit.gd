@@ -12,6 +12,9 @@ var content: Control
 
 func _init() -> void:
 	clip_contents = true
+	# The board's clicks and hovers are hit-tested by the match view above it,
+	# so they must pass through; a bare Control would stop them here.
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	resized.connect(fit)
 
 func set_content(control: Control) -> void:

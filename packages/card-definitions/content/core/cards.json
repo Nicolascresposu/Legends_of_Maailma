@@ -1,28 +1,11 @@
 [
   {
-    "id": "wolf",
-    "name": "Wolf",
+    "id": "chicken",
+    "name": "Chicken",
     "type": "CREATURE",
     "cost": 1,
     "attack": 2,
     "health": 1,
-    "tags": ["BEAST"],
-    "keywords": [],
-    "effects": [],
-    "source": "CORE",
-    "expansionId": "CORE",
-    "rarity": "COMMON",
-    "collectible": true,
-    "description": "No special abilities.",
-    "flavour": "The first to find you, and never the last."
-  },
-  {
-    "id": "brown_bear",
-    "name": "Brown Bear",
-    "type": "CREATURE",
-    "cost": 3,
-    "attack": 3,
-    "health": 4,
     "tags": ["BEAST"],
     "keywords": [],
     "effects": [],
@@ -30,50 +13,58 @@
     "expansionId": "CORE",
     "rarity": "BASIC",
     "collectible": true,
-    "description": "No special abilities.",
+    "description": "",
+    "flavour": "She's a fighter!",
+    "artist": "Aaron Blaise"
+  },
+  {
+    "id": "black_bear",
+    "name": "Black Bear",
+    "type": "CREATURE",
+    "cost": 4,
+    "attack": 4,
+    "health": 5,
+    "tags": ["BEAST"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "BASIC",
+    "collectible": true,
+    "description": "",
     "flavour": "It does not want your camp. It wants what is in your camp."
   },
   {
-    "id": "hawk",
-    "name": "Hawk",
+    "id": "lion",
+    "name": "Lion",
     "type": "CREATURE",
-    "cost": 2,
-    "attack": 2,
-    "health": 1,
+    "cost": 6,
+    "attack": 6,
+    "health": 7,
     "tags": ["BEAST"],
-    "keywords": ["SWIFT"],
+    "keywords": [],
+    "effects": [],
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "BASIC",
+    "collectible": true,
+    "description": ""
+  },
+  {
+    "id": "giant",
+    "name": "Giant",
+    "type": "CREATURE",
+    "cost": 7,
+    "attack": 7,
+    "health": 8,
+    "tags": [],
+    "keywords": [],
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
     "rarity": "COMMON",
     "collectible": true,
-    "description": "**Swift**",
-    "flavour": "Seen before it is heard, and gone before either."
-  },
-  {
-    "id": "giant_rat",
-    "name": "Giant Rat",
-    "type": "CREATURE",
-    "cost": 1,
-    "attack": 1,
-    "health": 1,
-    "tags": ["BEAST"],
-    "keywords": ["LAST_BREATH"],
-    "effects": [
-      {
-        "trigger": "LAST_BREATH",
-        "effect": {
-          "type": "DRAW_CARD",
-          "amount": 1
-        }
-      }
-    ],
-    "source": "CORE",
-    "expansionId": "CORE",
-    "rarity": "COMMON",
-    "collectible": true,
-    "description": "**Last Breath:** Draw a card.",
-    "flavour": "Where there is one, there are more in the walls."
+    "description": ""
   },
   {
     "id": "hunting_spider",
@@ -87,7 +78,7 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
     "description": "**Hidden**",
     "flavour": "The web is only a warning. The spider is the trap."
@@ -104,7 +95,7 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
     "description": "**Ranged**",
     "flavour": "Elves measure distance in heartbeats, not paces."
@@ -121,7 +112,7 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
     "description": "**Guard**",
     "flavour": "\"Through me, or not at all.\""
@@ -133,14 +124,14 @@
     "cost": 2,
     "attack": 3,
     "health": 2,
-    "tags": ["HUMAN", "SOLDIER"],
+    "tags": ["HUMAN"],
     "keywords": [],
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
-    "description": "No special abilities.",
+    "description": "",
     "flavour": "Loyal to the last coin, and not one coin further."
   },
   {
@@ -158,15 +149,15 @@
         "effect": {
           "type": "HEAL",
           "amount": 3,
-          "target": "OWNER_HERO"
+          "target": "PLAY_TARGET"
         }
       }
     ],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
-    "description": "**Arrival:** Restore 3 Health to your Hero.",
+    "description": "**Arrival:** Restore 3 Health to a friendly character.",
     "flavour": "Bandages first. Questions never.",
     "classId": "PRIEST"
   },
@@ -174,10 +165,10 @@
     "id": "apprentice_mage",
     "name": "Apprentice Mage",
     "type": "CREATURE",
-    "cost": 3,
+    "cost": 2,
     "attack": 2,
     "health": 2,
-    "tags": ["HUMAN", "MAGE"],
+    "tags": ["HUMAN"],
     "keywords": ["ARRIVAL"],
     "effects": [
       {
@@ -191,7 +182,7 @@
     ],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
     "description": "**Arrival:** Deal 1 damage to an enemy character.",
     "flavour": "The spell works. The aim is still being taught.",
@@ -209,7 +200,7 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
     "description": "**Ward**",
     "flavour": "Built to keep the old machines running, it keeps itself running too."
@@ -258,13 +249,21 @@
           "amount": 2,
           "target": "OWNER_HERO"
         }
+      },
+      {
+        "trigger": "LAST_BREATH",
+        "effect": {
+          "type": "DEAL_DAMAGE",
+          "amount": 1,
+          "target": "RANDOM_ENEMY_CREATURE"
+        }
       }
     ],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "LEGENDARY",
     "collectible": true,
-    "description": "**Last Breath:** Restore 2 Health to your Hero.",
+    "description": "**Last Breath:** Restore 2 Health to your Hero and deal 1 damage to a random enemy creature",
     "flavour": "Its final directive is the same as its first."
   },
   {
@@ -321,9 +320,9 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
-    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "description": "",
     "flavour": "Its edge is long gone. Its bite is not."
   },
   {
@@ -340,7 +339,7 @@
     "expansionId": "CORE",
     "rarity": "COMMON",
     "collectible": true,
-    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "description": "",
     "flavour": "Plain, honest, and sharp enough."
   },
   {
@@ -357,7 +356,7 @@
     "expansionId": "CORE",
     "rarity": "COMMON",
     "collectible": true,
-    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "description": "",
     "flavour": "Swung once, and remembered by everyone who was there."
   },
   {
@@ -372,9 +371,9 @@
     "effects": [],
     "source": "CORE",
     "expansionId": "CORE",
-    "rarity": "COMMON",
+    "rarity": "BASIC",
     "collectible": true,
-    "description": "**Ranged**. Your Hero attacks with this Weapon.",
+    "description": "**Ranged**.",
     "flavour": "Strung with sinew, and with patience."
   },
   {
@@ -391,7 +390,7 @@
     "expansionId": "CORE",
     "rarity": "COMMON",
     "collectible": true,
-    "description": "**Ranged**. Your Hero attacks with this Weapon.",
+    "description": "**Ranged**.",
     "flavour": "Taller than its archer, and it carries farther than any shout."
   },
   {
@@ -408,7 +407,7 @@
     "expansionId": "CORE",
     "rarity": "RARE",
     "collectible": true,
-    "description": "Your Hero attacks with this Weapon. Creatures it strikes hit back.",
+    "description": "",
     "flavour": "Dwarven smiths forge hammers to outlast the hands that swing them."
   },
   {
@@ -419,7 +418,13 @@
     "durability": 3,
     "activation": {
       "targetMode": "ENEMY_CHARACTER",
-      "effects": [{ "type": "DEAL_DAMAGE", "amount": 1, "target": "PLAY_TARGET" }]
+      "effects": [
+        {
+          "type": "DEAL_DAMAGE",
+          "amount": 1,
+          "target": "PLAY_TARGET"
+        }
+      ]
     },
     "effects": [],
     "source": "CORE",
@@ -438,7 +443,11 @@
     "effects": [
       {
         "trigger": "TURN_STARTED",
-        "effect": { "type": "HEAL", "amount": 2, "target": "OWNER_HERO" }
+        "effect": {
+          "type": "HEAL",
+          "amount": 2,
+          "target": "OWNER_HERO"
+        }
       }
     ],
     "source": "CORE",
@@ -458,7 +467,12 @@
     "activation": {
       "targetMode": "NONE",
       "effects": [
-        { "type": "BUFF", "attack": 1, "health": 1, "target": "ADJACENT_FRIENDLY_CREATURES" }
+        {
+          "type": "BUFF",
+          "attack": 1,
+          "health": 1,
+          "target": "ADJACENT_FRIENDLY_CREATURES"
+        }
       ]
     },
     "effects": [],
@@ -468,5 +482,22 @@
     "collectible": true,
     "description": "Give adjacent friendly Creatures +1/+1.",
     "flavour": "Pitched for one night. Still standing three wars later."
+  },
+  {
+    "id": "rat",
+    "name": "Rat",
+    "cost": 0,
+    "source": "CORE",
+    "expansionId": "CORE",
+    "rarity": "COMMON",
+    "collectible": true,
+    "description": "",
+    "type": "CREATURE",
+    "attack": 1,
+    "health": 1,
+    "tags": [],
+    "keywords": [],
+    "effects": [],
+    "artist": "Russell Dongjun Lu"
   }
 ]

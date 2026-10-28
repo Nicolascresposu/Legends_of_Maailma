@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  EXPANSION_DEFINITIONS,
   getHeroDefinition,
   captureCardContent,
   getScenarioDefinition,
@@ -15,6 +16,7 @@ import type {
 } from '@maailma/game-model';
 import type { CreateMatchPlayer, CreateMatchRequest } from '@maailma/protocol';
 import { InMemoryMatchRepository, type MatchRepository } from './match-repository.js';
+import { matchRandomPool } from './services/expansion-service.js';
 
 export interface ManagedActionResult {
   ok: boolean;
@@ -36,6 +38,16 @@ export const AI_PLAYER_ID = 'ai';
 /** Told when a match changes other than through a player's own action. */
 export type MatchChangeListener = (matchId: string, events: GameEvent[]) => void;
 
+/** Server-side choices about a new match that no client may make. */
+export interface MatchOptions {
+  /**
+   * The cards random effects may draw from; see `MatchSetup.randomPool`.
+   * Callers with live policy pass `matchRandomPool` of it; left out, the
+   * shipped policies decide, which hide unreleased expansions just the same.
+   */
+  randomPool?: readonly string[];
+}
+
 export class MatchManager {
   private readonly ai = new BasicAIController();
   /** Matches still waiting for an opponent, by match id. */
@@ -44,8 +56,15 @@ export class MatchManager {
 
   constructor(private readonly matches: MatchRepository = new InMemoryMatchRepository()) {}
 
-  create(request: CreateMatchRequest): GameEngine {
-    const engine = this.build(request.scenarioId, request.seed ?? randomUUID(), request.players);
+  create(request: CreateMatchRequest, options: MatchOptions = {}): GameEngine {
+    const engine = this.build(
+      request.scenarioId,
+      request.seed ?? randomUUID(),
+      request.players,
+      randomUUID(),
+      captureCardContent(),
+      options.randomPool ?? matchRandomPool(EXPANSION_DEFINITIONS),
+    );
     this.matches.save(engine);
     return engine;
   }
@@ -57,16 +76,22 @@ export class MatchManager {
    * take the seat, through `claimSeat`. Until then nobody may act, so the
    * creator cannot get a turn in before an opponent has even arrived.
    */
-  createWithOpenSeat(request: {
-    scenarioId: string;
-    seed?: number | string;
-    creator: CreateMatchPlayer;
-  }): GameEngine {
-    const engine = this.create({
-      scenarioId: request.scenarioId,
-      ...(request.seed === undefined ? {} : { seed: request.seed }),
-      players: [request.creator, { playerId: OPEN_SEAT_ID, controller: 'HUMAN' }],
-    });
+  createWithOpenSeat(
+    request: {
+      scenarioId: string;
+      seed?: number | string;
+      creator: CreateMatchPlayer;
+    },
+    options: MatchOptions = {},
+  ): GameEngine {
+    const engine = this.create(
+      {
+        scenarioId: request.scenarioId,
+        ...(request.seed === undefined ? {} : { seed: request.seed }),
+        players: [request.creator, { playerId: OPEN_SEAT_ID, controller: 'HUMAN' }],
+      },
+      options,
+    );
     this.openSeats.add(engine.state.matchId);
     return engine;
   }
@@ -83,7 +108,8 @@ export class MatchManager {
    * placeholder deck was already shuffled and dealt, and a fresh engine from
    * the same seed is the one way to deal the real deck as fairly as the first.
    * Nothing has happened yet — no one could act while the seat was open — so
-   * there is nothing a rebuild could lose.
+   * there is nothing a rebuild could lose. It keeps the content and random
+   * pool the match was created with, so both seats play the same match.
    */
   claimSeat(matchId: string, player: CreateMatchPlayer): GameEngine {
     const engine = this.matches.get(matchId);
@@ -99,6 +125,7 @@ export class MatchManager {
       players,
       matchId,
       engine.content,
+      engine.setup.randomPool,
     );
     this.matches.save(rebuilt);
     this.openSeats.delete(matchId);
@@ -161,8 +188,9 @@ export class MatchManager {
     scenarioId: string,
     seed: number | string,
     requested: CreateMatchRequest['players'],
-    matchId: string = randomUUID(),
-    content: CardContentSnapshot = captureCardContent(),
+    matchId: string,
+    content: CardContentSnapshot,
+    randomPool: readonly string[] | undefined,
   ): GameEngine {
     const scenario = getScenarioDefinition(scenarioId);
     const sides = [scenario.sideA, scenario.sideB] as const;
@@ -187,6 +215,11 @@ export class MatchManager {
     const setup: MatchSetup = {
       matchId,
       content,
+      // Policy is read before content is captured, so a publication in
+      // between can remove a pooled card; the pool keeps only what the match has.
+      ...(randomPool
+        ? { randomPool: randomPool.filter((id) => Object.hasOwn(content.cards, id)) }
+        : {}),
       scenario: structuredClone(scenario),
       seed,
       players,

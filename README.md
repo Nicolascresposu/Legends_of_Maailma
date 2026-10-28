@@ -52,9 +52,13 @@ away entirely. If the server refuses the play, the card comes back to the hand a
 out fades where it is. `src/card_play_effect.gd` draws this, from a copy of the card rendered
 offscreen, so the shards carry the card's real pixels.
 
-The client opens on the collection screen: sign in or create an account, browse every collectible
-card with the copies you own, and build decks. Cards you do not own stay visible but dimmed, and
-the deck panel shows the server's verdict live — card count, and any card you lack copies of.
+The client opens on the collection screen: sign in or create an account, then page through your
+cards eight at a time, cheapest first (the arrows or the mouse wheel turn the page; the cost buttons
+and search narrow it). While building a deck the pages hold the cards you own that the deck's class
+may use: left-click a card to add a copy, right-click to take one out. **Crafting** shows every
+card instead: unowned cards you can craft now glow blue, the rest are greyed out, and clicking a
+card opens its Craft and Disenchant panel. The deck panel shows the server's verdict live — card
+count, and any card you lack copies of.
 A deck that is not ready can still be saved; it simply cannot be made active or played. The
 active deck is the one the deck picker lists first.
 
@@ -171,6 +175,8 @@ in a separate `flavour` field and is shown dimmed and in italics beneath it. Bot
 small markup — `**bold**`, `*italic*` — that the reveal renders as formatting and tooltips, which
 cannot style text, show with the markup stripped. The card registry refuses to load if a
 description is missing, its markup is unbalanced, or a keyword the card has is not printed bold.
+An optional `artist` field credits the card's art; it is plain text, shown small beneath the
+flavour as "Art: …".
 
 Keywords are spelled out rather than listed. The server sends them as bare identifiers — `GUARD`,
 `WARD` — because the rules are the engine's; what they mean to a player is presentation, so the
@@ -278,8 +284,9 @@ laid-out rects.
 - `packages/game-model` — JSON-compatible domain types, actions, events, state, and scenarios.
 - `packages/rng` — serializable seeded random number generator.
 - `packages/card-definitions` — immutable card, class, Hero, expansion, pack, starter deck, and
-  scenario data, plus the crafting price table. Expansions, cards and packs are authored in
-  `content/<expansion>/` JSON files; see [Creating expansion content](docs/content.md).
+  scenario data, plus the crafting price table. Expansions, cards, packs, starter decks and
+  scenarios are authored in `content/<expansion>/` JSON files; see
+  [Creating expansion content](docs/content.md).
 - `packages/game-engine` — battlefield rules, event/effect queue, controllers, decks, pack
   generation, and replay.
 - `packages/protocol` — transport-neutral client/server messages.

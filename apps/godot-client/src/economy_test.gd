@@ -95,7 +95,7 @@ func _init() -> void:
 			bear = entry
 	_check("the Brown Bear is listed as Basic", str(bear.get("rarity", "")) == "BASIC")
 	if not bear.is_empty():
-		var row := screen._collection_row(bear)
+		var row := screen._craft_controls(bear)
 		var craft: Button = null
 		var dust: Button = null
 		for button in row.find_children("*", "Button", true, false):

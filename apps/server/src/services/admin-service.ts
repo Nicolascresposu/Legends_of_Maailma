@@ -450,7 +450,9 @@ export class AdminService {
    * the only thing skipped — the engine still judges the deck, class included
    * — and the account plays it under its own id, so it can join from a client
    * signed in as that player. Against an AI scenario it starts at once; a PvP
-   * scenario waits with its seat open, like any other.
+   * scenario waits with its seat open, like any other. Random effects draw
+   * from every expansion, released or not, so an unreleased set's "summon a
+   * random X" can be tried before launch.
    */
   async startDebugMatch(input: {
     userId?: unknown;
@@ -478,20 +480,24 @@ export class AdminService {
       : starterDeckFor(heroId);
     const player = { playerId: userId, heroDefinitionId: heroId, deck: cardIds };
     const { manager } = this.services;
+    const options = { randomPool: Object.keys(CARD_DEFINITIONS) };
     try {
       const engine =
         scenario.sideB.controller === 'AI'
-          ? manager.create({
-              scenarioId,
-              players: [
-                { ...player, controller: 'HUMAN' },
-                { playerId: AI_PLAYER_ID, controller: 'AI' },
-              ],
-            })
-          : manager.createWithOpenSeat({
-              scenarioId,
-              creator: { ...player, controller: 'HUMAN' },
-            });
+          ? manager.create(
+              {
+                scenarioId,
+                players: [
+                  { ...player, controller: 'HUMAN' },
+                  { playerId: AI_PLAYER_ID, controller: 'AI' },
+                ],
+              },
+              options,
+            )
+          : manager.createWithOpenSeat(
+              { scenarioId, creator: { ...player, controller: 'HUMAN' } },
+              options,
+            );
       return matchSummary(engine);
     } catch (error) {
       // The engine's deck rules still apply; say which one was broken.

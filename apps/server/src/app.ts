@@ -15,7 +15,7 @@ import type { ExpansionService } from './services/expansion-service.js';
 import type { EconomyService } from './services/economy-service.js';
 import type { PackService } from './services/pack-service.js';
 import type { TradeService } from './services/trade-service.js';
-import { visibleCards } from './services/expansion-service.js';
+import { matchRandomPool, visibleCards } from './services/expansion-service.js';
 import { attachUser, createAuthRouter } from './routes/auth-routes.js';
 import { createDeckRouter } from './routes/deck-routes.js';
 import { createCollectionRouter } from './routes/collection-routes.js';
@@ -107,9 +107,16 @@ export function createApp(
     response.json(Object.values(SCENARIO_DEFINITIONS)),
   );
 
-  app.post('/api/matches', (request, response) => {
+  app.post('/api/matches', async (request, response) => {
+    // Live policy where there is a database, else the shipped defaults, as
+    // the card registry above: either way an unreleased card is never drawn.
+    const policies = services
+      ? await services.expansions.policies().catch(() => EXPANSION_DEFINITIONS)
+      : EXPANSION_DEFINITIONS;
     try {
-      const engine = manager.create(request.body as CreateMatchRequest);
+      const engine = manager.create(request.body as CreateMatchRequest, {
+        randomPool: matchRandomPool(policies),
+      });
       logger.info('Match created', {
         requestId: request.requestId,
         matchId: engine.state.matchId,
@@ -197,14 +204,21 @@ export function createApp(
     app.use('/api/economy', createEconomyRouter(services.economy, logger));
     app.use('/api/packs', createPackRouter(services.packs, logger));
     app.use('/api/trades', createTradeRouter(services.trades, logger));
-    app.use('/api/play', createPlayRouter(services.decks, manager, logger));
+    app.use('/api/play', createPlayRouter(services.decks, services.expansions, manager, logger));
     if (services.prisma) {
       const admin = new AdminService({ ...services, prisma: services.prisma, manager });
       app.use('/api/admin', createAdminRouter(admin, logger));
     }
     app.use(
       '/api/social',
-      createSocialRouter(services.social, services.decks, manager, services.lobby, logger),
+      createSocialRouter(
+        services.social,
+        services.decks,
+        services.expansions,
+        manager,
+        services.lobby,
+        logger,
+      ),
     );
   }
 

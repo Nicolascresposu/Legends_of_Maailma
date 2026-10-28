@@ -46,6 +46,7 @@ var _stats: Label
 var _keywords: Label
 var _rules: RichTextLabel
 var _flavour: RichTextLabel
+var _artist: Label
 var _marks: Label
 
 ## What is currently revealed, so a repaint of the same card is a no-op and a
@@ -179,6 +180,14 @@ func _build() -> void:
 	_flavour.add_theme_color_override("default_color", COLOR_DIM)
 	column.add_child(_flavour)
 
+	# The art credit, small beneath the story, as a printed card signs its art.
+	_artist = Label.new()
+	_artist.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_artist.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_artist.add_theme_font_size_override("font_size", 10)
+	_artist.add_theme_color_override("font_color", COLOR_DIM)
+	column.add_child(_artist)
+
 	# What the creature cannot do right now ("acted", "sick").
 	_marks = Label.new()
 	_marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -286,7 +295,7 @@ func _fill(card: Dictionary) -> void:
 	_title.text = library.card_name(definition_id)
 
 	var kind := library.card_type(definition_id)
-	var cost := library.cost(definition_id)
+	var cost := int(card.get("cost", library.cost(definition_id)))
 	var parts: Array[String] = []
 	if kind != "":
 		parts.append(kind.capitalize())
@@ -342,6 +351,10 @@ func _fill(card: Dictionary) -> void:
 	var story := library.flavour_bbcode(definition_id)
 	_flavour.text = story
 	_flavour.visible = story != ""
+
+	var credit := library.artist_credit(definition_id)
+	_artist.text = credit
+	_artist.visible = credit != ""
 
 	var marks := str(card.get("marks", ""))
 	_marks.text = marks

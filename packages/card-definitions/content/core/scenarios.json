@@ -1,0 +1,66 @@
+[
+  {
+    "id": "STANDARD_PVP",
+    "name": "Standard Duel",
+    "expansionId": "CORE",
+    "battlefield": {
+      "width": 3
+    },
+    "sideA": {
+      "heroDefinitionId": "healer",
+      "heroHealth": 30,
+      "startingTaika": 1,
+      "maxTaika": 10,
+      "controller": "HUMAN"
+    },
+    "sideB": {
+      "heroDefinitionId": "striker",
+      "heroHealth": 30,
+      "startingTaika": 1,
+      "maxTaika": 10,
+      "controller": "HUMAN"
+    },
+    "victoryConditions": [
+      {
+        "type": "ENEMY_HERO_DEFEATED"
+      }
+    ]
+  },
+  {
+    "id": "BANDIT_AMBUSH",
+    "name": "Bandit Ambush",
+    "expansionId": "CORE",
+    "battlefield": {
+      "width": 2
+    },
+    "sideA": {
+      "heroDefinitionId": "healer",
+      "heroHealth": 30,
+      "startingTaika": 1,
+      "maxTaika": 10,
+      "controller": "HUMAN"
+    },
+    "sideB": {
+      "heroDefinitionId": "striker",
+      "heroHealth": 20,
+      "startingTaika": 1,
+      "maxTaika": 10,
+      "controller": "AI",
+      "startingCreatures": [
+        {
+          "definitionId": "human_mercenary",
+          "position": {
+            "row": "FRONT",
+            "column": 0
+          }
+        }
+      ],
+      "startingWeapon": "rusty_dagger"
+    },
+    "victoryConditions": [
+      {
+        "type": "ENEMY_HERO_DEFEATED"
+      }
+    ]
+  }
+]

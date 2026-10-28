@@ -8,6 +8,12 @@ class_name CardLibrary
 
 signal loaded()
 
+## Card types whose tags are left off the printed card. Rules still match
+## them, and the hover reveal still lists them.
+const UNPRINTED_TAG_TYPES := ["WEAPON"]
+## Tags left off every printed card, whatever its type.
+const UNPRINTED_TAGS: Array[String] = []
+
 ## What each keyword does, in the player's words.
 ##
 ## The server sends keywords as bare identifiers — "GUARD", "SWIFT" — because
@@ -15,7 +21,7 @@ signal loaded()
 ## presentation, so the glossary lives here. It describes the engine's actual
 ## behaviour; a keyword with no entry simply shows its name.
 const KEYWORD_TEXT := {
-	"ARRIVAL": "Triggers an effect when this Creature enters play.",
+	"ARRIVAL": "Triggers an effect when this Creature is played from hand.",
 	"LAST_BREATH": "Triggers an effect when this Creature dies.",
 	"GUARD": "Protects your Hero and adjacent Creatures from attack.",
 	"SWIFT": "Can attack Creatures the turn it is summoned, but not the Hero.",
@@ -89,6 +95,10 @@ func cost(definition_id: String) -> int:
 func card_type(definition_id: String) -> String:
 	return str(get_card(definition_id).get("type", ""))
 
+## BASIC, COMMON, RARE, EPIC or LEGENDARY; empty for a card not in the library.
+func rarity(definition_id: String) -> String:
+	return str(get_card(definition_id).get("rarity", ""))
+
 ## The card's description exactly as the server sent it, markup included.
 func description(definition_id: String) -> String:
 	return str(get_card(definition_id).get("description", ""))
@@ -117,6 +127,15 @@ func flavour_bbcode(definition_id: String) -> String:
 
 func flavour_plain(definition_id: String) -> String:
 	return markup_to_plain(flavour(definition_id))
+
+## Who made the card's art; "" when the card credits no one.
+func artist(definition_id: String) -> String:
+	return str(get_card(definition_id).get("artist", "")).strip_edges()
+
+## The art credit as it is printed, e.g. "Art: Russell Lu"; "" for none.
+func artist_credit(definition_id: String) -> String:
+	var name := artist(definition_id)
+	return "Art: " + name if name != "" else ""
 
 ## Splits description markup into runs of one emphasis each.
 ##
@@ -185,6 +204,17 @@ func tags(definition_id: String) -> Array:
 	var card := get_card(definition_id)
 	var list: Variant = card.get("tags", [])
 	return list if typeof(list) == TYPE_ARRAY else []
+
+## How a card's tags are printed on it: `["DWARF", "MECHANIC"]` →
+## "Dwarf · Mechanic". "" for a card with none, or none that are printed.
+func tag_line(definition_id: String) -> String:
+	if UNPRINTED_TAG_TYPES.has(card_type(definition_id)):
+		return ""
+	var names: Array[String] = []
+	for tag in tags(definition_id):
+		if not UNPRINTED_TAGS.has(str(tag)):
+			names.append(str(tag).capitalize())
+	return " · ".join(names)
 
 ## Base stats, used for hand cards that have no board instance yet.
 func base_attack(definition_id: String) -> int:

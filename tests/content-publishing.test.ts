@@ -13,7 +13,9 @@ import {
   getCardDefinition,
   getExpansionDefinition,
   getPackDefinition,
+  getScenarioDefinition,
   starterDeckFor,
+  STARTER_COLLECTION,
 } from '@maailma/card-definitions';
 import { createReplay, replayMatch, stableStateJson } from '@maailma/game-engine';
 import { ContentPublishingService } from '../apps/server/src/services/content-publishing-service.js';
@@ -54,7 +56,7 @@ function document() {
 
 function publish(name = 'Published Wolf') {
   const draft = document();
-  draft.cards.find((card) => card.id === 'wolf')!.name = name;
+  draft.cards.find((card) => card.id === 'chicken')!.name = name;
   const review = service.preview(draft);
   return service.publish(draft, review.baseVersion, review.candidateVersion, 'admin');
 }
@@ -67,12 +69,12 @@ describe('server content publishing', () => {
     expect(review.changes).toHaveLength(1);
     expect(review.changes[0]).toMatchObject({
       kind: 'cards',
-      id: 'wolf',
+      id: 'chicken',
       change: 'changed',
-      before: { name: 'Wolf' },
+      before: { name: 'Chicken' },
       after: { name: 'Snow Wolf' },
     });
-    expect(getCardDefinition('wolf').name).toBe('Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Chicken');
     expect(service.status().history).toHaveLength(1);
   });
 
@@ -83,7 +85,7 @@ describe('server content publishing', () => {
     draft.packs[0]!.name = 'Edited Pack';
     const review = service.preview(draft);
     service.publish(draft, review.baseVersion, review.candidateVersion, 'admin');
-    expect(getCardDefinition('wolf').name).toBe('Snow Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Snow Wolf');
     expect(getExpansionDefinition('CORE').name).toBe('Edited Core');
     expect(getPackDefinition('CORE_PACK').name).toBe('Edited Pack');
     expect(service.status().history[0]).toMatchObject({
@@ -98,7 +100,7 @@ describe('server content publishing', () => {
     activateContent(original);
     const restarted = new ContentPublishingService(directory);
     expect(restarted.status().currentVersion).toBe(result.currentVersion);
-    expect(getCardDefinition('wolf').name).toBe('Published Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Published Wolf');
     expect(restarted.status().history).toHaveLength(2);
   });
 
@@ -107,7 +109,7 @@ describe('server content publishing', () => {
     publish();
     const review = service.previewRollback(baseline);
     service.rollback(baseline, review.baseVersion, review.candidateVersion, 'another-admin');
-    expect(getCardDefinition('wolf').name).toBe('Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Chicken');
     expect(service.status().history).toHaveLength(3);
     expect(service.status().history[0]).toMatchObject({
       action: 'rollback',
@@ -156,19 +158,45 @@ describe('server content publishing', () => {
       { trigger: 'ARRIVAL', effect: { type: 'SUMMON', definitionId: 'missing' } },
     ];
     expect(() => service.preview(broken)).toThrow(/SUMMON/);
-    expect(getCardDefinition('wolf').name).toBe('Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Chicken');
   });
 
-  it('protects code-owned starter decks and scenario references', () => {
+  it('keeps starter decks and scenarios pointing at cards that exist', () => {
     const removed = document();
-    removed.cards = removed.cards.filter((card) => card.id !== 'wolf');
-    expect(() => service.preview(removed)).toThrow(/starter deck/);
+    removed.cards = removed.cards.filter((card) => card.id !== 'chicken');
+    expect(() => service.preview(removed)).toThrow(/PRIEST_STARTER: unknown card "chicken"/);
     const changed = document();
-    changed.cards.find((card) => card.id === 'wolf')!.rarity = 'LEGENDARY';
-    expect(() => service.preview(changed)).toThrow(/Legendary copy limit/);
+    changed.cards.find((card) => card.id === 'chicken')!.rarity = 'LEGENDARY';
+    expect(() => service.preview(changed)).toThrow(/chicken is Legendary/);
     const scenario = document();
     scenario.cards = scenario.cards.filter((card) => card.id !== 'rusty_dagger');
-    expect(() => service.preview(scenario)).toThrow(/scenario requires a Weapon/);
+    expect(() => service.preview(scenario)).toThrow(
+      /BANDIT_AMBUSH\.sideB: unknown card "rusty_dagger"/,
+    );
+    const misplaced = document();
+    misplaced.scenarios[1]!.sideB.startingWeapon = 'chicken';
+    expect(() => service.preview(misplaced)).toThrow(/chicken must be a Weapon/);
+  });
+
+  it('publishes starter decks and scenarios with the rest of the expansion', () => {
+    const draft = document();
+    draft.starterDecks
+      .find((deck) => deck.classId === 'PRIEST')!
+      .cards.push({
+        cardId: 'war_axe',
+        copies: 1,
+      });
+    draft.scenarios.find((scenario) => scenario.id === 'BANDIT_AMBUSH')!.sideB.heroHealth = 25;
+    const review = service.preview(draft);
+    expect(review.changes.map((change) => `${change.kind}:${change.id}`)).toEqual([
+      'starterDecks:PRIEST_STARTER',
+      'scenarios:BANDIT_AMBUSH',
+    ]);
+    service.publish(draft, review.baseVersion, review.candidateVersion, 'admin');
+    expect(starterDeckFor('healer').filter((id) => id === 'war_axe')).toHaveLength(1);
+    expect(STARTER_COLLECTION.get('war_axe')).toBe(1);
+    expect(getScenarioDefinition('BANDIT_AMBUSH').sideB.heroHealth).toBe(25);
+    expect(getScenarioDefinition('BANDIT_AMBUSH')).not.toHaveProperty('expansionId');
   });
 
   it('adds a new expansion without changing code', () => {
@@ -177,6 +205,9 @@ describe('server content publishing', () => {
     draft.expansion.name = 'New set';
     draft.cards = [{ ...draft.cards[0]!, id: 'new_wolf', expansionId: 'NEW_SET' }];
     draft.packs = [{ ...draft.packs[0]!, id: 'NEW_PACK', expansionId: 'NEW_SET' }];
+    // Core keeps the starter decks and scenarios; a set may ship none.
+    draft.starterDecks = [];
+    draft.scenarios = [];
     const review = service.preview(draft);
     service.publish(draft, review.baseVersion, review.candidateVersion, 'admin');
     expect(getCardDefinition('new_wolf').expansionId).toBe('NEW_SET');
@@ -193,7 +224,7 @@ describe('server content publishing', () => {
     expect(() =>
       failing.publish(draft, review.baseVersion, review.candidateVersion, 'admin'),
     ).toThrow();
-    expect(getCardDefinition('wolf').name).toBe('Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Chicken');
   });
 
   it('detects snapshot corruption instead of silently starting with different content', () => {
@@ -214,7 +245,7 @@ describe('server content publishing', () => {
     publish();
     const disabled = new ContentPublishingService(directory, false);
     expect(disabled.status().enabled).toBe(false);
-    expect(getCardDefinition('wolf').name).toBe('Published Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Published Wolf');
     expect(() => disabled.preview(document())).toThrow(/disabled/);
   });
 
@@ -237,15 +268,15 @@ describe('server content publishing', () => {
 
 describe('pinned matches and replays', () => {
   it('keeps an old match and its replay unchanged while new matches use the published stats', () => {
-    const old = makeEngine({ deckA: ['wolf'] });
+    const old = makeEngine({ deckA: ['chicken'] });
     const oldVersion = old.content.version;
     const draft = document();
-    const wolf = draft.cards.find((card) => card.id === 'wolf')!;
+    const wolf = draft.cards.find((card) => card.id === 'chicken')!;
     wolf.cost = 9;
     if (wolf.type === 'CREATURE') wolf.attack = 99;
     const review = service.preview(draft);
     service.publish(draft, review.baseVersion, review.candidateVersion, 'admin');
-    const next = makeEngine({ deckA: ['wolf'] });
+    const next = makeEngine({ deckA: ['chicken'] });
     const play = (engine: typeof old) =>
       engine.dispatch({
         type: 'PLAY_CARD',
@@ -263,7 +294,7 @@ describe('pinned matches and replays', () => {
     expect(stableStateJson(replayMatch(JSON.parse(JSON.stringify(replay))))).toBe(
       stableStateJson(old),
     );
-    expect(old.presentationCards().find((card) => card.id === 'wolf')!.cost).toBe(1);
+    expect(old.presentationCards().find((card) => card.id === 'chicken')!.cost).toBe(1);
   });
 
   it('preserves the original version when an open seat is claimed after publishing', () => {
@@ -275,11 +306,11 @@ describe('pinned matches and replays', () => {
     publish();
     const joined = manager.claimSeat(waiting.state.matchId, { playerId: 'b' });
     expect(joined.content.version).toBe(waiting.content.version);
-    expect(joined.getCardDefinition('wolf').name).toBe('Wolf');
+    expect(joined.getCardDefinition('chicken').name).toBe('Chicken');
     expect(
       manager
         .create({ scenarioId: 'STANDARD_PVP', players: [{ playerId: 'c' }, { playerId: 'd' }] })
-        .getCardDefinition('wolf').name,
+        .getCardDefinition('chicken').name,
     ).toBe('Published Wolf');
   });
 
@@ -294,7 +325,7 @@ describe('pinned matches and replays', () => {
     const response = await fetch(`${base}/api/matches/${engine.state.matchId}/replay`);
     expect(response.status).toBe(200);
     const replay = await response.json();
-    expect(replay.setup.content.cards.wolf.name).toBe('Wolf');
+    expect(replay.setup.content.cards.chicken.name).toBe('Chicken');
     expect(replay.setup.content.cards).not.toHaveProperty('kona_scrapwalker');
   });
 });
@@ -340,7 +371,7 @@ describe('publishing HTTP authorization and review', () => {
     expect(preview.status).toBe(200);
     const review = await preview.json();
     expect(review).not.toHaveProperty('catalog');
-    expect(getCardDefinition('wolf').name).toBe('Wolf');
+    expect(getCardDefinition('chicken').name).toBe('Chicken');
     expect((await call('publish', { document: draft })).status).toBe(409);
     expect(
       (
@@ -351,6 +382,6 @@ describe('publishing HTTP authorization and review', () => {
         })
       ).status,
     ).toBe(200);
-    expect(getCardDefinition('wolf').name).toBe('From HTTP');
+    expect(getCardDefinition('chicken').name).toBe('From HTTP');
   });
 });

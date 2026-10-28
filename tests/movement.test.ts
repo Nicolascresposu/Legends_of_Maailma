@@ -4,9 +4,9 @@ import { creatureId, makeEngine } from './helpers.js';
 describe('movement and swapping', () => {
   it('moves one orthogonal tile and consumes the combat action', () => {
     const engine = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
     });
-    const id = creatureId(engine, 'a', 'wolf');
+    const id = creatureId(engine, 'a', 'chicken');
     const result = engine.dispatch({
       type: 'MOVE_CREATURE',
       actorId: 'a',
@@ -21,11 +21,11 @@ describe('movement and swapping', () => {
   it('rejects diagonal movement and occupied destinations', () => {
     const engine = makeEngine({
       a: [
-        { definitionId: 'wolf', position: { row: 'FRONT', column: 0 } },
+        { definitionId: 'chicken', position: { row: 'FRONT', column: 0 } },
         { definitionId: 'brown_bear', position: { row: 'FRONT', column: 1 } },
       ],
     });
-    const wolf = creatureId(engine, 'a', 'wolf');
+    const wolf = creatureId(engine, 'a', 'chicken');
     expect(
       engine.dispatch({
         type: 'MOVE_CREATURE',
@@ -45,7 +45,7 @@ describe('movement and swapping', () => {
   });
 
   it('prevents a freshly summoned normal Creature from moving', () => {
-    const engine = makeEngine({ deckA: Array(6).fill('wolf') });
+    const engine = makeEngine({ deckA: Array(6).fill('chicken') });
     const card = engine.state.sides.a!.hand[0]!;
     expect(
       engine.dispatch({
@@ -55,7 +55,7 @@ describe('movement and swapping', () => {
         position: { row: 'FRONT', column: 0 },
       }).ok,
     ).toBe(true);
-    const wolf = creatureId(engine, 'a', 'wolf');
+    const wolf = creatureId(engine, 'a', 'chicken');
     expect(
       engine.dispatch({
         type: 'MOVE_CREATURE',
@@ -69,11 +69,11 @@ describe('movement and swapping', () => {
   it('swaps adjacent Creatures and exhausts both', () => {
     const engine = makeEngine({
       a: [
-        { definitionId: 'wolf', position: { row: 'FRONT', column: 0 } },
+        { definitionId: 'chicken', position: { row: 'FRONT', column: 0 } },
         { definitionId: 'brown_bear', position: { row: 'FRONT', column: 1 } },
       ],
     });
-    const wolf = creatureId(engine, 'a', 'wolf');
+    const wolf = creatureId(engine, 'a', 'chicken');
     const bear = creatureId(engine, 'a', 'brown_bear');
     const result = engine.dispatch({
       type: 'SWAP_CREATURES',
@@ -91,7 +91,7 @@ describe('movement and swapping', () => {
   it('rejects nonadjacent, exhausted, and newly summoned swap participants', () => {
     const nonadjacent = makeEngine({
       a: [
-        { definitionId: 'wolf', position: { row: 'FRONT', column: 0 } },
+        { definitionId: 'chicken', position: { row: 'FRONT', column: 0 } },
         { definitionId: 'brown_bear', position: { row: 'FRONT', column: 2 } },
       ],
     });
@@ -99,18 +99,18 @@ describe('movement and swapping', () => {
       nonadjacent.dispatch({
         type: 'SWAP_CREATURES',
         actorId: 'a',
-        firstCreatureId: creatureId(nonadjacent, 'a', 'wolf'),
+        firstCreatureId: creatureId(nonadjacent, 'a', 'chicken'),
         secondCreatureId: creatureId(nonadjacent, 'a', 'brown_bear'),
       }).error?.code,
     ).toBe('NOT_ADJACENT');
 
     const exhausted = makeEngine({
       a: [
-        { definitionId: 'wolf', position: { row: 'FRONT', column: 0 } },
+        { definitionId: 'chicken', position: { row: 'FRONT', column: 0 } },
         { definitionId: 'brown_bear', position: { row: 'BACK', column: 0 } },
       ],
     });
-    const wolf = creatureId(exhausted, 'a', 'wolf');
+    const wolf = creatureId(exhausted, 'a', 'chicken');
     const bear = creatureId(exhausted, 'a', 'brown_bear');
     exhausted.state.sides.a!.creatures[wolf]!.combatActionUsed = true;
     expect(

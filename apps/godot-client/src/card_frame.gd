@@ -3,8 +3,9 @@ class_name CardFrame
 
 ## A card drawn as a printed card: its type's frame from `art/assets/`, the
 ## card's art in the frame's window, its name on the ribbon, its cost on the
-## gem, its stats — a Creature's Attack and Health, a Weapon's Attack and
-## Durability, an Artifact's Durability — and its text in the box.
+## gem, its rarity on the gem in the middle, its stats — a Creature's Attack
+## and Health, a Weapon's Attack and Durability, an Artifact's Durability —
+## and its text in the box.
 ##
 ## Every part is placed as a fraction of the frame, so the same card draws at
 ## any size — a board slot, a hand card, or the large hover reveal. Nothing in
@@ -23,6 +24,14 @@ const DURABILITY_PATH := "res://art/assets/durability.png"
 const DURABILITY_ZERO_PATH := "res://art/assets/durability_zero.png"
 ## A Location's duration: the turns it has left run out of the hourglass.
 const HOURGLASS_PATH := "res://art/assets/hourglass.png"
+## The rarity gem, coloured as Hearthstone's: white, blue, purple, orange. A
+## Basic card prints none.
+const RARITY_GEM_PATHS := {
+	"COMMON": "res://art/assets/rarity_gem.png",
+	"RARE": "res://art/assets/rarity_gem_rare.png",
+	"EPIC": "res://art/assets/rarity_gem_epic.png",
+	"LEGENDARY": "res://art/assets/rarity_gem_legendary.png",
+}
 
 ## The frame images' width over their height: the Creature and Spell frames
 ## share this canvas. Every card is laid out at this shape, so cards of all
@@ -46,6 +55,10 @@ const ATTACK_CENTRE := Vector2(0.49, 0.566)
 const HEALTH_CENTRE := Vector2(0.487, 0.609)
 const DURABILITY_CENTRE := Vector2(0.5, 0.47)
 const HOURGLASS_CENTRE := Vector2(0.5, 0.5)
+## The gem stands in the middle of a square image, its centre a little above
+## the image's.
+const RARITY_WIDTH := 0.14
+const RARITY_CENTRE := Vector2(0.5, 0.484)
 
 ## Regions of the Creature frame, as fractions of its width and height: the
 ## art oval, the name on the ribbon beneath it, and the text box below that.
@@ -76,14 +89,20 @@ const ART_OVAL_OUTLINE := [
 	Vector2(0.976, 0.363), Vector2(0.985, 0.399), Vector2(0.991, 0.436), Vector2(0.995, 0.472),
 ]
 const NAME_BAND := Rect2(0.21, 0.556, 0.58, 0.068)
-## Kept clear of the Attack and Health badges on the box's lower corners.
-const TEXT_BOX := Rect2(0.25, 0.685, 0.5, 0.2)
+## The text box runs to just inside the parchment's border; its lines narrow
+## in steps as they pass down between the Attack and Health badges — past the
+## sword's ribbon and the heart's crest, then between the two badges.
+const TEXT_BOX := Rect2(0.16, 0.685, 0.68, 0.23)
+const TEXT_NARROW := [Rect2(0.195, 0.83, 0.61, 0.085), Rect2(0.235, 0.86, 0.53, 0.055)]
 ## Where each badge's number sits, as fractions of the frame. Attack and
-## Health stand on the text box's lower corners, inside the frame, so its thin
-## bottom border and corner studs still show.
+## Health sit on the card's lower corners, hanging a little past its bottom
+## and sides as they do on a Hearthstone card.
 const COST_AT := Vector2(0.17, 0.07)
-const ATTACK_AT := Vector2(0.2, 0.86)
-const HEALTH_AT := Vector2(0.8, 0.86)
+## Each frame's rarity gem sits on the dark seam between its name and its
+## text box, in the middle of the card, as a Hearthstone card's does.
+const RARITY_AT := Vector2(0.5, 0.653)
+const ATTACK_AT := Vector2(0.13, 0.915)
+const HEALTH_AT := Vector2(0.84, 0.915)
 
 ## Regions of the Spell (Action) frame: a framed art panel, the name on the
 ## scroll beneath it, and the text box below that.
@@ -94,26 +113,38 @@ const SPELL_ART_OUTLINE := [
 	Vector2(0.97, 1.0), Vector2(0.03, 1.0), Vector2(0.0, 0.975), Vector2(0.0, 0.025),
 ]
 const SPELL_NAME_BAND := Rect2(0.17, 0.556, 0.66, 0.07)
-const SPELL_TEXT_BOX := Rect2(0.2, 0.692, 0.6, 0.175)
+const SPELL_TEXT_BOX := Rect2(0.187, 0.695, 0.626, 0.175)
 const SPELL_COST_AT := Vector2(0.115, 0.085)
+## Set into the small diamond mount the frame has there.
+const SPELL_RARITY_AT := Vector2(0.5, 0.648)
 
 ## Regions of the Weapon frame: a shield-shaped art window, the name plate,
 ## the text box, and the two roundels its Attack and Durability sit in.
 const WEAPON_BODY := Rect2(0.01, 0.004, 0.98, 0.985)
-const WEAPON_ART := Rect2(0.256, 0.126, 0.488, 0.413)
+const WEAPON_ART := Rect2(0.2585, 0.0856, 0.4822, 0.4579)
+## The shield's top slopes up to two peaks either side of the frame's centre
+## notch, and its corners are chamfered; traced from the dark line inside the
+## gold edge.
 const WEAPON_ART_OUTLINE := [
-	Vector2(0.0, 0.11), Vector2(0.09, 0.0), Vector2(0.91, 0.0), Vector2(1.0, 0.11),
-	Vector2(1.0, 0.79), Vector2(0.5, 1.0), Vector2(0.0, 0.79),
+	Vector2(0.0, 0.162), Vector2(0.0185, 0.14), Vector2(0.415, 0.0), Vector2(0.5, 0.0685),
+	Vector2(0.585, 0.0), Vector2(0.9815, 0.14), Vector2(1.0, 0.162), Vector2(1.0, 0.822),
+	Vector2(0.9815, 0.847), Vector2(0.5, 1.0), Vector2(0.0185, 0.847), Vector2(0.0, 0.822),
 ]
 const WEAPON_NAME_BAND := Rect2(0.24, 0.566, 0.52, 0.062)
-## Kept clear of the roundels, which overlap the box's lower corners.
-const WEAPON_TEXT_BOX := Rect2(0.25, 0.672, 0.5, 0.15)
+## Its lines narrow in steps down the parchment's lower corners, which are
+## cut in toward the chevron at its foot by the roundels' mounts.
+const WEAPON_TEXT_BOX := Rect2(0.17, 0.672, 0.66, 0.163)
+const WEAPON_TEXT_NARROW := [
+	Rect2(0.19, 0.765, 0.62, 0.07), Rect2(0.225, 0.79, 0.55, 0.045), Rect2(0.25, 0.815, 0.5, 0.02),
+]
 const WEAPON_COST_AT := Vector2(0.115, 0.085)
+const WEAPON_RARITY_AT := Vector2(0.5, 0.653)
 const WEAPON_ATTACK_AT := Vector2(0.142, 0.862)
 const WEAPON_DURABILITY_AT := Vector2(0.858, 0.862)
 
 ## Regions of the Artifact frame: an octagonal art window, the name plate, and
-## the text box, with Durability on its shield badge at the box's lower right.
+## the text box, with Durability on its shield badge on the card's lower right
+## corner, hanging a little past its edges.
 const ARTIFACT_BODY := Rect2(0.019, 0.001, 0.963, 0.968)
 const ARTIFACT_ART := Rect2(0.165, 0.093, 0.667, 0.443)
 const ARTIFACT_ART_OUTLINE := [
@@ -121,14 +152,17 @@ const ARTIFACT_ART_OUTLINE := [
 	Vector2(0.78, 1.0), Vector2(0.22, 1.0), Vector2(0.0, 0.74), Vector2(0.0, 0.26),
 ]
 const ARTIFACT_NAME_BAND := Rect2(0.2, 0.562, 0.6, 0.058)
-## Kept clear of the Durability badge.
-const ARTIFACT_TEXT_BOX := Rect2(0.2, 0.67, 0.6, 0.2)
+## Its lines narrow beside the Durability badge.
+const ARTIFACT_TEXT_BOX := Rect2(0.112, 0.67, 0.776, 0.225)
+const ARTIFACT_TEXT_NARROW := [Rect2(0.165, 0.868, 0.67, 0.027)]
 const ARTIFACT_COST_AT := Vector2(0.115, 0.085)
-const ARTIFACT_DURABILITY_AT := Vector2(0.86, 0.885)
+const ARTIFACT_RARITY_AT := Vector2(0.5, 0.644)
+const ARTIFACT_DURABILITY_AT := Vector2(0.92, 0.93)
 
 ## Regions of the Location frame: a pointed-arch art window, the name plate,
-## and the text box, with the hourglass at the box's lower left and the
-## Durability shield at its lower right — whichever of the two it has.
+## and the text box, with the hourglass on the card's lower left corner and
+## the Durability shield on its lower right — whichever of the two it has —
+## each hanging a little past the card's edges.
 const LOCATION_BODY := Rect2(0.008, 0.001, 0.984, 0.984)
 const LOCATION_ART := Rect2(0.19, 0.114, 0.615, 0.438)
 const LOCATION_ART_OUTLINE := [
@@ -139,35 +173,40 @@ const LOCATION_ART_OUTLINE := [
 	Vector2(0.344, 0.039),
 ]
 const LOCATION_NAME_BAND := Rect2(0.19, 0.584, 0.62, 0.058)
-## Kept clear of the hourglass and the shield.
-const LOCATION_TEXT_BOX := Rect2(0.21, 0.69, 0.58, 0.18)
+## Its lines narrow between the hourglass and the shield.
+const LOCATION_TEXT_BOX := Rect2(0.107, 0.69, 0.786, 0.195)
+const LOCATION_TEXT_NARROW := [Rect2(0.125, 0.85, 0.75, 0.035), Rect2(0.155, 0.865, 0.69, 0.02)]
 const LOCATION_COST_AT := Vector2(0.115, 0.085)
-const LOCATION_DURATION_AT := Vector2(0.135, 0.885)
-const LOCATION_DURABILITY_AT := Vector2(0.865, 0.885)
+const LOCATION_RARITY_AT := Vector2(0.5, 0.664)
+const LOCATION_DURATION_AT := Vector2(0.06, 0.935)
+const LOCATION_DURABILITY_AT := Vector2(0.93, 0.935)
 
 ## Each framed card type's frame and where its parts go on it. The body is
 ## the card's visible extent within its image, which the ring hugs; the
 ## outline is the art window's shape, an empty one drawing it as an ellipse.
+## The text box's lines take its full width, but one reaching down into a
+## step of `narrow` takes only that step's width; the steps run from the
+## highest down, and a frame with none keeps every line full.
 const LAYOUTS := {
 	"CREATURE": {
 		"frame": FRAME_PATH, "body": BODY, "art": ART_OVAL, "outline": ART_OVAL_OUTLINE,
-		"name": NAME_BAND, "text": TEXT_BOX, "cost": COST_AT,
+		"name": NAME_BAND, "text": TEXT_BOX, "narrow": TEXT_NARROW, "cost": COST_AT, "rarity": RARITY_AT,
 	},
 	"ACTION": {
 		"frame": SPELL_FRAME_PATH, "body": SPELL_BODY, "art": SPELL_ART, "outline": SPELL_ART_OUTLINE,
-		"name": SPELL_NAME_BAND, "text": SPELL_TEXT_BOX, "cost": SPELL_COST_AT,
+		"name": SPELL_NAME_BAND, "text": SPELL_TEXT_BOX, "narrow": [], "cost": SPELL_COST_AT, "rarity": SPELL_RARITY_AT,
 	},
 	"WEAPON": {
 		"frame": WEAPON_FRAME_PATH, "body": WEAPON_BODY, "art": WEAPON_ART, "outline": WEAPON_ART_OUTLINE,
-		"name": WEAPON_NAME_BAND, "text": WEAPON_TEXT_BOX, "cost": WEAPON_COST_AT,
+		"name": WEAPON_NAME_BAND, "text": WEAPON_TEXT_BOX, "narrow": WEAPON_TEXT_NARROW, "cost": WEAPON_COST_AT, "rarity": WEAPON_RARITY_AT,
 	},
 	"ARTIFACT": {
 		"frame": ARTIFACT_FRAME_PATH, "body": ARTIFACT_BODY, "art": ARTIFACT_ART, "outline": ARTIFACT_ART_OUTLINE,
-		"name": ARTIFACT_NAME_BAND, "text": ARTIFACT_TEXT_BOX, "cost": ARTIFACT_COST_AT,
+		"name": ARTIFACT_NAME_BAND, "text": ARTIFACT_TEXT_BOX, "narrow": ARTIFACT_TEXT_NARROW, "cost": ARTIFACT_COST_AT, "rarity": ARTIFACT_RARITY_AT,
 	},
 	"LOCATION": {
 		"frame": LOCATION_FRAME_PATH, "body": LOCATION_BODY, "art": LOCATION_ART, "outline": LOCATION_ART_OUTLINE,
-		"name": LOCATION_NAME_BAND, "text": LOCATION_TEXT_BOX, "cost": LOCATION_COST_AT,
+		"name": LOCATION_NAME_BAND, "text": LOCATION_TEXT_BOX, "narrow": LOCATION_TEXT_NARROW, "cost": LOCATION_COST_AT, "rarity": LOCATION_RARITY_AT,
 	},
 }
 
@@ -176,9 +215,10 @@ const COLOR_BUFF := Color(0.52, 0.95, 0.60)
 const COLOR_HURT := Color(1.0, 0.45, 0.42)
 const COLOR_SHORT := Color(1.0, 0.45, 0.42)
 
-## Text never shrinks below these sizes to fit; past that it is cut off, and a
-## detailed card reports it through `rules_fit` so the caller can show it
-## elsewhere.
+## The smallest readable sizes. A name or tag line never shrinks below them,
+## and is cut short past that; a card's rules shrink further rather than lose
+## a word, and a detailed card reports rules smaller than readable through
+## `rules_fit`, so the caller can show them again elsewhere.
 const MIN_NAME_SIZE := 8
 const MIN_TEXT_SIZE := 7
 const MIN_RULES_SIZE := 9
@@ -210,8 +250,14 @@ var ring_shadow := 0:
 var _kind := "CREATURE"
 var _frame: TextureRect
 var _art: ArtOval
+## Hidden on a Basic card, and on one whose rarity the library does not know.
+var _rarity: TextureRect
 var _name: Label
 var _text: RichTextLabel
+## The card's tags — its tribes — on a line of their own along the bottom of
+## the text box, as a tribe is printed on a Hearthstone card. Rules can ask
+## for a tag, so it is shown on every card that has one, small or large.
+var _tags: Label
 var _cost: TextureRect
 var _attack: TextureRect
 var _health: TextureRect
@@ -223,9 +269,12 @@ var _health_value: Label
 var _durability_value: Label
 var _duration_value: Label
 
-## The text the box shows, kept plain as well so it can be measured.
-var _text_bbcode := ""
-var _text_plain := ""
+## The text the box shows, as words: each `{"pieces": [{text, bold, italic}],
+## "space": bool}`, a word set in more than one emphasis — "**Guard**," —
+## having a piece for each; `{"break": true}` is a line break in the text.
+var _words: Array = []
+## Lifts the rules down within the box, to centre them; set with the lines.
+var _text_margin := StyleBoxEmpty.new()
 
 ## Loaded textures, so a board of cards loads each image once.
 static var _textures: Dictionary = {}
@@ -278,9 +327,27 @@ func _init() -> void:
 	_text.bbcode_enabled = true
 	_text.scroll_active = false
 	_text.clip_contents = true
-	_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# The lines are broken and centred here, since how wide each may be
+	# depends on where it falls; the label only draws them.
+	_text.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_text.add_theme_stylebox_override("normal", _text_margin)
 	_text.add_theme_color_override("default_color", INK)
 	add_child(_text)
+
+	_tags = Label.new()
+	_tags.name = "Tags"
+	_tags.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tags.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tags.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_tags.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_tags.add_theme_color_override("font_color", INK)
+	add_child(_tags)
+
+	# Over the name and text, as a gem set into the frame would be: where a
+	# long name or a full box runs into it, the gem stays whole.
+	_rarity = _image(RARITY_GEM_PATHS["COMMON"])
+	_rarity.name = "RarityGem"
+	add_child(_rarity)
 
 	_cost = _image(COST_PATH)
 	add_child(_cost)
@@ -314,9 +381,21 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 	_art.outline = layout["outline"]
 	_name.text = library.card_name(definition_id)
 	_art.texture = CardArt.texture_for(definition_id)
+	_art.region = CardArt.FULL
+	_tags.text = library.tag_line(definition_id)
+	_tags.visible = _tags.text != ""
+	var gem_path := str(RARITY_GEM_PATHS.get(library.rarity(definition_id), ""))
+	_rarity.visible = gem_path != ""
+	if _rarity.visible:
+		_rarity.texture = _texture(gem_path)
 
-	_cost_value.text = str(library.cost(definition_id))
-	_tint_number(_cost_value, COLOR_SHORT if bool(card.get("unaffordable", false)) else Color.WHITE)
+	# A hand card's `cost` is what it costs now, which an aura may have
+	# lowered; a discount shows in green, as a buffed stat does.
+	var printed := library.cost(definition_id)
+	var cost := int(card.get("cost", printed))
+	_cost_value.text = str(cost)
+	var cost_color := COLOR_BUFF if cost < printed else Color.WHITE
+	_tint_number(_cost_value, COLOR_SHORT if bool(card.get("unaffordable", false)) else cost_color)
 
 	# A Creature's Attack and Health sit on badges; a Weapon's Attack and
 	# Durability in its frame's roundels; an Artifact's Durability on its
@@ -359,13 +438,12 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 		_duration_value.text = str(duration)
 		_tint_number(_duration_value, durability_color(duration, base_duration))
 
+	var spans: Array = []
 	if detailed:
-		_text_bbcode = library.description_bbcode(definition_id)
-		_text_plain = library.description_plain(definition_id)
+		spans = CardLibrary.description_spans(library.description(definition_id))
 	else:
 		# Sentences do not fit a small card, so it shows what the board always
 		# showed: the keywords by name, and why a creature cannot act.
-		var lines: Array[String] = []
 		var names: Array[String] = []
 		for keyword in library.keywords(definition_id):
 			names.append(str(keyword).capitalize())
@@ -373,23 +451,21 @@ func show_card(library: CardLibrary, card: Dictionary) -> void:
 		if is_weapon and library.is_ranged_weapon(definition_id):
 			names.append("Ranged")
 		if not names.is_empty():
-			lines.append(" · ".join(names))
+			spans.append({"text": " · ".join(names), "bold": true, "italic": false})
 		var marks := str(card.get("marks", ""))
 		if marks != "":
-			lines.append(marks)
-		_text_plain = "\n".join(lines)
-		var bbcode_lines: Array[String] = []
-		if not names.is_empty():
-			bbcode_lines.append("[b]%s[/b]" % " · ".join(names))
-		if marks != "":
-			bbcode_lines.append("[i]%s[/i]" % marks)
-		_text_bbcode = "\n".join(bbcode_lines)
+			if not spans.is_empty():
+				spans.append({"text": "\n", "bold": false, "italic": false})
+			spans.append({"text": marks, "bold": false, "italic": true})
+	_words = _split_words(spans)
 	_layout()
 
-## Shows `texture` in the art window in place of the card's own art, for art
-## that has been chosen but not saved yet.
-func show_art(texture: Texture2D) -> void:
+## Shows `region` of `texture` — fractions of it — in the art window in place
+## of the card's own art, for art that has been chosen or framed but not saved
+## yet.
+func show_art(texture: Texture2D, region := CardArt.FULL) -> void:
 	_art.texture = texture
+	_art.region = region
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
@@ -504,6 +580,9 @@ func _layout() -> void:
 	_frame.position = frame.position
 	_frame.size = frame.size
 	_place(_art, layout["art"], frame)
+	var gem := frame.size.x * RARITY_WIDTH
+	_rarity.size = Vector2(gem, gem)
+	_rarity.position = frame.position + layout["rarity"] * frame.size - RARITY_CENTRE * _rarity.size
 
 	# The name may spill past the ribbon's thin centre onto its curls; that
 	# reads better than a name too small to make out.
@@ -518,14 +597,44 @@ func _layout() -> void:
 	_name.size = Vector2(band.size.x, maxf(band.size.y, name_size * 1.5))
 	_name.position = Vector2(band.position.x, band.get_center().y - _name.size.y * 0.5)
 
-	_place(_text, layout["text"], frame)
+	# The tags take a band across the bottom of the text box, and the rules fit
+	# into what is left above it.
+	var box := _region(layout["text"], frame)
+	var narrow: Array[Rect2] = []
+	for step: Rect2 in layout["narrow"]:
+		narrow.append(_region(step, frame))
+	if _tags.visible:
+		# One line at the box's foot, shrinking to fit between the badges as
+		# the name does on its ribbon; past the smallest size it is cut short.
+		var tag_width := narrow.back().size.x if not narrow.is_empty() else box.size.x
+		var tag_size := _fit_size(
+			_tags.text, tag_width, INF,
+			clampi(int(frame.size.y * (0.032 if detailed else 0.05)), MIN_TEXT_SIZE, 13), MIN_TEXT_SIZE
+		)
+		var tag_band := minf(box.size.y * 0.4, tag_size * 1.5)
+		_tags.add_theme_font_size_override("font_size", tag_size)
+		# A label never draws shorter than its line; like the name, it is
+		# centred on its band at whatever height it takes.
+		_tags.size = Vector2(tag_width, maxf(tag_band, _tags.get_minimum_size().y))
+		_tags.position = Vector2(box.get_center().x - tag_width * 0.5, box.end.y - tag_band * 0.5 - _tags.size.y * 0.5)
+		box.size.y -= tag_band
+	_text.position = box.position
+	_text.size = box.size
 	var largest := clampi(int(frame.size.y * (0.040 if detailed else 0.06)), MIN_TEXT_SIZE, 15)
 	var smallest := MIN_RULES_SIZE if detailed else MIN_TEXT_SIZE
-	var text_size := _fit_size(_text_plain, _text.size.x, _text.size.y, largest, smallest)
-	rules_fit = _fits(_text_plain, _text.size.x, _text.size.y, text_size)
+	# The largest size at which every word fits: a card's rules are never cut
+	# short, however small that makes them. Below a readable size the caller
+	# is told, so it can print them again beside the card.
+	var rules := {}
+	for font_size in range(largest, 0, -1):
+		rules = _break_rules(box, narrow, font_size)
+		if rules["fits"]:
+			break
+	rules_fit = rules["fits"] and int(rules["size"]) >= smallest
 	for font_size in ["normal_font_size", "bold_font_size", "italics_font_size", "bold_italics_font_size"]:
-		_text.add_theme_font_size_override(font_size, text_size)
-	_text.text = "[center]%s[/center]" % _text_bbcode if _text_bbcode != "" else ""
+		_text.add_theme_font_size_override(font_size, int(rules["size"]))
+	_text_margin.content_margin_top = rules["top"] - box.position.y
+	_text.text = "[center]%s[/center]" % _lines_bbcode(rules["lines"]) if not _words.is_empty() else ""
 
 	var number_size := clampi(int(frame.size.x * 0.15), 9, 34)
 	_badge(_cost, _cost_value, layout["cost"], COST_WIDTH, COST_CENTRE, frame, number_size)
@@ -623,6 +732,130 @@ static func _fits(text: String, width: float, height: float, font_size: int) -> 
 	)
 	return measured.x <= usable and measured.y <= height
 
+## Splits runs of text into the words the rules are broken at; see `_words`.
+static func _split_words(spans: Array) -> Array:
+	var words: Array = []
+	var pieces: Array = []
+	var spaced := false
+	for span: Dictionary in spans:
+		var run := ""
+		for character in str(span["text"]):
+			if character != " " and character != "\n":
+				run += character
+				continue
+			if run != "":
+				pieces.append({"text": run, "bold": span["bold"], "italic": span["italic"]})
+				run = ""
+			if not pieces.is_empty():
+				words.append({"pieces": pieces, "space": spaced})
+				pieces = []
+			spaced = character == " "
+			if character == "\n":
+				words.append({"break": true})
+		if run != "":
+			pieces.append({"text": run, "bold": span["bold"], "italic": span["italic"]})
+	if not pieces.is_empty():
+		words.append({"pieces": pieces, "space": spaced})
+	return words
+
+## The rules broken into lines at `font_size`, centred down `box`: each line
+## as wide as the box, or as the lowest step of `narrow` it reaches down into.
+## Returns the lines, the size, where the first line's top falls, and whether
+## every line fitted.
+##
+## Where each line falls depends on how many there are, so the count is
+## guessed and the break redone until the two agree.
+func _break_rules(box: Rect2, narrow: Array[Rect2], font_size: int) -> Dictionary:
+	var line_height := _text.get_theme_font("normal_font").get_height(font_size) \
+		+ _text.get_theme_constant("line_separation")
+	var count := 1
+	var tried := {}
+	var result := {}
+	while true:
+		var top := box.position.y + maxf(0.0, (box.size.y - count * line_height) * 0.5)
+		result = _fill_lines(top, line_height, box, narrow, font_size)
+		var lines: Array = result["lines"]
+		tried[count] = true
+		if lines.size() == count or tried.has(lines.size()):
+			# Settled, or flipping between two counts: the lines as laid out
+			# for this count are drawn where they were measured.
+			result["top"] = top
+			result["fits"] = result["fits"] and box.end.y - top >= lines.size() * line_height - 0.5
+			break
+		count = lines.size()
+	result["size"] = font_size
+	return result
+
+## Fills lines greedily from `top`, a line `line_height` tall at a time.
+func _fill_lines(top: float, line_height: float, box: Rect2, narrow: Array[Rect2], font_size: int) -> Dictionary:
+	var lines: Array = [[]]
+	var used := 0.0
+	var fits := true
+	var space := _text.get_theme_font("normal_font").get_string_size(" ", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	for word: Dictionary in _words:
+		if word.has("break"):
+			lines.append([])
+			used = 0.0
+			continue
+		var width := 0.0
+		for piece: Dictionary in word["pieces"]:
+			width += _rules_font(piece).get_string_size(
+				piece["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, font_size
+			).x
+		var line: Array = lines.back()
+		var limit := _line_width(top + (lines.size() - 1) * line_height, line_height, box, narrow)
+		var spaced := used + (space if word["space"] else 0.0) + width
+		if line.is_empty() or spaced <= limit:
+			line.append(word)
+			used = width if line.size() == 1 else spaced
+		else:
+			lines.append([word])
+			used = width
+			limit = _line_width(top + (lines.size() - 1) * line_height, line_height, box, narrow)
+		if used > limit:
+			fits = false
+	return {"lines": lines, "fits": fits}
+
+## How wide a line whose top is at `line_top` may run: the box's width, or
+## that of the lowest step of `narrow` its letters reach down into — the foot
+## of a line is mostly space below them — less a sliver for the label's own
+## rounding.
+static func _line_width(line_top: float, line_height: float, box: Rect2, narrow: Array[Rect2]) -> float:
+	var width := box.size.x
+	for step in narrow:
+		if line_top + line_height * 0.8 > step.position.y:
+			width = step.size.x
+	return width * 0.98
+
+func _rules_font(piece: Dictionary) -> Font:
+	if piece["bold"] and piece["italic"]:
+		return _text.get_theme_font("bold_italics_font")
+	if piece["bold"]:
+		return _text.get_theme_font("bold_font")
+	if piece["italic"]:
+		return _text.get_theme_font("italics_font")
+	return _text.get_theme_font("normal_font")
+
+## Broken lines as BBCode, each piece in its own emphasis. A literal `[` is
+## escaped so card text can never be read as a tag.
+static func _lines_bbcode(lines: Array) -> String:
+	var out: Array[String] = []
+	for line: Array in lines:
+		var text := ""
+		for index in line.size():
+			var word: Dictionary = line[index]
+			if index > 0 and word["space"]:
+				text += " "
+			for piece: Dictionary in word["pieces"]:
+				var part := str(piece["text"]).replace("[", "[lb]")
+				if piece["italic"]:
+					part = "[i]%s[/i]" % part
+				if piece["bold"]:
+					part = "[b]%s[/b]" % part
+				text += part
+		out.append(text)
+	return "\n".join(out)
+
 func _image(path: String) -> TextureRect:
 	var rect := TextureRect.new()
 	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -704,22 +937,22 @@ class ArtOval extends Control:
 		set(value):
 			outline = value
 			queue_redraw()
+	## The part of the texture drawn, as fractions of it.
+	var region := CardArt.FULL:
+		set(value):
+			region = value
+			queue_redraw()
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_RESIZED:
 			queue_redraw()
 
 	func _draw() -> void:
-		if texture == null or size.x <= 0.0 or size.y <= 0.0:
+		if texture == null or size.x <= 0.0 or size.y <= 0.0 or not region.has_area():
 			return
-		var uv_size := Vector2.ONE
-		var art_aspect := texture.get_width() / float(texture.get_height())
-		var oval_aspect := size.x / size.y
-		if art_aspect > oval_aspect:
-			uv_size.x = oval_aspect / art_aspect
-		else:
-			uv_size.y = art_aspect / oval_aspect
-		var uv_origin := (Vector2.ONE - uv_size) * 0.5
+		var shown := CardArt.cover(texture.get_size() * region.size, size.x / size.y)
+		var uv_origin := region.position + shown.position * region.size
+		var uv_size := shown.size * region.size
 		var units: Array = outline
 		if units.is_empty():
 			units = []

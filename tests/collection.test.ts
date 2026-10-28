@@ -148,7 +148,7 @@ describe('collection contents', () => {
       expect(entry, `${cardId} should be listed`).toBeDefined();
       expect(entry!.owned).toBe(0);
     }
-    const wolf = body.cards.find((card) => card.cardId === 'wolf');
+    const wolf = body.cards.find((card) => card.cardId === 'chicken');
     expect(wolf?.owned).toBe(2);
   });
 
@@ -165,9 +165,9 @@ describe('collection contents', () => {
     });
     expect(entry?.quantity).toBe(1);
 
-    await collections.grant(user.user.id, 'wolf', 9);
+    await collections.grant(user.user.id, 'chicken', 9);
     const wolf = await prisma.collectionEntry.findUnique({
-      where: { userId_cardId: { userId: user.user.id, cardId: 'wolf' } },
+      where: { userId_cardId: { userId: user.user.id, cardId: 'chicken' } },
     });
     expect(wolf?.quantity).toBe(2);
   });
@@ -231,7 +231,7 @@ describe('deck readiness', () => {
 
   it('separates rule problems from ownership problems', async () => {
     const user = await register('split');
-    const readiness = await collections.assessForUser(user.user.id, ['wolf', UNOWNED[0]!]);
+    const readiness = await collections.assessForUser(user.user.id, ['chicken', UNOWNED[0]!]);
     expect(readiness.playable).toBe(false);
     // Too few cards is a rule problem...
     expect(readiness.ruleErrors.join(' ')).toContain('30');
@@ -258,9 +258,9 @@ describe('deck readiness', () => {
     const user = await register('copies');
     // Three copies of a card the player owns two of.
     const readiness = await collections.assessForUser(user.user.id, [
-      ...Array.from({ length: 3 }, () => 'wolf'),
+      ...Array.from({ length: 3 }, () => 'chicken'),
     ]);
-    const wolf = readiness.missing.find((row) => row.cardId === 'wolf');
+    const wolf = readiness.missing.find((row) => row.cardId === 'chicken');
     expect(wolf).toBeDefined();
     expect(wolf!.required).toBe(3);
     expect(wolf!.owned).toBe(2);
@@ -444,7 +444,7 @@ describe('orphaned cards', () => {
         userId: user.user.id,
         name: 'Legacy',
         heroId: 'healer',
-        cardIds: ['retired_card', ...Array.from({ length: 29 }, () => 'wolf')],
+        cardIds: ['retired_card', ...Array.from({ length: 29 }, () => 'chicken')],
       },
     });
 
@@ -461,7 +461,7 @@ describe('orphaned cards', () => {
   it('ignores a database whose cards all still exist', async () => {
     const user = await register('noorphan');
     const report = await collections.findOrphans();
-    expect(report.collection.some((row) => row.cardId === 'wolf')).toBe(false);
+    expect(report.collection.some((row) => row.cardId === 'chicken')).toBe(false);
     void user;
   });
 
@@ -475,7 +475,7 @@ describe('orphaned cards', () => {
         userId: user.user.id,
         name: 'Untouched',
         heroId: 'healer',
-        cardIds: ['prune_me', ...Array.from({ length: 29 }, () => 'wolf')],
+        cardIds: ['prune_me', ...Array.from({ length: 29 }, () => 'chicken')],
       },
     });
 

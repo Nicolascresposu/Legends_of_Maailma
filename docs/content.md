@@ -1,6 +1,7 @@
 # Creating expansion content
 
-Expansion metadata, cards and packs live in JSON under `packages/card-definitions/content/`:
+Expansion metadata, cards, packs, starter decks and scenarios live in JSON under
+`packages/card-definitions/content/`:
 
 ```text
 content/
@@ -8,6 +9,8 @@ content/
     expansion.json
     cards.json
     packs.json
+    starterDecks.json
+    scenarios.json
   chronicle/
     expansion.json
     cards.json
@@ -26,6 +29,13 @@ and its pack definitions in the folder whose `expansion.json` has their `expansi
 `cards.json` and `packs.json` are arrays. Either can be `[]` for unfinished content or a set that
 has no packs. JSON requires double quotes and does not support comments or trailing commas.
 
+`starterDecks.json` and `scenarios.json` are optional arrays; a folder without them has none. Core
+ships both. Every class needs exactly one starter deck across all expansions: it is what a new
+account is given and what a side plays when it brings no deck. Each lists cards by ID with a
+number of copies, and every card must exist, be collectible and fit the deck's class. A scenario
+names a Hero for each side and the cards that side starts with, each of which must exist and be of
+the right type. Heroes and classes are still defined in TypeScript.
+
 ## Godot expansion creator
 
 Sign in as an admin, enable **Admin UI**, open the admin panel from the collection screen, and
@@ -43,17 +53,27 @@ select **Expansions**. The creator edits local files on the machine running Godo
    **Choose art…** under the preview picks an image (PNG, WebP, JPEG or SVG) as the card's art and
    **Remove art** clears it. The change shows in the preview at once and is written on **Save**,
    which copies the image to `apps/godot-client/art/cards/<expansion_folder>/<card_id>.<ext>`
-   (for example `art/cards/core/wolf.png`). Renaming a card's ID moves its art to the new ID on
-   Save, and **Duplicate** gives the copy the same picture.
+   (for example `art/cards/core/chicken.png`). Drag the art in the preview to choose which part of
+   it shows, and scroll or use **Zoom** to zoom in; **Reset** fits the whole picture again. The
+   framing is saved beside the image as `<card_id>.crop.json`, leaving the image itself whole, so
+   it can be reframed later. Renaming a card's ID moves its art and framing to the new ID on Save,
+   and **Duplicate** gives the copy the same picture and framing.
    Expansion assignments follow the expansion ID automatically. Leave Class ID off for neutral
    cards, and use **Add entry** to add tags, keywords or effects.
 4. Use **Packs** to edit pack IDs, sizes, slot counts and rarity weights. Optional checkboxes turn
    individual weighted rarities on or off. Effects and pack rules have structured nested forms;
-   no JSON syntax is needed in the UI.
+   no JSON syntax is needed in the UI. **Starter decks** and **Scenarios** edit those files the
+   same way; most expansions leave them empty.
 5. Click **Validate**, then **Save**. Validation checks the draft against the other expansion
    folders, including duplicate IDs and cross-expansion summon references. Select a validation
-   issue to open its card or pack. Save writes the expansion's three JSON files in the selected
+   issue to open its card or pack. Save writes the expansion's JSON files in the selected
    content root. Unchanged files retain their bytes, so editing metadata does not reformat cards.
+
+Changing a card's ID renames the card. On Save the creator finds everything that refers to the old
+ID in every expansion folder: SUMMON effects, starter decks, and what scenarios start with. It
+lists them and asks before saving, then rewrites them all to the new ID. Everything is validated
+before anything is written. Saved decks and collections already on a server still use the old
+ID; see [When cards change](../README.md#when-cards-change).
 
 Edits stay in memory until Save. Changing expansions, opening another root, importing a draft or
 using the admin panel's Back button prompts before discarding unsaved work. Discard restores the
@@ -143,7 +163,8 @@ Create `cards.json`, for example:
     "rarity": "COMMON",
     "collectible": true,
     "description": "No special abilities.",
-    "flavour": "Its tracks disappear beneath the snow."
+    "flavour": "Its tracks disappear beneath the snow.",
+    "artist": "Aino Virtanen"
   }
 ]
 ```
@@ -151,13 +172,15 @@ Create `cards.json`, for example:
 Copy an existing card of the desired type to get its full structure. Supported types are
 `CREATURE`, `ACTION`, `ARTIFACT`, `WEAPON` and `LOCATION`. Fields such as `keywords`, `tags` and `effects`
 must be present when required by the card type, even when empty. Omit `classId` for a neutral
-card; existing class IDs are `PRIEST` and `WIZARD`. `flavour` is optional.
+card; existing class IDs are `PRIEST` and `WIZARD`. `flavour` is optional, and so is `artist`,
+plain text crediting whoever made the card's art, shown as "Art: …" under the flavour.
 
 `source` is the existing category (`CORE` or `CHRONICLE`), separate from `expansionId`.
 Adding an expansion does not require adding a source category. Rarities are `BASIC`, `COMMON`,
 `RARE`, `EPIC` and `LEGENDARY`. Basic cards are outside the crafting/trading/pack economy.
 
-Descriptions are presentation text, not executable rules. Keywords must be printed in `**bold**`.
+Descriptions are presentation text, not executable rules. Keywords must be printed in `**bold**`;
+a card with no keywords and no rules text may leave its description blank (`""`).
 Encode mechanics in the relevant fields as well. Creatures, Artifacts and Weapons use triggered
 effects, for example:
 
@@ -173,7 +196,8 @@ Actions instead use effects directly, without the trigger wrapper, and require `
 A Location has a `durability`, a `duration`, or both. `durability` is how many times it can be
 activated, and requires an `activation` — what one use does, written like an Action: a
 `targetMode` and a list of `effects`. `duration` is how many of its owner's turns it stands.
-A Location's own `effects` may only trigger on `TURN_STARTED` or `TURN_ENDED`. For example:
+A Location's own `effects` may only trigger on `TURN_STARTED`, `TURN_ENDED`,
+`FRIENDLY_CREATURE_SUMMONED` or `FRIENDLY_CREATURE_DIED`. For example:
 
 ```json
 {
@@ -193,12 +217,59 @@ A Location's own `effects` may only trigger on `TURN_STARTED` or `TURN_ENDED`. F
 
 The description says what an activation does; the hourglass and shield print the two measures.
 Supported effects are `DEAL_DAMAGE`, `HEAL`, `DRAW_CARD`, `BUFF`, `APPLY_STATUS`, `SUMMON`,
-`MOVE`, `DESTROY` and `GAIN_TAIKA`. A `SUMMON` must reference an existing Creature, including
-one in another expansion. New mechanics require an engine implementation and schema update.
+`SUMMON_RANDOM`, `MOVE`, `DESTROY` and `GAIN_TAIKA`. A `SUMMON` must reference an existing
+Creature, including one in another expansion. New mechanics require an engine implementation and
+schema update.
+
+### Tags in rules (tribes)
+
+A Creature's `tags` are free-form — kin (`BEAST`, `ELF`), trade (`MECHANIC`), allegiance
+(`REBEL`) — and rules can ask for them by a `tag` field, matched exactly. Weapons carry tags too,
+so a cost aura can name `BOW`. Validation rejects a `tag` that no card in any expansion carries,
+which is nearly always a typo.
+
+| Pattern                                    | How to write it                                                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| "Give your Beasts +1/+1"                   | `{ "type": "BUFF", "attack": 1, "health": 1, "target": "ALL_FRIENDLY_CREATURES", "tag": "BEAST" }`                   |
+| "Give a friendly Beast +2/+2" (Action)     | `"targetMode": "FRIENDLY_CREATURE", "targetTag": "BEAST"` and an effect aimed at `PLAY_TARGET`                       |
+| "**Arrival:** Give a friendly Beast +2/+2" | An `ARRIVAL` effect aimed at `PLAY_TARGET` with `"tag": "BEAST"`                                                     |
+| "Summon a random Beast"                    | `{ "type": "SUMMON_RANDOM", "tag": "BEAST" }`                                                                        |
+| "If you control another Beast, …"          | `"condition": { "type": "CONTROLS_CREATURE", "tag": "BEAST" }` on any effect                                         |
+| "If you're holding a Dragon, …"            | `"condition": { "type": "HOLDS_CARD", "tag": "DRAGON" }`                                                             |
+| "Whenever you summon a Beast, give it +1"  | trigger `FRIENDLY_CREATURE_SUMMONED`, `"tag": "BEAST"`, target `TRIGGERING_CREATURE`                                 |
+| "Whenever a friendly Beast dies, …"        | trigger `FRIENDLY_CREATURE_DIED`, `"tag": "BEAST"`                                                                   |
+| "Your other Beasts have +1/+1"             | `"auras": [{ "type": "STAT_AURA", "attack": 1, "health": 1, "target": "OTHER_FRIENDLY_CREATURES", "tag": "BEAST" }]` |
+| "Your Beasts cost 1 less"                  | `"auras": [{ "type": "COST_AURA", "amount": -1, "tag": "BEAST" }]`                                                   |
+
+A `tag` on an effect narrows whatever its `target` reaches to Creatures carrying the tag; a
+random target picks only among those. New targets `ALL_FRIENDLY_CREATURES`,
+`OTHER_FRIENDLY_CREATURES` and `RANDOM_OTHER_FRIENDLY_CREATURE` work with or without a tag.
+A targeted Arrival with no legal target still lets the Creature be played; a targeted Action with
+none stays in hand. Conditions are checked as the effect resolves and never count the effect's
+own source. Arrival fires only when the Creature is played from hand, never when a `SUMMON` or
+`SUMMON_RANDOM` puts it on the battlefield. The `FRIENDLY_CREATURE_*` triggers answer other
+Creatures on the same side, however they arrived, after that Creature's own Arrival or Last Breath.
+
+`auras` (Creatures, Artifacts, Locations) hold only while their source is on the battlefield.
+Losing a Health aura lowers maximum Health but never kills. A `COST_AURA` changes cards in its
+owner's hand, never below 0, and may also name a `cardType`.
+
+`SUMMON_RANDOM` draws from the collectible Creatures in the match's random pool, which the server
+fixes when the match is created: the cards of released expansions, by live policy. An unreleased
+set's cards are never drawn in a player's match, so a random summon cannot reveal them. Admin
+debug matches draw from every expansion, so an unreleased set's random effects can be tried
+before launch.
+
+A card's tags print along the bottom of its text box, one line, so players can see what each
+card counts as. Weapons print no tags, and single tags can be left off every card too, through
+`UNPRINTED_TAG_TYPES` and `UNPRINTED_TAGS` in `apps/godot-client/src/card_library.gd`. Unprinted
+tags still count for rules, and the hover reveal still lists them.
 
 Artwork is a separate Godot asset: `apps/godot-client/art/cards/<expansion_folder>/<card_id>.png`
 (WebP, JPEG and SVG are also supported; art directly in `art/cards/` is still found). Content files do not bundle or upload artwork; the creator's **Choose art…**
-copies an image into place for you.
+copies an image into place for you. An optional `<card_id>.crop.json` beside it,
+`{"crop": [x, y, width, height]}` as fractions of the image, is the part of the picture the game
+shows wherever the card is drawn.
 
 ## Packs
 
@@ -253,6 +324,6 @@ Docker images include the JSON and schema alongside compiled code. Commit the co
 rest of the project and deploy it through the usual workflow. No database migration or content
 seeding is needed for a new expansion.
 
-Keep existing card IDs stable: collections and decks store those IDs. Never reuse an old ID for
-a different card. Heroes, classes, starter decks, scenarios and crafting prices remain in the
-TypeScript modules in `packages/card-definitions/src/`.
+Prefer keeping card IDs stable: collections and decks on a server store those IDs, and a rename
+in the creator updates content only. Never reuse an old ID for a different card. Heroes, classes
+and crafting prices remain in the TypeScript modules in `packages/card-definitions/src/`.

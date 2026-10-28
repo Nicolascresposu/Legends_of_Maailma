@@ -1,13 +1,17 @@
 import { captureCardContent, freezeContent, getHeroDefinition } from '@maailma/card-definitions';
 import type {
   ActionResult,
+  Aura,
   CardDefinition,
   CardContentSnapshot,
   CreatureDefinition,
   CreatureInstance,
+  CreatureTag,
   DamageContext,
   DebugEdit,
   Effect,
+  EffectCondition,
+  EffectDefinition,
   EffectTarget,
   EntityId,
   GameAction,
@@ -27,7 +31,7 @@ import type {
   WeaponRange,
   WeaponRemovalReason,
 } from '@maailma/game-model';
-import { cardEffects } from '@maailma/game-model';
+import { cardEffects, carriesTag } from '@maailma/game-model';
 import { SeededRng, normalizeSeed } from '@maailma/rng';
 import {
   adjacentPositions,
@@ -50,6 +54,8 @@ type WorkItem =
       ownerId: PlayerId;
       sourceId?: EntityId;
       playTargetId?: EntityId;
+      /** The Creature a `FRIENDLY_CREATURE_*` trigger fired for. */
+      subjectId?: EntityId;
     };
 
 export const heroEntityId = (playerId: PlayerId): EntityId => `${playerId}:hero`;
@@ -93,7 +99,10 @@ export class GameEngine {
     return card;
   }
 
-  /** Only definitions used by this match and its transitive summons leave the server. */
+  /**
+   * Only definitions used by this match and its transitive summons leave the
+   * server — including every Creature a random summon could bring.
+   */
   presentationCards(): CardDefinition[] {
     const ids = new Set<string>();
     for (const player of this.setup.players) for (const id of player.deck) ids.add(id);
@@ -115,9 +124,16 @@ export class GameEngine {
     for (let index = 0; index < pending.length; index++) {
       const card = this.getCardDefinition(pending[index]!);
       for (const effect of cardEffects(card)) {
-        if (effect.type === 'SUMMON' && !ids.has(effect.definitionId)) {
-          ids.add(effect.definitionId);
-          pending.push(effect.definitionId);
+        const summoned =
+          effect.type === 'SUMMON'
+            ? [effect.definitionId]
+            : effect.type === 'SUMMON_RANDOM'
+              ? this.randomPool(effect.tag)
+              : [];
+        for (const id of summoned) {
+          if (ids.has(id)) continue;
+          ids.add(id);
+          pending.push(id);
         }
       }
     }
@@ -143,6 +159,7 @@ export class GameEngine {
       this.validateAction(action);
       this.applyAction(action);
       this.drainQueue();
+      this.refreshAuras();
       this.state.actionLog.push(structuredClone(action));
       this.state.rngState = this.rng.state;
       return { ok: true, events: this.currentEvents };
@@ -175,6 +192,7 @@ export class GameEngine {
       this.checkDeaths();
       this.checkMatchEnd();
       this.drainQueue();
+      this.refreshAuras();
       this.state.debugEdits = (this.state.debugEdits ?? 0) + 1;
       this.state.rngState = this.rng.state;
       return { ok: true, events: this.currentEvents };
@@ -265,11 +283,18 @@ export class GameEngine {
 
     for (const card of side.hand) {
       const definition = this.getCardDefinition(card.definitionId);
-      if (definition.cost > side.taika.current) continue;
+      if (this.currentCost(side, definition) > side.taika.current) continue;
       const positions = occupiesTile(definition) ? emptyPositions(side.battlefield) : [undefined];
       const targetMode = cardTargetMode(definition);
+      const aimed =
+        targetMode === 'NONE'
+          ? []
+          : this.targetsForMode(playerId, targetMode, cardTargetTag(definition));
+      // A Creature's Arrival with nothing to aim at does not keep it in hand.
       const targets =
-        targetMode === 'NONE' ? [undefined] : this.targetsForMode(playerId, targetMode);
+        targetMode === 'NONE' || (aimed.length === 0 && definition.type === 'CREATURE')
+          ? [undefined]
+          : aimed;
       for (const position of positions) {
         for (const targetId of targets) {
           const action: GameAction = {
@@ -348,7 +373,7 @@ export class GameEngine {
       const targets =
         activation.targetMode === 'NONE'
           ? [undefined]
-          : this.targetsForMode(playerId, activation.targetMode);
+          : this.targetsForMode(playerId, activation.targetMode, activation.targetTag);
       for (const targetId of targets) {
         const action: GameAction = {
           type: 'ACTIVATE_LOCATION',
@@ -389,6 +414,7 @@ export class GameEngine {
     this.lethalContext.clear();
     this.enqueueEffect(effect, ownerId, sourceId);
     this.drainQueue();
+    this.refreshAuras();
     this.state.rngState = this.rng.state;
     return this.currentEvents;
   }
@@ -444,6 +470,7 @@ export class GameEngine {
       // PvE Heroes may open the match already armed.
       if (scenarioSide.startingWeapon) this.equipWeapon(side, scenarioSide.startingWeapon);
     }
+    this.refreshAuras();
     state.rngState = this.rng.state;
   }
 
@@ -520,7 +547,11 @@ export class GameEngine {
     const card = side.hand.find((candidate) => candidate.instanceId === action.cardInstanceId);
     rule(card, 'CARD_NOT_IN_HAND', 'The selected card is not in hand');
     const definition = this.getCardDefinition(card.definitionId);
-    rule(side.taika.current >= definition.cost, 'INSUFFICIENT_TAIKA', 'Not enough Taika');
+    rule(
+      side.taika.current >= this.currentCost(side, definition),
+      'INSUFFICIENT_TAIKA',
+      'Not enough Taika',
+    );
     if (occupiesTile(definition)) {
       rule(action.position, 'POSITION_REQUIRED', `A ${typeLabel(definition)} requires a tile`);
       rule(
@@ -536,7 +567,18 @@ export class GameEngine {
     } else {
       rule(!action.position, 'UNEXPECTED_POSITION', 'This card does not occupy a battlefield tile');
     }
-    this.validateTargetMode(action.actorId, cardTargetMode(definition), action.targetId);
+    const mode = cardTargetMode(definition);
+    const tag = cardTargetTag(definition);
+    // A Creature whose Arrival has nothing to aim at is still played; the
+    // Arrival simply finds no target. An Action with no target is not.
+    if (
+      definition.type === 'CREATURE' &&
+      mode !== 'NONE' &&
+      !action.targetId &&
+      this.targetsForMode(action.actorId, mode, tag).length === 0
+    )
+      return;
+    this.validateTargetMode(action.actorId, mode, action.targetId, tag);
   }
 
   private validateAttack(action: Extract<GameAction, { type: 'ATTACK' }>): void {
@@ -720,10 +762,21 @@ export class GameEngine {
       'LOCATION_CLOSED',
       'This Location was already used; it opens again at the start of your next turn',
     );
-    this.validateTargetMode(action.actorId, activation.targetMode, action.targetId);
+    this.validateTargetMode(
+      action.actorId,
+      activation.targetMode,
+      action.targetId,
+      activation.targetTag,
+    );
   }
 
-  private validateTargetMode(actorId: PlayerId, mode: TargetMode, targetId?: EntityId): void {
+  /** `tag`, when given, narrows any mode to Creatures carrying it. */
+  private validateTargetMode(
+    actorId: PlayerId,
+    mode: TargetMode,
+    targetId?: EntityId,
+    tag?: CreatureTag,
+  ): void {
     if (mode === 'NONE') {
       rule(!targetId, 'UNEXPECTED_TARGET', 'This action does not take a target');
       return;
@@ -745,6 +798,14 @@ export class GameEngine {
     if (mode.includes('ENEMY'))
       rule(targetOwner !== actorId, 'INVALID_TARGET', 'Target must be an enemy');
     if (mode.endsWith('CREATURE')) rule(isCreature, 'INVALID_TARGET', 'Target must be a Creature');
+    if (tag !== undefined) {
+      const creature = isCreature ? this.findCreature(targetId) : undefined;
+      rule(
+        creature && carriesTag(this.creatureDefinition(creature), tag),
+        'INVALID_TARGET',
+        `Target must be a ${tag} Creature`,
+      );
+    }
   }
 
   private applyAction(action: GameAction): void {
@@ -781,9 +842,11 @@ export class GameEngine {
     const index = side.hand.findIndex((card) => card.instanceId === action.cardInstanceId);
     const card = side.hand[index]!;
     const definition = this.getCardDefinition(card.definitionId);
+    // Priced while still in hand, where the auras that discount it apply.
+    const cost = this.currentCost(side, definition);
     side.hand.splice(index, 1);
-    side.taika.current -= definition.cost;
-    this.enqueueEvent({ type: 'TAIKA_CHANGED', actorId: side.playerId, amount: -definition.cost });
+    side.taika.current -= cost;
+    this.enqueueEvent({ type: 'TAIKA_CHANGED', actorId: side.playerId, amount: -cost });
     this.enqueueEvent({
       type: 'CARD_PLAYED',
       actorId: side.playerId,
@@ -800,6 +863,8 @@ export class GameEngine {
         ...(action.targetId ? { targetId: action.targetId } : {}),
         cardDefinitionId: definition.id,
         position: clonePosition(creature.position),
+        // Marks a play from hand, the only summon that sets off Arrival.
+        reason: 'PLAYED',
       });
     } else if (definition.type === 'ACTION') {
       side.discard.push(definition.id);
@@ -1052,77 +1117,73 @@ export class GameEngine {
       if (work.kind === 'EVENT') {
         const event: GameEvent = { ...work.event, sequence: this.state.nextEventSequence++ };
         this.currentEvents.push(event);
+        this.refreshAuras();
         this.discoverTriggers(event);
       } else {
-        this.applyEffect(work.effect, work.ownerId, work.sourceId, work.playTargetId);
+        this.applyEffect(work);
         this.checkDeaths();
         this.checkMatchEnd();
+        this.refreshAuras();
       }
     }
   }
 
   private discoverTriggers(event: GameEvent): void {
-    const trigger =
-      event.type === 'CREATURE_SUMMONED'
-        ? 'ARRIVAL'
-        : event.type === 'CREATURE_DIED'
-          ? 'LAST_BREATH'
-          : event.type === 'TURN_STARTED'
-            ? 'TURN_STARTED'
-            : event.type === 'TURN_ENDED'
-              ? 'TURN_ENDED'
-              : undefined;
-    if (!trigger) return;
-
-    if (
-      (trigger === 'ARRIVAL' || trigger === 'LAST_BREATH') &&
-      event.cardDefinitionId &&
-      event.actorId
-    ) {
+    if (event.type === 'CREATURE_SUMMONED' || event.type === 'CREATURE_DIED') {
+      if (!event.cardDefinitionId || !event.actorId) return;
+      const summoned = event.type === 'CREATURE_SUMMONED';
+      // The Creature's own Arrival or Last Breath resolves first — Arrival only
+      // when it was played from hand, never when an effect summons it...
       const definition = this.getCardDefinition(event.cardDefinitionId);
-      if (definition.type === 'CREATURE') {
-        for (const effect of definition.effects.filter(
-          (candidate) => candidate.trigger === trigger,
-        )) {
+      if (definition.type === 'CREATURE' && (!summoned || event.reason === 'PLAYED')) {
+        const own = summoned ? 'ARRIVAL' : 'LAST_BREATH';
+        for (const effect of definition.effects.filter((candidate) => candidate.trigger === own)) {
           this.enqueueEffect(effect.effect, event.actorId, event.sourceId, event.targetId);
+        }
+      }
+      // ...then whatever on its side answers it.
+      const reaction = summoned ? 'FRIENDLY_CREATURE_SUMMONED' : 'FRIENDLY_CREATURE_DIED';
+      for (const source of this.triggerSources(event.actorId)) {
+        if (source.id === event.sourceId) continue;
+        for (const effect of source.effects) {
+          if (effect.trigger !== reaction || !carriesTag(definition, effect.tag)) continue;
+          this.enqueueEffect(effect.effect, event.actorId, source.id, undefined, event.sourceId);
         }
       }
       return;
     }
 
-    if (event.actorId) {
-      const side = this.side(event.actorId);
-      const sources = [
-        ...Object.values(side.creatures).map((creature) => ({
-          id: creature.instanceId,
-          definition: this.getCardDefinition(creature.definitionId),
-        })),
-        ...Object.values(side.locations).map((location) => ({
-          id: location.instanceId,
-          definition: this.getCardDefinition(location.definitionId),
-        })),
-        ...side.artifacts.map((artifact) => ({
-          id: artifact.instanceId,
-          definition: this.getCardDefinition(artifact.definitionId),
-        })),
-      ].sort((a, b) => a.id.localeCompare(b.id));
-      for (const source of sources) {
-        if (source.definition.type === 'ACTION') continue;
-        for (const effect of source.definition.effects.filter(
-          (candidate) => candidate.trigger === trigger,
-        )) {
-          this.enqueueEffect(effect.effect, side.playerId, source.id);
-        }
+    const trigger =
+      event.type === 'TURN_STARTED'
+        ? 'TURN_STARTED'
+        : event.type === 'TURN_ENDED'
+          ? 'TURN_ENDED'
+          : undefined;
+    if (!trigger || !event.actorId) return;
+    for (const source of this.triggerSources(event.actorId)) {
+      for (const effect of source.effects.filter((candidate) => candidate.trigger === trigger)) {
+        this.enqueueEffect(effect.effect, event.actorId, source.id);
       }
     }
   }
 
-  private applyEffect(
-    effect: Effect,
-    ownerId: PlayerId,
-    sourceId?: EntityId,
-    playTargetId?: EntityId,
-  ): void {
+  /** What stands on a side and can answer a trigger, in a stable order. */
+  private triggerSources(playerId: PlayerId): Array<{ id: EntityId; effects: EffectDefinition[] }> {
+    const side = this.side(playerId);
+    return [...Object.values(side.creatures), ...Object.values(side.locations), ...side.artifacts]
+      .map((entity) => ({
+        id: entity.instanceId,
+        definition: this.getCardDefinition(entity.definitionId),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .flatMap(({ id, definition }) =>
+        definition.type === 'ACTION' ? [] : [{ id, effects: definition.effects }],
+      );
+  }
+
+  private applyEffect(work: Extract<WorkItem, { kind: 'EFFECT' }>): void {
+    const { effect, ownerId, sourceId, playTargetId, subjectId } = work;
+    if (effect.condition && !this.conditionHolds(effect.condition, ownerId, sourceId)) return;
     switch (effect.type) {
       case 'DRAW_CARD':
         for (let count = 0; count < effect.amount; count += 1)
@@ -1139,16 +1200,25 @@ export class GameEngine {
         });
         return;
       }
-      case 'SUMMON': {
+      case 'SUMMON':
+      case 'SUMMON_RANDOM': {
         const side = this.side(ownerId);
         const position = effect.position ?? emptyPositions(side.battlefield)[0];
         if (!position || entityAt(side.battlefield, position)) return;
-        const creature = this.summonCreature(side, effect.definitionId, position, true);
+        // The draw is made only once there is room, so a full board spends no randomness.
+        let definitionId: string;
+        if (effect.type === 'SUMMON') definitionId = effect.definitionId;
+        else {
+          const pool = this.randomPool(effect.tag);
+          if (pool.length === 0) return;
+          definitionId = this.rng.pick(pool);
+        }
+        const creature = this.summonCreature(side, definitionId, position, true);
         this.enqueueEvent({
           type: 'CREATURE_SUMMONED',
           actorId: ownerId,
           sourceId: creature.instanceId,
-          cardDefinitionId: effect.definitionId,
+          cardDefinitionId: definitionId,
           position: clonePosition(position),
         });
         return;
@@ -1157,7 +1227,12 @@ export class GameEngine {
         break;
     }
 
-    const targets = this.resolveTargets(effect.target, ownerId, sourceId, playTargetId);
+    const targets = this.resolveTargets(effect.target, effect.tag, {
+      ownerId,
+      ...(sourceId ? { sourceId } : {}),
+      ...(playTargetId ? { playTargetId } : {}),
+      ...(subjectId ? { subjectId } : {}),
+    });
     for (const targetId of targets) {
       switch (effect.type) {
         case 'DEAL_DAMAGE':
@@ -1239,47 +1314,202 @@ export class GameEngine {
     }
   }
 
+  /**
+   * What an effect's target reaches. With a `tag`, only Creatures carrying it
+   * are reached — and a random pick is made among those, so "a random enemy
+   * Beast" never lands on something else and fizzles.
+   */
   private resolveTargets(
     target: EffectTarget,
-    ownerId: PlayerId,
-    sourceId?: EntityId,
-    playTargetId?: EntityId,
+    tag: CreatureTag | undefined,
+    context: {
+      ownerId: PlayerId;
+      sourceId?: EntityId;
+      playTargetId?: EntityId;
+      subjectId?: EntityId;
+    },
   ): EntityId[] {
+    const matches = (id: EntityId) => {
+      if (tag === undefined) return true;
+      const creature = this.findCreature(id);
+      return creature !== undefined && carriesTag(this.creatureDefinition(creature), tag);
+    };
+    return this.targetCandidates(target, context, matches);
+  }
+
+  private targetCandidates(
+    target: EffectTarget,
+    context: {
+      ownerId: PlayerId;
+      sourceId?: EntityId;
+      playTargetId?: EntityId;
+      subjectId?: EntityId;
+    },
+    matches: (id: EntityId) => boolean,
+  ): EntityId[] {
+    const { ownerId, sourceId, playTargetId, subjectId } = context;
+    const creaturesOf = (side: MatchSide) =>
+      Object.values(side.creatures)
+        .sort(byInstanceId)
+        .map((creature) => creature.instanceId)
+        .filter(matches);
+    const pickOne = (ids: EntityId[]) => (ids.length ? [this.rng.pick(ids)] : []);
     switch (target) {
       case 'PLAY_TARGET':
-        return playTargetId ? [playTargetId] : [];
+        return playTargetId ? [playTargetId].filter(matches) : [];
       case 'SELF':
-        return sourceId ? [sourceId] : [];
+        return sourceId ? [sourceId].filter(matches) : [];
+      case 'TRIGGERING_CREATURE':
+        return subjectId && this.findCreature(subjectId) ? [subjectId].filter(matches) : [];
       case 'OWNER_HERO':
-        return [heroEntityId(ownerId)];
+        return [heroEntityId(ownerId)].filter(matches);
       case 'ENEMY_HERO':
-        return [heroEntityId(this.opponentId(ownerId))];
-      case 'RANDOM_ENEMY_CREATURE': {
-        const creatures = Object.values(this.opponentSide(ownerId).creatures).sort(byInstanceId);
-        return creatures.length ? [this.rng.pick(creatures).instanceId] : [];
-      }
+        return [heroEntityId(this.opponentId(ownerId))].filter(matches);
+      case 'RANDOM_ENEMY_CREATURE':
+        return pickOne(creaturesOf(this.opponentSide(ownerId)));
       case 'ALL_ENEMY_CREATURES':
-        return Object.values(this.opponentSide(ownerId).creatures)
-          .sort(byInstanceId)
-          .map((creature) => creature.instanceId);
+        return creaturesOf(this.opponentSide(ownerId));
+      case 'ALL_FRIENDLY_CREATURES':
+        return creaturesOf(this.side(ownerId));
+      case 'OTHER_FRIENDLY_CREATURES':
+        return creaturesOf(this.side(ownerId)).filter((id) => id !== sourceId);
+      case 'RANDOM_OTHER_FRIENDLY_CREATURE':
+        return pickOne(creaturesOf(this.side(ownerId)).filter((id) => id !== sourceId));
       case 'FRIENDLY_WEAPON': {
         const equipped = this.side(ownerId).hero.equippedWeapon;
-        return equipped ? [equipped.instanceId] : [];
+        return equipped ? [equipped.instanceId].filter(matches) : [];
       }
       case 'ENEMY_WEAPON': {
         const equipped = this.opponentSide(ownerId).hero.equippedWeapon;
-        return equipped ? [equipped.instanceId] : [];
+        return equipped ? [equipped.instanceId].filter(matches) : [];
       }
-      case 'ADJACENT_FRIENDLY_CREATURES': {
-        // A Location reaches its neighbours from its tile as a Creature does.
-        const source = sourceId
-          ? (this.findCreature(sourceId) ?? this.findLocation(sourceId))
-          : undefined;
-        if (!source) return [];
-        const side = this.side(ownerId);
-        return adjacentPositions(side.battlefield, source.position)
-          .map((position) => entityAt(side.battlefield, position))
-          .filter((id): id is string => id !== null && Boolean(side.creatures[id]));
+      case 'ADJACENT_FRIENDLY_CREATURES':
+        return this.adjacentFriendlyCreatures(ownerId, sourceId).filter(matches);
+    }
+  }
+
+  /** A Location reaches its neighbours from its tile as a Creature does. */
+  private adjacentFriendlyCreatures(ownerId: PlayerId, sourceId?: EntityId): EntityId[] {
+    const source = sourceId
+      ? (this.findCreature(sourceId) ?? this.findLocation(sourceId))
+      : undefined;
+    if (!source) return [];
+    const side = this.side(ownerId);
+    return adjacentPositions(side.battlefield, source.position)
+      .map((position) => entityAt(side.battlefield, position))
+      .filter((id): id is string => id !== null && Boolean(side.creatures[id]));
+  }
+
+  /** Whether an effect's condition holds as it resolves. */
+  private conditionHolds(
+    condition: EffectCondition,
+    ownerId: PlayerId,
+    sourceId?: EntityId,
+  ): boolean {
+    const side = this.side(ownerId);
+    if (condition.type === 'CONTROLS_CREATURE') {
+      const count = Object.values(side.creatures).filter(
+        (creature) =>
+          creature.instanceId !== sourceId &&
+          carriesTag(this.creatureDefinition(creature), condition.tag),
+      ).length;
+      return count >= (condition.atLeast ?? 1);
+    }
+    return side.hand.some((card) => {
+      const definition = this.getCardDefinition(card.definitionId);
+      return (
+        (condition.cardType === undefined || definition.type === condition.cardType) &&
+        carriesTag(definition, condition.tag)
+      );
+    });
+  }
+
+  /**
+   * The Creatures a random summon draws from: every collectible Creature in
+   * the setup's random pool carrying `tag`, in id order so a seed always picks
+   * the same one.
+   */
+  private randomPool(tag: CreatureTag | undefined): string[] {
+    return (this.setup.randomPool ?? Object.keys(this.content.cards))
+      .map((id) => this.getCardDefinition(id))
+      .filter((card) => card.type === 'CREATURE' && card.collectible && carriesTag(card, tag))
+      .map((card) => card.id)
+      .sort();
+  }
+
+  /** What a card in `side`'s hand costs now: its printed cost, moved by its owner's cost auras. */
+  private currentCost(side: MatchSide, definition: CardDefinition): number {
+    let cost = definition.cost;
+    for (const { aura } of this.auraSources(side)) {
+      if (aura.type !== 'COST_AURA') continue;
+      if (aura.cardType !== undefined && aura.cardType !== definition.type) continue;
+      if (carriesTag(definition, aura.tag)) cost += aura.amount;
+    }
+    return Math.max(0, cost);
+  }
+
+  /** Every aura standing on `side`'s battlefield, with where it stands. */
+  private auraSources(side: MatchSide): Array<{ sourceId: EntityId; aura: Aura }> {
+    return [...Object.values(side.creatures), ...Object.values(side.locations), ...side.artifacts]
+      .sort(byInstanceId)
+      .flatMap((entity) => {
+        const definition = this.getCardDefinition(entity.definitionId);
+        const auras =
+          definition.type === 'CREATURE' ||
+          definition.type === 'LOCATION' ||
+          definition.type === 'ARTIFACT'
+            ? (definition.auras ?? [])
+            : [];
+        return auras.map((aura) => ({ sourceId: entity.instanceId, aura }));
+      });
+  }
+
+  /**
+   * Brings every aura's bonus in line with the board as it now stands.
+   *
+   * Run after each step of resolution, so an aura is in force from the moment
+   * its source arrives and gone the moment it leaves. Taking Health back
+   * lowers the maximum, and the current Health only as far as the new
+   * maximum: damage the bonus soaked up stays soaked, so an aura leaving can
+   * wound but never kill. Hand costs are refreshed too, for clients to show.
+   */
+  private refreshAuras(): void {
+    for (const playerId of this.state.playerOrder) {
+      const side = this.side(playerId);
+      const sources = this.auraSources(side);
+      const owed = new Map<EntityId, { attack: number; health: number }>();
+      for (const { sourceId, aura } of sources) {
+        if (aura.type !== 'STAT_AURA') continue;
+        const reached =
+          aura.target === 'ADJACENT_FRIENDLY_CREATURES'
+            ? this.adjacentFriendlyCreatures(playerId, sourceId)
+            : Object.keys(side.creatures).filter((id) => id !== sourceId);
+        for (const id of reached) {
+          if (!carriesTag(this.creatureDefinition(side.creatures[id]!), aura.tag)) continue;
+          const bonus = owed.get(id) ?? { attack: 0, health: 0 };
+          bonus.attack += aura.attack;
+          bonus.health += aura.health;
+          owed.set(id, bonus);
+        }
+      }
+      for (const creature of Object.values(side.creatures)) {
+        const next = owed.get(creature.instanceId) ?? { attack: 0, health: 0 };
+        const previous = creature.auraBonus ?? { attack: 0, health: 0 };
+        const health = next.health - previous.health;
+        creature.currentAttack += next.attack - previous.attack;
+        creature.maxHealth += health;
+        creature.currentHealth =
+          health > 0
+            ? creature.currentHealth + health
+            : Math.min(creature.currentHealth, creature.maxHealth);
+        if (next.attack === 0 && next.health === 0) delete creature.auraBonus;
+        else creature.auraBonus = next;
+      }
+      for (const card of side.hand) {
+        const definition = this.getCardDefinition(card.definitionId);
+        const cost = this.currentCost(side, definition);
+        if (cost === definition.cost) delete card.cost;
+        else card.cost = cost;
       }
     }
   }
@@ -1666,22 +1896,25 @@ export class GameEngine {
     creature.statuses.push({ id: this.nextId('status'), kind: 'REVEALED' });
   }
 
-  private targetsForMode(actorId: PlayerId, mode: TargetMode): EntityId[] {
+  /** `tag`, when given, narrows any mode to Creatures carrying it; no Hero carries one. */
+  private targetsForMode(actorId: PlayerId, mode: TargetMode, tag?: CreatureTag): EntityId[] {
     if (mode === 'NONE') return [];
     const friendly = this.side(actorId);
     const enemy = this.opponentSide(actorId);
     const creatureIds = (side: MatchSide) =>
       Object.values(side.creatures)
         .filter((creature) => !this.isHidden(creature))
+        .filter((creature) => carriesTag(this.creatureDefinition(creature), tag))
         .sort(byInstanceId)
         .map((creature) => creature.instanceId);
-    if (mode === 'FRIENDLY_CHARACTER') return [heroEntityId(actorId), ...creatureIds(friendly)];
-    if (mode === 'ENEMY_CHARACTER') return [heroEntityId(enemy.playerId), ...creatureIds(enemy)];
+    const hero = (playerId: PlayerId) => (tag === undefined ? [heroEntityId(playerId)] : []);
+    if (mode === 'FRIENDLY_CHARACTER') return [...hero(actorId), ...creatureIds(friendly)];
+    if (mode === 'ENEMY_CHARACTER') return [...hero(enemy.playerId), ...creatureIds(enemy)];
     if (mode === 'ANY_CHARACTER')
       return [
-        heroEntityId(actorId),
+        ...hero(actorId),
         ...creatureIds(friendly),
-        heroEntityId(enemy.playerId),
+        ...hero(enemy.playerId),
         ...creatureIds(enemy),
       ];
     if (mode === 'FRIENDLY_CREATURE') return creatureIds(friendly);
@@ -1738,6 +1971,7 @@ export class GameEngine {
     ownerId: PlayerId,
     sourceId?: EntityId,
     playTargetId?: EntityId,
+    subjectId?: EntityId,
   ): void {
     this.queue.push({
       kind: 'EFFECT',
@@ -1745,6 +1979,7 @@ export class GameEngine {
       ownerId,
       ...(sourceId ? { sourceId } : {}),
       ...(playTargetId ? { playTargetId } : {}),
+      ...(subjectId ? { subjectId } : {}),
     });
   }
 
@@ -1771,6 +2006,22 @@ function cardTargetMode(definition: CardDefinition): TargetMode {
   return 'NONE';
 }
 
+/**
+ * The tag a card's play target must carry. An Action states it outright; a
+ * Creature's comes from the Arrival effect that its target mode is read from.
+ */
+function cardTargetTag(definition: CardDefinition): CreatureTag | undefined {
+  if (definition.type === 'ACTION') return definition.targetTag;
+  if (definition.type !== 'CREATURE') return undefined;
+  const targeted = definition.effects.find(
+    (entry) =>
+      entry.trigger === 'ARRIVAL' &&
+      'target' in entry.effect &&
+      entry.effect.target === 'PLAY_TARGET',
+  );
+  return targeted && 'tag' in targeted.effect ? targeted.effect.tag : undefined;
+}
+
 function validateSetup(setup: MatchSetup, definitionFor: (id: string) => CardDefinition): void {
   if (setup.players.length !== 2) throw new Error('A match currently requires exactly two sides');
   if (setup.players[0].playerId === setup.players[1].playerId)
@@ -1781,6 +2032,7 @@ function validateSetup(setup: MatchSetup, definitionFor: (id: string) => CardDef
   for (const player of setup.players) {
     for (const cardId of player.deck) definitionFor(cardId);
   }
+  for (const cardId of setup.randomPool ?? []) definitionFor(cardId);
 }
 
 /** Creatures and Locations are put on a tile when played; nothing else is. */

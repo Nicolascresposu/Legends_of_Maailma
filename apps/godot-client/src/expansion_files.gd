@@ -3,6 +3,8 @@ extends RefCounted
 ## Local authoring only. No HTTP requests, database changes, or live publishing.
 const Validator := preload("res://src/content_validator.gd")
 const FILES := ["expansion", "cards", "packs"]
+## Files a folder may leave out; a missing one holds nothing.
+const OPTIONAL := ["starterDecks", "scenarios"]
 
 static func default_root() -> String:
 	return ProjectSettings.globalize_path("res://").path_join("../../packages/card-definitions/content").simplify_path()
@@ -10,8 +12,11 @@ static func default_root() -> String:
 static func load_folder(directory: String) -> Dictionary:
 	var data: Dictionary = {}
 	var errors: Array[String] = []
-	for key in FILES:
+	for key in FILES + OPTIONAL:
 		var path := directory.path_join(key + ".json")
+		if key in OPTIONAL and not FileAccess.file_exists(path):
+			data[key] = []
+			continue
 		var file := FileAccess.open(path, FileAccess.READ)
 		if file == null:
 			errors.append("%s: %s" % [path, error_string(FileAccess.get_open_error())])
@@ -76,7 +81,7 @@ static func suggested_folder(id: String) -> String:
 
 static func fingerprint(directory: String) -> String:
 	var combined := ""
-	for key in FILES:
+	for key in FILES + OPTIONAL:
 		var path := directory.path_join(key + ".json")
 		combined += key + ":" + (FileAccess.get_sha256(path) if FileAccess.file_exists(path) else "missing") + "\n"
 	return combined.sha256_text()
@@ -87,14 +92,17 @@ static func has_content(directory: String) -> bool:
 			return true
 	return false
 
-static func save(root: String, folder: String, data: Dictionary, expected_stamp: String = "", overwrite: bool = false) -> Dictionary:
+## `context`, when given, is the other expansions to validate against in place
+## of the ones on disk: a save that also rewrites them validates what they
+## will be, not what they were.
+static func save(root: String, folder: String, data: Dictionary, expected_stamp: String = "", overwrite: bool = false, context: Variant = null) -> Dictionary:
 	if not safe_folder(folder):
 		return _failure(["Folder name must use letters, numbers, hyphens or underscores; no paths."])
 	var path := root.path_join(folder).simplify_path()
 	# Resolve the final target before any writes; it must be an immediate child.
 	if not same_path(path.get_base_dir(), root):
 		return _failure(["Expansion folder must be inside the selected content folder."])
-	var errors := validate(data, root, path)
+	var errors := Validator.validate(data, context) if context is Array else validate(data, root, path)
 	if not errors.is_empty():
 		return _failure(errors)
 	return write_folder(path, data, expected_stamp, overwrite)
@@ -116,14 +124,17 @@ static func write_folder(directory: String, data: Dictionary, expected_stamp: St
 		return _failure(["Cannot create folder %s: %s" % [directory, error_string(result)]])
 	var token := ".creator-%s-%s" % [Time.get_ticks_usec(), randi()]
 	var staged: Array = []
-	for key in FILES:
+	for key in FILES + OPTIONAL:
 		var path := directory.path_join(key + ".json")
+		# An optional file is written once it holds something, and kept after.
+		if key in OPTIONAL and data.get(key, []).is_empty() and not FileAccess.file_exists(path):
+			continue
 		var original := FileAccess.open(path, FileAccess.READ) if FileAccess.file_exists(path) else null
 		if original != null:
 			var parsed := JSON.new()
 			var valid := parsed.parse(original.get_as_text()) == OK
 			original.close()
-			if valid and parsed.data == data[key]:
+			if valid and parsed.data == data.get(key, []):
 				continue
 		var record := {"path": path, "temp": path + token + ".tmp", "backup": path + token + ".backup", "backed_up": false, "replaced": false}
 		staged.append(record)
@@ -131,7 +142,7 @@ static func write_folder(directory: String, data: Dictionary, expected_stamp: St
 		if file == null:
 			_cleanup_temps(staged)
 			return _failure(["Cannot stage %s: %s" % [path, error_string(FileAccess.get_open_error())]])
-		file.store_string(_serialize(data[key]) + "\n")
+		file.store_string(_serialize(data.get(key, [])) + "\n")
 		file.flush()
 		var written := file.get_error()
 		file.close()

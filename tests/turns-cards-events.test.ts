@@ -6,8 +6,8 @@ describe('turns, Taika, and Hero Powers', () => {
   it('increments, refills, and caps Taika at ten', () => {
     const engine = makeEngine({
       taika: 9,
-      deckA: Array(12).fill('wolf'),
-      deckB: Array(12).fill('wolf'),
+      deckA: Array(12).fill('chicken'),
+      deckB: Array(12).fill('chicken'),
     });
     engine.state.sides.a!.taika.current = 0;
     engine.dispatch({ type: 'END_TURN', actorId: 'a' });
@@ -129,7 +129,7 @@ describe('event and effect resolution', () => {
     const engine = makeEngine({
       a: [{ definitionId: 'brown_bear', position: { row: 'FRONT', column: 0 } }],
       b: [{ definitionId: 'giant_rat', position: { row: 'FRONT', column: 0 } }],
-      deckB: Array(5).fill('wolf'),
+      deckB: Array(5).fill('chicken'),
     });
     const before = engine.state.sides.b!.hand.length;
     const result = engine.dispatch({
@@ -152,8 +152,8 @@ describe('event and effect resolution', () => {
     const engine = makeEngine({
       a: [{ definitionId: 'giant_rat', position: { row: 'FRONT', column: 0 } }],
       b: [{ definitionId: 'giant_rat', position: { row: 'FRONT', column: 0 } }],
-      deckA: Array(4).fill('wolf'),
-      deckB: Array(4).fill('wolf'),
+      deckA: Array(4).fill('chicken'),
+      deckB: Array(4).fill('chicken'),
     });
     const result = engine.dispatch({
       type: 'ATTACK',
@@ -168,10 +168,10 @@ describe('event and effect resolution', () => {
 
   it('Ward negates one damage source and then disappears', () => {
     const engine = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
       b: [{ definitionId: 'maintenance_anima', position: { row: 'FRONT', column: 0 } }],
     });
-    const attacker = creatureId(engine, 'a', 'wolf');
+    const attacker = creatureId(engine, 'a', 'chicken');
     const warded = creatureId(engine, 'b', 'maintenance_anima');
     const result = engine.dispatch({
       type: 'ATTACK',
@@ -202,7 +202,7 @@ describe('event and effect resolution', () => {
     const engine = makeEngine({
       taika: 6,
       deckA: Array(6).fill('arcane_battery'),
-      deckB: Array(6).fill('wolf'),
+      deckB: Array(6).fill('chicken'),
     });
     for (const card of [...engine.state.sides.a!.hand].slice(0, 2)) {
       expect(

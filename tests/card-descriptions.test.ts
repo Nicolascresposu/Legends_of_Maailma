@@ -65,12 +65,12 @@ describe('card descriptions', () => {
   );
 
   it('rejects malformed flavour markup', () => {
-    const card: CardDefinition = { ...getCardDefinition('wolf'), flavour: '**loud' };
-    expect(validateCardDescription(card)).toEqual(['wolf: flavour bold (**) is never closed']);
+    const card: CardDefinition = { ...getCardDefinition('chicken'), flavour: '**loud' };
+    expect(validateCardDescription(card)).toEqual(['chicken: flavour bold (**) is never closed']);
   });
 
   it('allows a card with no flavour', () => {
-    const card = { ...getCardDefinition('wolf') };
+    const card = { ...getCardDefinition('chicken') };
     delete card.flavour;
     expect(validateCardDescription(card)).toEqual([]);
   });
@@ -89,10 +89,15 @@ describe('card descriptions', () => {
     ]);
   });
 
-  it('rejects a missing description', () => {
-    const blank: CardDefinition = { ...getCardDefinition('wolf'), description: '  ' };
+  it('allows a blank description on a card with no keywords', () => {
+    const blank: CardDefinition = { ...getCardDefinition('brown_bear'), description: '' };
+    expect(validateCardDescription(blank)).toEqual([]);
+  });
+
+  it('rejects a blank description on a card with keywords', () => {
+    const blank: CardDefinition = { ...getCardDefinition('dwarf_defender'), description: '  ' };
     expect(validateCardDescription(blank)).toEqual([
-      'wolf: description must be a non-empty string',
+      'dwarf_defender: description must print keyword Guard in bold',
     ]);
   });
 });

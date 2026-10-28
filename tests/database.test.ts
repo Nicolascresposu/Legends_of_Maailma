@@ -214,7 +214,7 @@ describe('decks', () => {
     const tooSmall = await fetch(`${base}/api/decks`, {
       method: 'POST',
       headers: authed(token),
-      body: JSON.stringify({ name: 'Tiny', heroId: 'healer', cardIds: ['wolf'] }),
+      body: JSON.stringify({ name: 'Tiny', heroId: 'healer', cardIds: ['chicken'] }),
     });
     expect(tooSmall.status).toBe(201);
     const tinyId = ((await tooSmall.json()) as { deck: { id: string } }).deck.id;

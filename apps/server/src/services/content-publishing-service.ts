@@ -16,10 +16,6 @@ import {
   currentContent,
   parseContentDocuments,
   validateExpansionDocument,
-  STARTER_DECKS,
-  HERO_DEFINITIONS,
-  SCENARIO_DEFINITIONS,
-  cardFitsClass,
   type ContentCatalog,
   type ExpansionDocument,
 } from '@maailma/card-definitions';
@@ -42,12 +38,15 @@ interface PublishedState {
 }
 
 export interface ContentChange {
-  kind: 'expansions' | 'cards' | 'packs';
+  kind: (typeof CHANGE_KINDS)[number];
   id: string;
   change: 'added' | 'changed' | 'removed';
   before: unknown;
   after: unknown;
 }
+
+/** Every kind of definition a review compares, in the order it lists them. */
+const CHANGE_KINDS = ['expansions', 'cards', 'packs', 'starterDecks', 'scenarios'] as const;
 
 /** One server process owns this store. Source JSON remains the authoring source. */
 export class ContentPublishingService {
@@ -134,46 +133,11 @@ export class ContentPublishingService {
 
   private parseDocuments(documents: ExpansionDocument[]): ContentCatalog {
     try {
+      // Starter decks and scenarios are content too, so the catalogue's own
+      // checks keep them pointing at cards that still exist.
       const catalog = parseContentDocuments(
         documents.map((data) => ({ folder: data.expansion.id, data })),
       );
-      // Code-owned starters and scenarios must remain usable after a publication.
-      const cards = new Map(catalog.cards.map((card) => [card.id, card]));
-      const errors: string[] = [];
-      for (const [classId, deck] of Object.entries(STARTER_DECKS)) {
-        for (const id of deck) {
-          const card = cards.get(id);
-          if (!card || !card.collectible || !cardFitsClass(card, classId)) {
-            errors.push(`${id}: required by the ${classId} starter deck`);
-          }
-          if (card?.rarity === 'LEGENDARY' && deck.filter((entry) => entry === id).length > 1) {
-            errors.push(`${id}: Legendary copy limit would break the ${classId} starter deck`);
-          }
-        }
-      }
-      for (const scenario of Object.values(SCENARIO_DEFINITIONS)) {
-        for (const side of [scenario.sideA, scenario.sideB]) {
-          if (!HERO_DEFINITIONS[side.heroDefinitionId])
-            errors.push(`Unknown scenario Hero ${side.heroDefinitionId}`);
-          for (const creature of side.startingCreatures ?? []) {
-            if (cards.get(creature.definitionId)?.type !== 'CREATURE')
-              errors.push(`${creature.definitionId}: scenario requires a Creature`);
-          }
-          for (const location of side.startingLocations ?? []) {
-            if (cards.get(location.definitionId)?.type !== 'LOCATION')
-              errors.push(`${location.definitionId}: scenario requires a Location`);
-          }
-          for (const id of side.startingArtifacts ?? []) {
-            if (cards.get(id)?.type !== 'ARTIFACT')
-              errors.push(`${id}: scenario requires an Artifact`);
-          }
-          if (side.startingWeapon && cards.get(side.startingWeapon)?.type !== 'WEAPON')
-            errors.push(`${side.startingWeapon}: scenario requires a Weapon`);
-          for (const id of side.startingCards ?? [])
-            if (!cards.has(id)) errors.push(`${id}: required by scenario`);
-        }
-      }
-      if (errors.length) throw new Error([...new Set(errors)].join('\n'));
       return catalog;
     } catch (error) {
       throw new AccountError('INVALID_CONTENT', String((error as Error).message), 422);
@@ -183,7 +147,7 @@ export class ContentPublishingService {
   private review(catalog: ContentCatalog) {
     const before = currentContent();
     const changes: ContentChange[] = [];
-    for (const kind of ['expansions', 'cards', 'packs'] as const) {
+    for (const kind of CHANGE_KINDS) {
       const old = new Map<string, unknown>(before[kind].map((entry) => [entry.id, entry]));
       const next = new Map<string, unknown>(catalog[kind].map((entry) => [entry.id, entry]));
       for (const id of [...new Set([...old.keys(), ...next.keys()])].sort()) {

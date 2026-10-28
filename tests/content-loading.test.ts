@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
+  CLASS_DEFINITIONS,
   getCardDefinition,
   getExpansionDefinition,
   getPackDefinition,
@@ -19,7 +20,7 @@ function fixture(id = 'TEST') {
     expansion: { schemaVersion: 1, ...structuredClone(getExpansionDefinition('CORE')), id },
     cards: [
       {
-        ...structuredClone(getCardDefinition('wolf') as CreatureDefinition),
+        ...structuredClone(getCardDefinition('chicken') as CreatureDefinition),
         id: `${id}_wolf`,
         expansionId: id,
       },
@@ -38,6 +39,21 @@ function writeFixture(data = fixture(), folder = 'test') {
   }
 }
 
+/**
+ * Gives `folder` one starter deck per class, built from `cardId`: a catalogue
+ * is only complete with them, so every load that should succeed needs one.
+ */
+function writeStarters(folder = 'test', cardId = 'TEST_wolf', expansionId = 'TEST') {
+  const decks = Object.keys(CLASS_DEFINITIONS).map((classId) => ({
+    id: `${classId}_STARTER`,
+    name: `${classId} starter`,
+    classId,
+    expansionId,
+    cards: [{ cardId, copies: 2 }],
+  }));
+  writeFileSync(join(root, folder, 'starterDecks.json'), JSON.stringify(decks));
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'maailma-content-'));
 });
@@ -52,6 +68,7 @@ describe('JSON expansion discovery', () => {
   it('discovers new expansion folders with no TypeScript registration', () => {
     writeFixture(fixture('SECOND'), 'z-second');
     writeFixture(fixture('FIRST'), 'a-first');
+    writeStarters('a-first', 'FIRST_wolf', 'FIRST');
     const loaded = loadContent(pathToFileURL(root));
     expect(loaded.expansions.map((expansion) => expansion.id)).toEqual(['FIRST', 'SECOND']);
     expect(loaded.cards.map((card) => card.id)).toEqual(['FIRST_wolf', 'SECOND_wolf']);
@@ -65,7 +82,11 @@ describe('JSON expansion discovery', () => {
     data.cards = [];
     data.packs = [];
     writeFixture(data);
-    expect(loadContent(root).expansions[0]?.policy.released).toBe(false);
+    // The starter decks live in a finished expansion beside it.
+    writeFixture(fixture('OTHER'), 'other');
+    writeStarters('other', 'OTHER_wolf', 'OTHER');
+    const unfinished = loadContent(root).expansions.find((expansion) => expansion.id === 'TEST');
+    expect(unfinished?.policy.released).toBe(false);
   });
 
   it('loads compiled registries from a different working directory', () => {
@@ -75,11 +96,11 @@ describe('JSON expansion discovery', () => {
       [
         '--input-type=module',
         '-e',
-        `const {getCardDefinition} = await import(${JSON.stringify(entry)}); console.log(getCardDefinition('wolf').name);`,
+        `const {getCardDefinition} = await import(${JSON.stringify(entry)}); console.log(getCardDefinition('chicken').name);`,
       ],
       { cwd: root, encoding: 'utf8' },
     );
-    expect(output.trim()).toBe('Wolf');
+    expect(output.trim()).toBe('Chicken');
   });
 
   it('reports a missing file with its path', () => {
@@ -266,9 +287,23 @@ describe('content shape validation', () => {
     data.cards[0]!.effects = effects.map((effect) => ({ trigger: 'ARRIVAL', effect }));
     writeFixture(data);
     writeFixture(fixture('OTHER'), 'other');
+    writeStarters();
     expect(loadContent(root).cards.find((card) => card.id === 'TEST_wolf')?.effects).toEqual(
       data.cards[0]!.effects,
     );
+  });
+
+  it('carries an art credit, which must not be blank when given', () => {
+    const data = fixture();
+    data.cards[0]!.artist = 'Russell Dongjun Lu';
+    writeFixture(data);
+    writeStarters();
+    expect(loadContent(root).cards.find((card) => card.id === 'TEST_wolf')?.artist).toBe(
+      'Russell Dongjun Lu',
+    );
+    data.cards[0]!.artist = ' ';
+    writeFixture(data);
+    expect(() => loadContent(root)).toThrow(/artist/);
   });
 });
 

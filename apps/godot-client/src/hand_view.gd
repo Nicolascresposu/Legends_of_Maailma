@@ -523,6 +523,7 @@ func _build_zoom() -> void:
 	if CardFrame.supports(library, definition_id):
 		var frame := CardFrame.make(library, {
 			"definition_id": definition_id,
+			"cost": int(info.get("cost", library.cost(definition_id))),
 			"unaffordable": bool(info.get("unaffordable", false)),
 		}, ZOOM_WIDTH, true)
 		# The frame is clear at its sides, so the card draws the ring round
@@ -538,7 +539,11 @@ func _build_zoom() -> void:
 		if not frame.rules_fit:
 			notes.append(_rich(library.description_bbcode(definition_id), 13, Color.WHITE))
 	else:
-		_zoom.add_child(_zoom_tile(definition_id, bool(info.get("unaffordable", false))))
+		_zoom.add_child(_zoom_tile(
+			definition_id,
+			int(info.get("cost", library.cost(definition_id))),
+			bool(info.get("unaffordable", false))
+		))
 
 	var kind := library.card_type(definition_id)
 	var is_weapon := kind == "WEAPON"
@@ -569,7 +574,7 @@ func _build_zoom() -> void:
 
 ## A card without a frame, drawn large: its name, type and cost, art, rules
 ## and flavour, at the frame's size so every card in the hand zooms alike.
-func _zoom_tile(definition_id: String, unaffordable: bool) -> Control:
+func _zoom_tile(definition_id: String, cost: int, unaffordable: bool) -> Control:
 	var tile := PanelContainer.new()
 	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tile.custom_minimum_size = Vector2(ZOOM_WIDTH, roundf(ZOOM_WIDTH / CardFrame.ASPECT))
@@ -594,7 +599,7 @@ func _zoom_tile(definition_id: String, unaffordable: bool) -> Control:
 	var kind := library.card_type(definition_id)
 	if kind != "":
 		parts.append(kind.capitalize())
-	parts.append("%d Taika" % library.cost(definition_id))
+	parts.append("%d Taika" % cost)
 	var type_line := _line("  ·  ".join(parts), 12, COLOR_NOTE if unaffordable else COLOR_DIM)
 	type_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(type_line)
@@ -614,6 +619,9 @@ func _zoom_tile(definition_id: String, unaffordable: bool) -> Control:
 	var story := library.flavour_bbcode(definition_id)
 	if story != "":
 		column.add_child(_rich(story, 11, COLOR_DIM))
+	var credit := library.artist_credit(definition_id)
+	if credit != "":
+		column.add_child(_line(credit, 10, COLOR_DIM))
 	return tile
 
 func _line(text: String, font_size: int, color: Color) -> Label:

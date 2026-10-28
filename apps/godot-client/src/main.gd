@@ -1515,11 +1515,13 @@ func _render_hand(side: Dictionary) -> void:
 			var definition_id := str(card.get("definitionId", ""))
 			var panel := _hand_card(card, available)
 			var playable := panel.has_meta("drag_card")
+			var cost := _hand_cost(card)
 			# What the large card on hover shows besides the card itself.
 			hand_view.put_card(str(card.get("instanceId", "")), panel, {
 				"definition_id": definition_id,
+				"cost": cost,
 				"playable": playable,
-				"unaffordable": library.cost(definition_id) > available,
+				"unaffordable": cost > available,
 				"ring": COLOR_READY if playable else COLOR_EMPTY,
 				"note": str(panel.get_meta("hand_note", "")),
 			})
@@ -1532,7 +1534,7 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 	panel.custom_minimum_size = CARD_SIZE
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 
-	var cost := library.cost(definition_id)
+	var cost := _hand_cost(card)
 	# A card is drawn on its type's frame; its cost badge says when it cannot
 	# be paid for, which is what the "needs" line says on a card of a type
 	# with no frame.
@@ -1541,6 +1543,7 @@ func _hand_card(card: Dictionary, available_taika: int) -> Control:
 		panel.set_meta("framed", true)
 		panel.add_child(CardFrame.make(library, {
 			"definition_id": definition_id,
+			"cost": cost,
 			"unaffordable": cost > available_taika,
 		}, FRAME_WIDTH))
 	else:
@@ -2273,10 +2276,15 @@ func _cheapest_hand_cost(side: Dictionary) -> int:
 	for card in (hand as Array):
 		if typeof(card) != TYPE_DICTIONARY:
 			continue
-		var cost := library.cost(str(card.get("definitionId", "")))
+		var cost := _hand_cost(card)
 		if cheapest < 0 or cost < cheapest:
 			cheapest = cost
 	return cheapest
+
+## What a hand card costs now. The server sends `cost` only when an aura has
+## moved it off the printed cost.
+func _hand_cost(card: Dictionary) -> int:
+	return int(card.get("cost", library.cost(str(card.get("definitionId", "")))))
 
 func _end_turn() -> void:
 	for action in legal_actions:

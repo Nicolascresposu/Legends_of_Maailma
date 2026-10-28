@@ -1,6 +1,6 @@
 import { SCENARIO_DEFINITIONS } from '@maailma/card-definitions';
 import { GameEngine } from '@maailma/game-engine';
-import type { Position, ScenarioDefinition } from '@maailma/game-model';
+import type { CardContentSnapshot, Position, ScenarioDefinition } from '@maailma/game-model';
 
 interface CreaturePlacement {
   definitionId: string;
@@ -18,6 +18,8 @@ export function makeEngine(
     seed?: number | string;
     startingWeaponA?: string;
     startingWeaponB?: string;
+    /** Definitions to play with instead of the shipped ones. */
+    content?: CardContentSnapshot;
   } = {},
 ): GameEngine {
   const width = options.width ?? 3;
@@ -44,6 +46,7 @@ export function makeEngine(
   return new GameEngine({
     scenario,
     seed: options.seed ?? 123,
+    ...(options.content ? { content: options.content } : {}),
     players: [
       { playerId: 'a', deck: options.deckA ?? [] },
       { playerId: 'b', deck: options.deckB ?? [] },

@@ -62,7 +62,66 @@ func _init() -> void:
 	# The two legendaries sit outside the starter grant.
 	_check("unowned cards are still listed", unowned > 0)
 	print("  owned kinds: %d, unowned kinds: %d" % [owned, unowned])
-	_check("the screen rendered a row per card", screen._card_list.get_child_count() == screen.collection.size())
+
+	# The collection is a book of pages, cheapest first, holding only the cards
+	# owned until the crafting view opens.
+	await process_frame
+	var shown := screen.visible_entries()
+	_check("a page shows up to eight cards", screen.page_cards().size() == mini(8, shown.size()))
+	_check("building a deck shows only owned cards",
+		shown.all(func(entry: Dictionary) -> bool: return int(entry.get("owned", 0)) > 0))
+	_check("the cards are in cost order", _in_cost_order(shown))
+	_check("the cards are laid out on the page",
+		screen.page_cards().all(func(tile: CollectionCard) -> bool: return tile.frame.size.x > 60.0))
+	print("  deck-building pages: %d" % screen.page_count())
+	if screen.page_count() > 1:
+		var first_card := screen.page_cards()[0].card_id
+		_wheel(screen._page_grid, MOUSE_BUTTON_WHEEL_DOWN)
+		_check("the wheel turns the page",
+			screen.page == 1 and screen.page_cards()[0].card_id != first_card)
+		screen.turn_page(-1)
+
+	var clicked_id := screen.page_cards()[0].card_id
+	_click(screen.page_cards()[0], MOUSE_BUTTON_LEFT)
+	_check("a left click adds a copy to the deck", int(screen.draft.get(clicked_id, 0)) == 1)
+	_click(screen.page_cards()[0], MOUSE_BUTTON_RIGHT)
+	_check("a right click takes it out again", not screen.draft.has(clicked_id))
+
+	# The crafting view shows every card, and says by its look which can be made.
+	screen._crafting_button.button_pressed = true
+	_check("the crafting view shows unowned cards too",
+		screen.visible_entries().size() == screen.collection.size())
+	var looks_right := true
+	var locked := 0
+	for p in range(screen.page_count()):
+		screen.page = p
+		screen._render_collection()
+		for tile in screen.page_cards():
+			var entry := screen._entry_for(tile.card_id)
+			if int(entry.get("owned", 0)) > 0:
+				looks_right = looks_right and tile.look == CollectionCard.Look.NORMAL
+			elif screen._can_craft(entry):
+				looks_right = looks_right and tile.look == CollectionCard.Look.CRAFTABLE \
+					and tile.is_processing() and tile.frame.material != null
+			else:
+				looks_right = looks_right and tile.look == CollectionCard.Look.LOCKED \
+					and tile.frame.modulate.a < 1.0
+				locked += 1
+	_check("owned, craftable and uncraftable cards each wear their look", looks_right)
+	# A new account cannot afford a Legendary.
+	_check("a card that cannot be crafted yet is greyed out", locked > 0)
+	screen.page = 0
+	screen._render_collection()
+	var to_craft := screen.page_cards()[0]
+	_click(to_craft, MOUSE_BUTTON_LEFT)
+	_check("crafting, a click opens the card's crafting panel",
+		screen._craft_overlay.visible and screen.crafting_card_id == to_craft.card_id)
+	_check("crafting, a click adds nothing to the deck", screen.draft.is_empty())
+	screen.close_crafting()
+	_check("the crafting panel closes", not screen._craft_overlay.visible)
+	screen._crafting_button.button_pressed = false
+	_check("leaving crafting shows the deck's cards again",
+		screen.visible_entries().size() == shown.size())
 
 	# A new account has no deck yet, so it cannot play: starting a match only
 	# offers the deck picker, and the picker has nothing it will accept.
@@ -142,7 +201,7 @@ func _init() -> void:
 	# An incomplete deck must save but be flagged.
 	screen.draft.clear()
 	screen.editing_deck_id = ""
-	screen._add_card("wolf", 2)
+	screen._add_card("chicken", 2)
 	screen._draft_name.text = "Tiny Probe"
 	screen._save_draft()
 	for i in range(240):
@@ -171,6 +230,29 @@ func _finish() -> void:
 		print("  FAIL: ", f)
 	print("RESULT: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+func _in_cost_order(entries: Array) -> bool:
+	for i in range(1, entries.size()):
+		if main.library.cost(str(entries[i - 1].get("cardId", ""))) > main.library.cost(str(entries[i].get("cardId", ""))):
+			return false
+	return true
+
+## Presses and releases `button` over the middle of `control`, through the
+## viewport, as the mouse would.
+func _click(control: Control, button: MouseButton) -> void:
+	# Input arrives in window coordinates, which a headless window — far
+	# smaller than the canvas it stretches — does not share with the canvas.
+	var at := get_root().get_final_transform() * control.get_global_rect().get_center()
+	for pressed in [true, false]:
+		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = pressed
+		event.position = at
+		event.global_position = at
+		get_root().push_input(event)
+
+func _wheel(control: Control, button: MouseButton) -> void:
+	_click(control, button)
 
 func _check(label: String, condition: bool) -> void:
 	print("  [%s] %s" % ["ok" if condition else "XX", label])

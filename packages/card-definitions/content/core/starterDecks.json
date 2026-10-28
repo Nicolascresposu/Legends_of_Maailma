@@ -1,0 +1,138 @@
+[
+  {
+    "id": "PRIEST_STARTER",
+    "name": "Priest Starter",
+    "classId": "PRIEST",
+    "expansionId": "CORE",
+    "cards": [
+      {
+        "cardId": "chicken",
+        "copies": 2
+      },
+      {
+        "cardId": "black_bear",
+        "copies": 2
+      },
+      {
+        "cardId": "lion",
+        "copies": 2
+      },
+      {
+        "cardId": "giant",
+        "copies": 2
+      },
+      {
+        "cardId": "hunting_spider",
+        "copies": 2
+      },
+      {
+        "cardId": "elf_archer",
+        "copies": 2
+      },
+      {
+        "cardId": "dwarf_defender",
+        "copies": 2
+      },
+      {
+        "cardId": "human_mercenary",
+        "copies": 2
+      },
+      {
+        "cardId": "maintenance_anima",
+        "copies": 2
+      },
+      {
+        "cardId": "mercy_4",
+        "copies": 1
+      },
+      {
+        "cardId": "arcane_battery",
+        "copies": 2
+      },
+      {
+        "cardId": "iron_sword",
+        "copies": 2
+      },
+      {
+        "cardId": "hunting_bow",
+        "copies": 2
+      },
+      {
+        "cardId": "field_medic",
+        "copies": 2
+      },
+      {
+        "cardId": "healing_potion",
+        "copies": 2
+      }
+    ]
+  },
+  {
+    "id": "WIZARD_STARTER",
+    "name": "Wizard Starter",
+    "classId": "WIZARD",
+    "expansionId": "CORE",
+    "cards": [
+      {
+        "cardId": "chicken",
+        "copies": 2
+      },
+      {
+        "cardId": "black_bear",
+        "copies": 2
+      },
+      {
+        "cardId": "lion",
+        "copies": 2
+      },
+      {
+        "cardId": "giant",
+        "copies": 2
+      },
+      {
+        "cardId": "hunting_spider",
+        "copies": 2
+      },
+      {
+        "cardId": "elf_archer",
+        "copies": 2
+      },
+      {
+        "cardId": "dwarf_defender",
+        "copies": 2
+      },
+      {
+        "cardId": "human_mercenary",
+        "copies": 2
+      },
+      {
+        "cardId": "maintenance_anima",
+        "copies": 2
+      },
+      {
+        "cardId": "mercy_4",
+        "copies": 1
+      },
+      {
+        "cardId": "arcane_battery",
+        "copies": 2
+      },
+      {
+        "cardId": "iron_sword",
+        "copies": 2
+      },
+      {
+        "cardId": "hunting_bow",
+        "copies": 2
+      },
+      {
+        "cardId": "apprentice_mage",
+        "copies": 2
+      },
+      {
+        "cardId": "firebolt",
+        "copies": 2
+      }
+    ]
+  }
+]

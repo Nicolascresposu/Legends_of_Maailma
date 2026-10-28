@@ -83,10 +83,10 @@ func _on_actions(player: String, list: Array) -> void:
 
 	if turns_taken == 0:
 		_check("card library loaded", library.is_loaded())
-		_check("library resolves a real card name", library.card_name("wolf") == "Wolf")
+		_check("library resolves a real card name", library.card_name("chicken") == "Chicken")
 		_check("library reports cost", library.cost("brown_bear") == 3)
 		_check("unknown card falls back to its id", library.card_name("nope") == "nope")
-		_check("tooltip mentions the card name", library.tooltip("wolf").contains("Wolf"))
+		_check("tooltip mentions the card name", library.tooltip("chicken").contains("Chicken"))
 		_check("every card arrives with a description",
 			library.description("dwarf_defender").contains("**Guard**"))
 		_check("tooltips show descriptions without markup",
@@ -137,10 +137,10 @@ func _on_actions(player: String, list: Array) -> void:
 
 		# Art is looked up by card id from client assets; a card without a file
 		# must fall back to text rather than rendering an empty tile.
-		_check("art resolves for a card that has a file", CardArt.has_art("wolf"))
+		_check("art resolves for a card that has a file", CardArt.has_art("chicken"))
 		_check("an unknown card has no art", not CardArt.has_art("definitely_not_a_card"))
 		_check("an empty id has no art", CardArt.texture_for("") == null)
-		_check("a banner is built when art exists", CardArt.make_banner("wolf", 40.0) != null)
+		_check("a banner is built when art exists", CardArt.make_banner("chicken", 40.0) != null)
 		_check(
 			"no banner is built without art",
 			CardArt.make_banner("definitely_not_a_card", 40.0) == null

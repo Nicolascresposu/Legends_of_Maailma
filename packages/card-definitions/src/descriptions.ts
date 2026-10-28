@@ -98,15 +98,17 @@ function printedKeywords(card: CardDefinition): string[] {
 /**
  * Rejects a description a player could not read correctly.
  *
- * Every card needs one, its markup must be balanced, and each keyword the
- * card has must appear in bold — the bold is what tells a player "this word
- * is a rule, look it up", so a keyword printed plain reads as flavour. Flavour
- * is optional, but when a card has some its markup is held to the same rule.
+ * A card with no rules text may leave it blank, but its markup must be
+ * balanced and each keyword the card has must appear in bold — the bold is
+ * what tells a player "this word is a rule, look it up", so a keyword printed
+ * plain reads as flavour, and a card with keywords therefore needs a
+ * description. Flavour is optional, but when a card has some its markup is
+ * held to the same rule.
  */
 export function validateCardDescription(card: CardDefinition): string[] {
   const where = card.id || '(unnamed card)';
-  if (typeof card.description !== 'string' || card.description.trim() === '') {
-    return [`${where}: description must be a non-empty string`];
+  if (typeof card.description !== 'string') {
+    return [`${where}: description must be a string`];
   }
   const { spans, errors } = parseDescription(card.description);
   const problems = errors.map((error) => `${where}: description ${error}`);

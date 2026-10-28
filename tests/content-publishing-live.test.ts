@@ -92,7 +92,8 @@ it('publishes from the creator API and immediately tests new cards while old mat
       return response.json();
     };
     const old = await createMatch();
-    draft.cards.find((card: { id: string }) => card.id === 'wolf').name = 'Live Development Wolf';
+    draft.cards.find((card: { id: string }) => card.id === 'chicken').name =
+      'Live Development Wolf';
     draft.cards.push({
       ...structuredClone(draft.cards[0]),
       id: 'live_dev_card',
@@ -103,9 +104,9 @@ it('publishes from the creator API and immediately tests new cards while old mat
     const review = await reviewResponse.json();
     expect(
       (await (await request('/api/cards')).json()).find(
-        (card: { id: string }) => card.id === 'wolf',
+        (card: { id: string }) => card.id === 'chicken',
       ).name,
-    ).toBe('Wolf');
+    ).toBe('Chicken');
     const publishedResponse = await request('/api/admin/content/publish', {
       document: draft,
       baseVersion: review.baseVersion,
@@ -116,7 +117,7 @@ it('publishes from the creator API and immediately tests new cards while old mat
     expect(published.history[0].actorId).toBe(userId);
     expect(
       (await (await request('/api/cards')).json()).find(
-        (card: { id: string }) => card.id === 'wolf',
+        (card: { id: string }) => card.id === 'chicken',
       ).name,
     ).toBe('Live Development Wolf');
 
@@ -133,7 +134,7 @@ it('publishes from the creator API and immediately tests new cards while old mat
     const oldSocket = await joinMatch(old.matchId, 'a');
     const pinned = oldSocket.messages.find((message) => message.type === 'MATCH_CONTENT');
     expect(pinned.version).toBe(baseline);
-    expect(pinned.cards.find((card: { id: string }) => card.id === 'wolf').name).toBe('Wolf');
+    expect(pinned.cards.find((card: { id: string }) => card.id === 'chicken').name).toBe('Chicken');
     expect(pinned.cards.some((card: { id: string }) => card.id === 'kona_scrapwalker')).toBe(false);
 
     const debugResponse = await request('/api/admin/matches', {
@@ -182,15 +183,15 @@ it('publishes from the creator API and immediately tests new cards while old mat
     expect(rolledBack.status).toBe(200);
     expect(
       (await (await request('/api/cards')).json()).find(
-        (card: { id: string }) => card.id === 'wolf',
+        (card: { id: string }) => card.id === 'chicken',
       ).name,
-    ).toBe('Wolf');
+    ).toBe('Chicken');
     const afterRollback = await joinMatch(debug.matchId, userId);
     expect(afterRollback.messages.find((message) => message.type === 'MATCH_CONTENT').version).toBe(
       published.currentVersion,
     );
     const replay = await (await request(`/api/matches/${old.matchId}/replay`)).json();
-    expect(replay.setup.content.cards.wolf.name).toBe('Wolf');
+    expect(replay.setup.content.cards.chicken.name).toBe('Chicken');
     expect(replay.setup.content.cards).not.toHaveProperty('kona_scrapwalker');
   } finally {
     for (const socket of sockets) socket.terminate();

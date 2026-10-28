@@ -6,7 +6,7 @@ extends SceneTree
 ## Run it windowed with `-- --screenshot-dir=<dir>` to save what it drew.
 
 const WOLF := {
-	"id": "wolf", "name": "Wolf", "type": "CREATURE", "cost": 2,
+	"id": "chicken", "name": "Wolf", "type": "CREATURE", "cost": 2,
 	"attack": 2, "health": 3, "tags": ["BEAST"], "keywords": ["SWIFT"],
 	"description": "**Swift**",
 }
@@ -44,7 +44,7 @@ func _init() -> void:
 	get_root().add_child(row)
 
 	var hurt := CreatureToken.make(library, {
-		"definition_id": "wolf", "attack": 3, "health": 1, "max_health": 3, "marks": "sick",
+		"definition_id": "chicken", "attack": 3, "health": 1, "max_health": 3, "marks": "sick",
 	}, SLOT)
 	row.add_child(hurt)
 	var fresh := CreatureToken.make(library, {"definition_id": "nameless_recruit"}, SLOT)
@@ -57,7 +57,7 @@ func _init() -> void:
 	var spent := CreatureToken.make(library, {"definition_id": "wordy_warden", "statuses": []}, SLOT)
 	row.add_child(spent)
 	var granted := CreatureToken.make(library, {
-		"definition_id": "wolf", "statuses": [{"kind": "ROOTED"}, {"kind": "WARD"}], "marks": "sick",
+		"definition_id": "chicken", "statuses": [{"kind": "ROOTED"}, {"kind": "WARD"}], "marks": "sick",
 	}, SLOT)
 	row.add_child(granted)
 	var mercy := CreatureToken.make(library, {"definition_id": "mercy_4", "marks": "sick"}, SLOT)
@@ -108,7 +108,7 @@ func _init() -> void:
 	_check("consuming ward removes the shield on refresh", not guard._ward.visible)
 	guard.show_card(library, {"definition_id": "wordy_warden", "statuses": [{"kind": "WARD"}]})
 	_check("regaining ward restores the shield", guard._ward.visible)
-	spent.show_card(library, {"definition_id": "wolf"})
+	spent.show_card(library, {"definition_id": "chicken"})
 	_check("refreshing to a non-Guard clears its frame", not spent._guard.visible)
 	spent.show_card(library, {"definition_id": "wordy_warden", "marks": "sick"})
 	_check("resting Guards keep their steel shield", spent._guard.visible and spent._guard.modulate == Color.WHITE)

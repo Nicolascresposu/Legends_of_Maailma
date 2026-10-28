@@ -81,7 +81,7 @@ func _build_object() -> void:
 	var required: Array = rule.get("required", [])
 	var keys: Array = rule.get("properties", {}).keys()
 	if rule.get("properties", {}).get("type", {}).get("const", "") in ["CREATURE", "ACTION", "ARTIFACT", "WEAPON", "LOCATION"]:
-		keys = ["id", "name", "cost", "attack", "health", "durability", "duration", "range", "targetMode", "activation", "rarity", "source", "expansionId", "classId", "collectible", "tags", "keywords", "description", "flavour", "effects"]
+		keys = ["id", "name", "cost", "attack", "health", "durability", "duration", "range", "targetMode", "targetTag", "activation", "rarity", "source", "expansionId", "classId", "collectible", "tags", "keywords", "description", "flavour", "artist", "effects", "auras"]
 	for key: String in keys:
 		if not rule["properties"].has(key):
 			continue
@@ -90,6 +90,8 @@ func _build_object() -> void:
 			continue
 		if key == "classId":
 			property = {"type": "string", "enum": Schema.CLASSES}
+		elif key == "heroDefinitionId":
+			property = {"type": "string", "enum": Schema.HEROES}
 		elif key == "expansionId":
 			property = {"const": value.get(key, "")}
 		var resolved := Validator.resolve_schema(property)
@@ -135,7 +137,7 @@ func _build_object() -> void:
 			changed.emit(value))
 		row.add_child(form)
 		if key == "id":
-			form.tooltip_text = "Stable ID used by decks and collections. Keep existing card IDs unchanged."
+			form.tooltip_text = "Stable ID that other content, decks and collections refer to. Renaming a card updates every reference to it in this content folder when you save; decks and collections on a server keep the old ID."
 
 func _build_array() -> void:
 	if not value is Array:

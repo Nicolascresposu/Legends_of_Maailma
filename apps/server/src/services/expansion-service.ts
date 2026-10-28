@@ -229,6 +229,18 @@ export function visibleCards(policies: LivePolicies): CardDefinition[] {
   return Object.values(CARD_DEFINITIONS).filter((card) => isCardVisible(policies, card.id));
 }
 
+/**
+ * What a player's match may draw at random: the collectible cards of
+ * released expansions. A random summon shows the card it brings, so drawing
+ * from an unreleased set would leak it.
+ */
+export function matchRandomPool(policies: LivePolicies): string[] {
+  return visibleCards(policies)
+    .filter((card) => card.collectible)
+    .map((card) => card.id)
+    .sort();
+}
+
 export function isCardLegalIn(policies: LivePolicies, cardId: string, format: DeckFormat): boolean {
   const card = CARD_DEFINITIONS[cardId];
   if (!card) return false;

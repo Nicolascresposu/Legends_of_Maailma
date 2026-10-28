@@ -53,7 +53,7 @@ const activate = (engine: GameEngine, locationId: string, targetId?: string) =>
   });
 
 /** Enough to draw from every turn, so no Hero takes fatigue damage. */
-const WOLVES = Array<string>(20).fill('wolf');
+const WOLVES = Array<string>(20).fill('chicken');
 
 const FRONT_0: Position = { row: 'FRONT', column: 0 };
 const FRONT_1: Position = { row: 'FRONT', column: 1 };
@@ -127,7 +127,7 @@ describe('Placing a Location', () => {
   });
 
   it('needs an empty tile of its own, and fills it', () => {
-    const engine = makeEngine({ a: [{ definitionId: 'wolf', position: FRONT_0 }] });
+    const engine = makeEngine({ a: [{ definitionId: 'chicken', position: FRONT_0 }] });
     const cardInstanceId = giveCard(engine, 'a', 'war_camp');
     const without = engine.dispatch({ type: 'PLAY_CARD', actorId: 'a', cardInstanceId });
     expect(without.error?.code).toBe('POSITION_REQUIRED');
@@ -224,10 +224,10 @@ describe('Activating a Location', () => {
   });
 
   it('checks the activation target the way an Action checks its own', () => {
-    const engine = makeEngine({ a: [{ definitionId: 'wolf', position: FRONT_1 }] });
+    const engine = makeEngine({ a: [{ definitionId: 'chicken', position: FRONT_1 }] });
     const id = place(engine, 'a', 'border_watchtower', FRONT_0);
     expect(activate(engine, id).error?.code).toBe('TARGET_REQUIRED');
-    expect(activate(engine, id, creatureId(engine, 'a', 'wolf')).error?.code).toBe(
+    expect(activate(engine, id, creatureId(engine, 'a', 'chicken')).error?.code).toBe(
       'INVALID_TARGET',
     );
     expect(location(engine, 'a', id)).toMatchObject({ currentDurability: 3, closed: false });
@@ -260,7 +260,7 @@ describe('Activating a Location', () => {
   it('reaches adjacent friendly Creatures from its tile, and only Creatures', () => {
     const engine = makeEngine({
       a: [
-        { definitionId: 'wolf', position: FRONT_0 },
+        { definitionId: 'chicken', position: FRONT_0 },
         { definitionId: 'giant_rat', position: BACK_1 },
       ],
     });
@@ -268,7 +268,7 @@ describe('Activating a Location', () => {
     place(engine, 'a', 'border_watchtower', { row: 'FRONT', column: 2 });
     expect(activate(engine, camp).ok).toBe(true);
     const creatures = engine.state.sides.a!.creatures;
-    expect(creatures[creatureId(engine, 'a', 'wolf')]).toMatchObject({
+    expect(creatures[creatureId(engine, 'a', 'chicken')]).toMatchObject({
       currentAttack: 3,
       currentHealth: 2,
     });
@@ -323,10 +323,10 @@ describe('A Location duration', () => {
 
 describe('A Location in the battlefield', () => {
   it('cannot be attacked or targeted', () => {
-    const engine = makeEngine({ b: [{ definitionId: 'wolf', position: FRONT_0 }] });
+    const engine = makeEngine({ b: [{ definitionId: 'chicken', position: FRONT_0 }] });
     const id = place(engine, 'a', 'border_watchtower', FRONT_0);
     engine.dispatch({ type: 'END_TURN', actorId: 'a' });
-    const wolf = creatureId(engine, 'b', 'wolf');
+    const wolf = creatureId(engine, 'b', 'chicken');
     const attack = engine.dispatch({
       type: 'ATTACK',
       actorId: 'b',
@@ -349,27 +349,27 @@ describe('A Location in the battlefield', () => {
   it('does not shield the Creature behind it from melee', () => {
     const engine = makeEngine({
       a: [{ definitionId: 'giant_rat', position: { row: 'BACK', column: 0 } }],
-      b: [{ definitionId: 'wolf', position: FRONT_0 }],
+      b: [{ definitionId: 'chicken', position: FRONT_0 }],
     });
     place(engine, 'a', 'border_watchtower', FRONT_0);
     engine.dispatch({ type: 'END_TURN', actorId: 'a' });
     const attack = engine.dispatch({
       type: 'ATTACK',
       actorId: 'b',
-      attackerId: creatureId(engine, 'b', 'wolf'),
+      attackerId: creatureId(engine, 'b', 'chicken'),
       targetId: creatureId(engine, 'a', 'giant_rat'),
     });
     expect(attack.ok, attack.error?.message).toBe(true);
   });
 
   it('replays to the same state', () => {
-    const engine = makeEngine({ seed: 'locations', deckA: ['wolf'], deckB: ['wolf'] });
+    const engine = makeEngine({ seed: 'locations', deckA: ['chicken'], deckB: ['chicken'] });
     const id = place(engine, 'a', 'war_camp', FRONT_0);
     expect(activate(engine, id).ok).toBe(true);
     passRound(engine);
     expect(activate(engine, id).ok).toBe(true);
 
-    const replayed = makeEngine({ seed: 'locations', deckA: ['wolf'], deckB: ['wolf'] });
+    const replayed = makeEngine({ seed: 'locations', deckA: ['chicken'], deckB: ['chicken'] });
     // Hand cards given by the test are not actions, so give them again.
     giveCard(replayed, 'a', 'war_camp');
     for (const action of engine.state.actionLog) {

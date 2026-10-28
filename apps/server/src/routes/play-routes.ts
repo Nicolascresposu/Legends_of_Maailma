@@ -4,6 +4,7 @@ import type { Logger } from '../logger.js';
 import { AI_PLAYER_ID, type MatchManager } from '../match-manager.js';
 import { AccountError } from '../services/account-service.js';
 import type { DeckService } from '../services/deck-service.js';
+import { matchRandomPool, type ExpansionService } from '../services/expansion-service.js';
 import { requireUser, respondAccountError } from './auth-routes.js';
 
 export { AI_PLAYER_ID };
@@ -22,6 +23,7 @@ export { AI_PLAYER_ID };
  */
 export function createPlayRouter(
   decks: DeckService,
+  expansions: ExpansionService,
   manager: MatchManager,
   logger: Logger,
 ): express.Router {
@@ -29,7 +31,7 @@ export function createPlayRouter(
   router.use(requireUser());
 
   router.post('/', (request, response, next) => {
-    start(request, decks, manager, logger)
+    start(request, decks, expansions, manager, logger)
       .then((payload) => response.status(201).json(payload))
       .catch((error: unknown) => respondAccountError(error, request, response, logger, next));
   });
@@ -46,6 +48,7 @@ export function createPlayRouter(
 async function start(
   request: express.Request,
   decks: DeckService,
+  expansions: ExpansionService,
   manager: MatchManager,
   logger: Logger,
 ) {
@@ -66,13 +69,14 @@ async function start(
     controller: 'HUMAN' as const,
   };
 
+  const options = { randomPool: matchRandomPool(await expansions.policies()) };
   const againstAi = scenario.sideB.controller === 'AI';
   const engine = againstAi
-    ? manager.create({
-        scenarioId,
-        players: [creator, { playerId: AI_PLAYER_ID, controller: 'AI' }],
-      })
-    : manager.createWithOpenSeat({ scenarioId, creator });
+    ? manager.create(
+        { scenarioId, players: [creator, { playerId: AI_PLAYER_ID, controller: 'AI' }] },
+        options,
+      )
+    : manager.createWithOpenSeat({ scenarioId, creator }, options);
   const matchId = engine.state.matchId;
   logger.info('Match started', {
     requestId: request.requestId,

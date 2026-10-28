@@ -6,7 +6,7 @@ installing this feature, then open **Admin → Expansions** in Godot.
 1. Edit an expansion. **Save** keeps its JSON in the repository for Git review; a draft can also
    be published before saving.
 2. Click **Preview publish…**. The server validates the proposed catalogue, checks IDs and
-   references, and protects code-owned starter decks and scenarios. The review names the target
+   references, and checks that starter decks and scenarios name cards that exist. The review names the target
    server and old/new version IDs. Every added, changed or removed definition has before/after
    data. Preview does not activate anything.
 3. Confirm **Publish version**. The server persists a snapshot and activates it immediately.
@@ -29,8 +29,9 @@ active server document as an unsaved local draft.
 
 Save/import/export operate on local JSON files; publishing and rollback operate on the server.
 Publishing leaves source JSON unchanged. Expansion IDs identify replacement targets, so keep
-existing IDs stable. New effect mechanics, heroes, classes, scenarios and starter deck definitions
-remain code changes. Live database policy overrides still take precedence over default flags.
+existing IDs stable. Starter decks and scenarios publish with their expansion, so a new starter
+deck applies to accounts created afterwards. New effect mechanics, heroes and classes remain code
+changes. Live database policy overrides still take precedence over default flags.
 
 ## Persistence and configuration
 
@@ -46,6 +47,8 @@ A server restart restores the active published version. Source JSON initializes 
 when no publication state exists. Once a publication exists, changing source JSON and restarting
 does not replace the published version: publish that saved draft through the creator. To return
 to source JSON during development, stop the server, move the store aside as a backup and restart.
+Snapshots published before starter decks and scenarios became content have neither, so a server
+refuses to start from one; move that store aside the same way.
 
 `CONTENT_STORE_DIR` selects a writable store. `CONTENT_PUBLISHING=false` disables edits while
 retaining a previously published version. Outside production publishing defaults on; with
@@ -62,7 +65,8 @@ pending reviews.
 ## API and verification
 
 All paths below are relative to `/api/admin/content` and require bearer-token admin access.
-Non-admins receive 404. A document is `{ expansion, cards, packs }`, matching the local files.
+Non-admins receive 404. A document is `{ expansion, cards, packs, starterDecks, scenarios }`,
+matching the local files; the last two may be omitted.
 
 | Method | Path                         | Purpose                                                                   |
 | ------ | ---------------------------- | ------------------------------------------------------------------------- |

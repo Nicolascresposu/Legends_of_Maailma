@@ -6,6 +6,7 @@ const Validator := preload("res://src/content_validator.gd")
 const Creator := preload("res://src/expansion_creator.gd")
 const Form := preload("res://src/content_form.gd")
 const Admin := preload("res://src/admin_screen.gd")
+const Schema := preload("res://src/content_schema.gd")
 var failures: Array[String] = []
 var test_root := ""
 var creator: Control
@@ -22,8 +23,10 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(test_root)
 	print("== expansion creator ==")
 	_test_files()
+	_test_starter_content()
 	await _test_ui()
 	await _test_art()
+	await _test_renames()
 	await _test_admin()
 	if checks < 50:
 		failures.append("Test aborted before the file and UI checks completed")
@@ -42,6 +45,15 @@ func _init() -> void:
 	print("RESULT: %s (%d failures)" % ["PASS" if failures.is_empty() else "FAIL", failures.size()])
 	quit(0 if failures.is_empty() else 1)
 
+## One starter deck per class, of `card_id`: a content folder is only
+## complete with them, so a test root's first expansion carries them.
+func _starters(card_id: String, expansion_id: String) -> Array:
+	var decks: Array = []
+	for class_id: String in Schema.CLASSES:
+		decks.append({"id": class_id + "_STARTER", "name": class_id.capitalize() + " starter", "classId": class_id, "expansionId": expansion_id, "cards": [{"cardId": card_id, "copies": 2}]})
+	# As read from a file, so a round trip compares equal: JSON numbers load as floats.
+	return JSON.parse_string(JSON.stringify(decks))
+
 func _fixture(id: String = "TEST") -> Dictionary:
 	var core := Files.load_folder(Files.default_root().path_join("core"))
 	var data: Dictionary = core["data"]
@@ -51,6 +63,9 @@ func _fixture(id: String = "TEST") -> Dictionary:
 	data["cards"][0]["expansionId"] = id
 	data["packs"][0]["id"] = id + "_PACK"
 	data["packs"][0]["expansionId"] = id
+	# Core's starter decks and scenarios name Core's cards; a fixture has its own.
+	data["starterDecks"] = []
+	data["scenarios"] = []
 	return data
 
 func _test_files() -> void:
@@ -61,10 +76,11 @@ func _test_files() -> void:
 		var context: Array = shipped["entries"].filter(func(other: Dictionary) -> bool: return other["folder"] != entry["folder"])
 		_check("validates shipped " + str(entry["folder"]), Validator.validate(entry["data"], context).is_empty())
 		total += entry["data"]["cards"].size()
-	_check("loads all 32 cards", total == 32)
+	_check("loads all 33 cards", total == 33)
 	var root := test_root.path_join("content")
 	DirAccess.make_dir_recursive_absolute(root)
 	var data := _fixture()
+	data["starterDecks"] = _starters("test_wolf", "TEST")
 	var result := Files.save(root, "test", data)
 	_check("saves a new expansion", result["ok"])
 	var path := root.path_join("test")
@@ -103,6 +119,12 @@ func _test_files() -> void:
 		invalid["cards"][0][mutation["key"]] = mutation["value"]
 		_check("rejects invalid " + str(mutation["key"]), not Validator.validate(invalid).is_empty())
 	invalid = data.duplicate(true)
+	invalid["cards"][0]["keywords"] = []
+	invalid["cards"][0]["description"] = ""
+	_check("allows a blank description on a card with no keywords", Validator.validate(invalid).is_empty())
+	invalid["cards"][0]["keywords"] = ["GUARD"]
+	_check("requires a description to print a card's keywords", not Validator.validate(invalid).is_empty())
+	invalid = data.duplicate(true)
 	invalid["expansion"]["policy"].erase("released")
 	_check("requires every policy flag", not Validator.validate(invalid).is_empty())
 	invalid = data.duplicate(true)
@@ -135,7 +157,8 @@ func _test_files() -> void:
 	result = Files.write_folder(rollback, changed, Files.fingerprint(rollback))
 	_check("reports a failed file replacement", not result["ok"])
 	_check("rolls back earlier replacements", FileAccess.get_sha256(rollback.path_join("expansion.json")) == before_expansion and FileAccess.get_sha256(rollback.path_join("cards.json")) == before_cards)
-	_check("leaves no staged files after rollback", DirAccess.get_files_at(rollback).size() == 2)
+	_check("leaves no staged files after rollback",
+		Array(DirAccess.get_files_at(rollback)).all(func(file: String) -> bool: return not file.contains(".creator-")))
 
 func _test_ui() -> void:
 	var backdrop := ColorRect.new()
@@ -186,6 +209,22 @@ func _test_ui() -> void:
 	var fields: Control = card_form.get_child(1)
 	_edit_text(fields, "name", "Snowfall")
 	_check("card fields update without saving", creator.draft["cards"][1]["name"] == "Snowfall")
+	var artist_toggle: CheckBox = fields.get_node("artist").get_child(0)
+	artist_toggle.button_pressed = true
+	await process_frame
+	await process_frame
+	card_form = creator._card_form.get_child(0)
+	fields = card_form.get_child(1)
+	_edit_text(fields, "artist", "Aino Virtanen")
+	_check("the optional art credit is edited through the form", creator.draft["cards"][1]["artist"] == "Aino Virtanen" and creator.validate_draft())
+	creator._render_preview()
+	_check("the preview shows the art credit", creator._preview.find_children("*", "Label", true, false).any(func(label: Label) -> bool: return label.text == "Art: Aino Virtanen"))
+	creator.draft["cards"][1]["artist"] = " "
+	_check("a blank art credit is rejected", not creator.validate_draft())
+	creator.draft["cards"][1].erase("artist")
+	creator._refresh_entities("cards")
+	card_form = creator._card_form.get_child(0)
+	fields = card_form.get_child(1)
 	var effects_form: Control = fields.get_node("effects").get_child(1)
 	(effects_form.get_child(0) as Button).pressed.emit()
 	await process_frame
@@ -269,7 +308,7 @@ func _test_art() -> void:
 	CardArt.clear_cache()
 	# Saved art goes in a folder named after the expansion's content folder.
 	var expansion_art := art_dir.path_join("test")
-	var picture := Image.create(8, 4, false, Image.FORMAT_RGBA8)
+	var picture := Image.create(80, 40, false, Image.FORMAT_RGBA8)
 	picture.fill(Color.RED)
 	var pick := test_root.path_join("picked art.png")
 	picture.save_png(pick)
@@ -303,25 +342,53 @@ func _test_art() -> void:
 	_check("saved art is used wherever the card is drawn", CardArt.texture_for("test_wolf") != null)
 	CardArt.clear_cache()
 	_check("art not yet imported by the editor still loads", CardArt.texture_for("test_wolf") != null)
+	_check("unframed art is shown whole", CardArt.texture_for("test_wolf").get_size() == Vector2(80, 40) and not FileAccess.file_exists(expansion_art.path_join("test_wolf.crop.json")))
+	var frame := _preview_frame(art_creator)
+	_check("unframed art starts at the lowest zoom", is_equal_approx(art_creator.art_zoom(frame), 1.0))
+	art_creator.frame_art(frame, Vector2.ZERO, 2.0)
+	var zoomed: Rect2 = frame._art.region
+	_check("zooming stages framing and previews it", art_creator.dirty and zoomed.size.x < 0.5 and is_equal_approx(art_creator.art_zoom(frame), 2.0))
+	_check("staged framing writes nothing before Save", not FileAccess.file_exists(expansion_art.path_join("test_wolf.crop.json")))
+	art_creator.frame_art(frame, Vector2(10, 0))
+	_check("dragging the art right shows more of its left", frame._art.region.position.x < zoomed.position.x and is_equal_approx(frame._art.region.size.x, zoomed.size.x))
+	art_creator.frame_art(frame, Vector2(-100000, -100000))
+	_check("art cannot be dragged past its edge", is_equal_approx(frame._art.region.end.x, 1.0) and is_equal_approx(frame._art.region.end.y, 1.0))
+	art_creator.save_draft()
+	var framed := CardArt.texture_for("test_wolf")
+	_check("Save writes the framing beside the art", not art_creator.dirty and FileAccess.file_exists(expansion_art.path_join("test_wolf.crop.json")))
+	_check("framed art shows only its framed part", framed != null and framed.get_width() < 40 and CardArt.source_texture_for("test_wolf").get_size() == Vector2(80, 40))
+	CardArt.clear_cache()
+	_check("framing is read back from disk", CardArt.texture_for("test_wolf").get_size() == framed.get_size())
+	_check("reopened framing previews where it was left", is_equal_approx(art_creator.art_zoom(_preview_frame(art_creator)), 2.0))
 	var fields: Control = art_creator._card_form.get_child(0).get_child(1)
 	_edit_text(fields, "id", "test_grey_wolf")
 	_check("a renamed card keeps previewing its art", _preview_art(art_creator) != null)
 	art_creator.save_draft()
 	_check("Save moves art to the renamed card ID", FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")) and not FileAccess.file_exists(expansion_art.path_join("test_wolf.png")))
+	_check("Save moves framing with renamed art", FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.crop.json")) and not FileAccess.file_exists(expansion_art.path_join("test_wolf.crop.json")))
+	art_creator.reset_framing()
+	_check("resetting framing previews the whole fit again", art_creator.dirty and is_equal_approx(art_creator.art_zoom(_preview_frame(art_creator)), 1.0))
+	art_creator.save_draft()
+	_check("Save drops reset framing", not FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.crop.json")) and CardArt.texture_for("test_grey_wolf").get_size() == Vector2(80, 40))
+	art_creator.frame_art(_preview_frame(art_creator), Vector2.ZERO, 3.0)
+	art_creator.save_draft()
 	art_creator.duplicate_entity("cards")
 	art_creator.save_draft()
 	_check("a duplicated card keeps its original's art", FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".png")) and FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")))
+	_check("a duplicated card keeps its original's framing", CardArt.crop_for(str(art_creator.draft["cards"][1]["id"])).is_equal_approx(CardArt.crop_for("test_grey_wolf")) and FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.crop.json")))
 	var jpeg := test_root.path_join("replacement.jpg")
 	picture.save_jpg(jpeg)
 	art_creator.choose_art(jpeg)
 	art_creator.save_draft()
 	_check("new art in another format replaces the old file", FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".jpg")) and not FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".png")))
+	_check("new art starts unframed", not FileAccess.file_exists(expansion_art.path_join(str(art_creator.draft["cards"][1]["id"]) + ".crop.json")))
 	art_creator._card_index = 0
 	art_creator._render_entity("cards")
 	art_creator.clear_art()
 	_check("removing art stages it", art_creator.dirty and _preview_art(art_creator) == null and FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")))
 	art_creator.save_draft()
 	_check("Save deletes removed art", not FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.png")) and CardArt.texture_for("test_grey_wolf") == null)
+	_check("Save deletes removed art's framing", not FileAccess.file_exists(expansion_art.path_join("test_grey_wolf.crop.json")))
 	art_creator.queue_free()
 	await process_frame
 	picture.save_png(art_dir.path_join("loose_card.png"))
@@ -335,9 +402,13 @@ func _test_art() -> void:
 	CardArt.clear_cache()
 
 func _preview_art(target: Control) -> Texture2D:
+	var frame := _preview_frame(target)
+	return frame._art.texture if frame != null else null
+
+func _preview_frame(target: Control) -> CardFrame:
 	for child in target._preview.get_children():
 		if child is CardFrame:
-			return child._art.texture
+			return child
 	return null
 
 func _edit_text(form: Control, field: String, text: String) -> void:
@@ -374,6 +445,96 @@ func _test_admin() -> void:
 	admin.queue_free()
 	accounts.queue_free()
 	await process_frame
+
+func _test_starter_content() -> void:
+	var core := Files.load_folder(Files.default_root().path_join("core"))
+	_check("Core ships its starter decks and scenarios as content",
+		core["data"]["starterDecks"].size() == Schema.CLASSES.size() and not core["data"]["scenarios"].is_empty())
+	var root := test_root.path_join("starter-content")
+	DirAccess.make_dir_recursive_absolute(root)
+	var data := _fixture()
+	_check("an expansion without starter decks reads as having none", data["starterDecks"].is_empty())
+	Files.save(root, "test", data)
+	_check("an empty optional file is not written",
+		not FileAccess.file_exists(root.path_join("test/starterDecks.json")) and not FileAccess.file_exists(root.path_join("test/scenarios.json")))
+	var other := _fixture("OTHER")
+	_check("a content folder must give every class a starter deck",
+		Files.validate(other, root, root.path_join("other")).has("class PRIEST: has no starter deck"))
+	data["starterDecks"] = _starters("missing_card", "TEST")
+	var errors := Validator.validate(data)
+	_check("a starter deck naming a missing card says which",
+		errors.has("starterDecks.json[0].cards: unknown card missing_card"))
+	data["starterDecks"] = []
+	data["scenarios"] = [{"id": "DUEL", "name": "Duel", "expansionId": "TEST", "battlefield": {"width": 3},
+		"sideA": {"heroDefinitionId": "healer", "heroHealth": 30, "startingTaika": 1, "maxTaika": 10, "startingWeapon": "test_wolf"},
+		"sideB": {"heroDefinitionId": "nobody", "heroHealth": 30, "startingTaika": 1, "maxTaika": 10}}]
+	errors = Validator.validate(data)
+	_check("a scenario's starting Weapon must be a Weapon", errors.has("scenarios.json[0].sideA: test_wolf must be a Weapon"))
+	_check("a scenario's Hero must exist", errors.has("scenarios.json[0].sideB.heroDefinitionId: unknown hero nobody"))
+
+## Renaming a card in the creator follows every reference to it — a SUMMON,
+## a starter deck, a scenario — into every expansion, after asking.
+func _test_renames() -> void:
+	var root := test_root.path_join("rename-content")
+	DirAccess.make_dir_recursive_absolute(root)
+	# Saving moves art too, so it stays in a scratch folder.
+	CardArt.art_dir = test_root.path_join("rename-art")
+	DirAccess.make_dir_recursive_absolute(CardArt.art_dir)
+	CardArt.clear_cache()
+	var base := _fixture()
+	base["starterDecks"] = _starters("test_wolf", "TEST")
+	base["scenarios"] = [{"id": "DUEL", "name": "Duel", "expansionId": "TEST", "battlefield": {"width": 3},
+		"sideA": {"heroDefinitionId": "healer", "heroHealth": 30, "startingTaika": 1, "maxTaika": 10, "startingCreatures": [{"definitionId": "test_wolf", "position": {"row": "FRONT", "column": 0}}]},
+		"sideB": {"heroDefinitionId": "striker", "heroHealth": 30, "startingTaika": 1, "maxTaika": 10, "startingCards": ["test_wolf"]}}]
+	_check("saves an expansion with starter decks and scenarios", Files.save(root, "test", base)["ok"])
+	var other := _fixture("OTHER")
+	other["cards"][0]["effects"] = [{"trigger": "ARRIVAL", "effect": {"type": "SUMMON", "definitionId": "test_wolf"}}]
+	_check("saves an expansion summoning another's card", Files.save(root, "other", other)["ok"])
+	var other_before := Files.fingerprint(root.path_join("other"))
+
+	var renamer = Creator.new()
+	get_root().add_child(renamer)
+	await process_frame
+	renamer.open_root(root)
+	for index in renamer._entries.size():
+		if renamer._entries[index]["folder"] == "test":
+			renamer._load_entry(index)
+	_check("the creator has tabs for starter decks and scenarios",
+		renamer._tabs.get_tab_count() == 5 and renamer._tabs.get_tab_title(3) == "Starter decks")
+	var fields: Control = renamer._card_form.get_child(0).get_child(1)
+	_edit_text(fields, "id", "test_hen")
+	renamer.save_draft()
+	_check("renaming a card asks before saving", renamer._renames_dialog.visible)
+	var text: String = renamer._renames_dialog.dialog_text
+	_check("the question names the rename and everything it updates",
+		text.contains("test_wolf → test_hen") and text.contains("starterDecks.json · Priest starter")
+		and text.contains("scenarios.json · Duel") and text.contains("other/cards.json"))
+	renamer._renames_dialog.hide()
+	renamer._renames_dialog.canceled.emit()
+	_check("declining saves nothing", renamer.dirty and Files.fingerprint(root.path_join("other")) == other_before
+		and Files.load_folder(root.path_join("test"))["data"]["cards"][0]["id"] == "test_wolf")
+	renamer.save_draft()
+	renamer._renames_dialog.hide()
+	renamer._renames_dialog.confirmed.emit()
+	var saved: Dictionary = Files.load_folder(root.path_join("test"))["data"]
+	var summoned: Dictionary = Files.load_folder(root.path_join("other"))["data"]
+	_check("the renamed card is saved", not renamer.dirty and saved["cards"][0]["id"] == "test_hen")
+	_check("its starter decks follow the rename", saved["starterDecks"].all(func(deck: Dictionary) -> bool: return deck["cards"][0]["cardId"] == "test_hen"))
+	_check("its scenarios follow the rename", saved["scenarios"][0]["sideA"]["startingCreatures"][0]["definitionId"] == "test_hen"
+		and saved["scenarios"][0]["sideB"]["startingCards"] == ["test_hen"])
+	_check("another expansion's SUMMON follows the rename", summoned["cards"][0]["effects"][0]["effect"]["definitionId"] == "test_hen")
+	_check("the content stays valid after the rename", Files.validate(summoned, root, root.path_join("other")).is_empty())
+	# A rename nothing refers to saves without asking.
+	renamer.add_entity("cards")
+	renamer.save_draft()
+	fields = renamer._card_form.get_child(0).get_child(1)
+	_edit_text(fields, "id", "lonely_card")
+	renamer.save_draft()
+	_check("a rename nothing refers to saves without asking", not renamer._renames_dialog.visible and not renamer.dirty)
+	renamer.queue_free()
+	await process_frame
+	CardArt.art_dir = CardArt.ART_DIR
+	CardArt.clear_cache()
 
 func _screenshots() -> void:
 	var destination := ""

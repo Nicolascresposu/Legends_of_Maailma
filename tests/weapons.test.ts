@@ -104,7 +104,7 @@ describe('Weapon card lifecycle', () => {
   it('tracks state on the instance and leaves the definition untouched', () => {
     const engine = makeEngine({
       taika: 5,
-      b: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      b: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
     });
     equip(engine, 'a', 'iron_sword');
     const equipped = weapon(engine, 'a')!;
@@ -467,14 +467,14 @@ describe('Guard and Hero Weapons', () => {
   it('refuses a friendly target and a stale id', () => {
     const engine = makeEngine({
       taika: 10,
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
     });
     equip(engine, 'a', 'iron_sword');
     expect(
       engine.dispatch({
         type: 'HERO_ATTACK',
         actorId: 'a',
-        targetId: creatureId(engine, 'a', 'wolf'),
+        targetId: creatureId(engine, 'a', 'chicken'),
       }).error?.code,
     ).toBe('FRIENDLY_FIRE');
     expect(
@@ -654,13 +654,13 @@ describe('event ordering and attribution', () => {
   it('attributes Weapon damage and the kills it causes', () => {
     const engine = makeEngine({
       taika: 10,
-      b: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      b: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
     });
     equip(engine, 'a', 'hunting_bow');
     const result = engine.dispatch({
       type: 'HERO_ATTACK',
       actorId: 'a',
-      targetId: creatureId(engine, 'b', 'wolf'),
+      targetId: creatureId(engine, 'b', 'chicken'),
     });
 
     const damage = result.events.find((event) => event.type === 'DAMAGE_DEALT');
@@ -801,8 +801,8 @@ describe('replay determinism', () => {
       },
       seed: 'weapons-replay',
       players: [
-        { playerId: 'a', deck: ['wolf', 'hawk', 'wolf', 'hawk', 'wolf', 'hawk'] },
-        { playerId: 'b', deck: ['wolf', 'hawk', 'wolf', 'hawk', 'wolf', 'hawk'] },
+        { playerId: 'a', deck: ['chicken', 'hawk', 'chicken', 'hawk', 'chicken', 'hawk'] },
+        { playerId: 'b', deck: ['chicken', 'hawk', 'chicken', 'hawk', 'chicken', 'hawk'] },
       ],
     };
   }
@@ -922,7 +922,7 @@ describe('deck and collection integration', () => {
 
     // Trading both Wolves for a third Iron Sword and a Wolf keeps 30 cards
     // but breaks the copy limit.
-    const tooMany = [...deck.filter((id) => id !== 'wolf'), 'iron_sword', 'wolf'];
+    const tooMany = [...deck.filter((id) => id !== 'chicken'), 'iron_sword', 'chicken'];
     expect(tooMany).toHaveLength(30);
     expect(validateDeck(tooMany).valid).toBe(false);
   });

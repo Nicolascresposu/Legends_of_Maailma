@@ -27,6 +27,12 @@ export const KEYWORDS = [
 ] as const;
 export type Keyword = (typeof KEYWORDS)[number];
 
+/**
+ * What a Creature is — its kin, its trade, its allegiance — for effects that
+ * care ("your Beasts", "a friendly Rebel"). Open-ended on purpose: a new
+ * expansion brings its own tribes without a code change. Rules match a tag
+ * exactly, by the `tag` field on whatever asks.
+ */
 export type CreatureTag =
   | 'HUMAN'
   | 'ELF'
@@ -153,7 +159,21 @@ export interface ExpansionDefinition {
 export const DECK_FORMATS = ['STANDARD', 'WILD'] as const;
 export type DeckFormat = (typeof DECK_FORMATS)[number];
 
-export type Trigger = 'ARRIVAL' | 'LAST_BREATH' | 'TURN_STARTED' | 'TURN_ENDED';
+/**
+ * When a triggered effect fires. `FRIENDLY_CREATURE_SUMMONED` and
+ * `FRIENDLY_CREATURE_DIED` answer another Creature on the same side — never
+ * the card's own arrival or death, which are `ARRIVAL` and `LAST_BREATH`.
+ * `ARRIVAL` fires only when the Creature is played from hand; one summoned by
+ * an effect arrives silently, though it still sets off
+ * `FRIENDLY_CREATURE_SUMMONED`.
+ */
+export type Trigger =
+  | 'ARRIVAL'
+  | 'LAST_BREATH'
+  | 'TURN_STARTED'
+  | 'TURN_ENDED'
+  | 'FRIENDLY_CREATURE_SUMMONED'
+  | 'FRIENDLY_CREATURE_DIED';
 
 export type EffectTarget =
   | 'PLAY_TARGET'
@@ -163,24 +183,78 @@ export type EffectTarget =
   | 'RANDOM_ENEMY_CREATURE'
   | 'ALL_ENEMY_CREATURES'
   | 'ADJACENT_FRIENDLY_CREATURES'
+  | 'ALL_FRIENDLY_CREATURES'
+  /** Every friendly Creature but the effect's source. */
+  | 'OTHER_FRIENDLY_CREATURES'
+  /** One friendly Creature at random, never the effect's source. */
+  | 'RANDOM_OTHER_FRIENDLY_CREATURE'
+  /** The Creature a `FRIENDLY_CREATURE_*` trigger fired for. */
+  | 'TRIGGERING_CREATURE'
   | 'FRIENDLY_WEAPON'
   | 'ENEMY_WEAPON';
 
-export type Effect =
-  | { type: 'DEAL_DAMAGE'; amount: number; target: EffectTarget }
-  | { type: 'HEAL'; amount: number; target: EffectTarget }
+export type CardType = CardDefinition['type'];
+
+/**
+ * What must hold when an effect resolves for it to happen at all. Checked at
+ * resolution, not when the card is played, and never counts the effect's own
+ * source: "if you control another Beast".
+ */
+export type EffectCondition =
+  /** The owner controls at least `atLeast` (default 1) other matching Creatures. */
+  | { type: 'CONTROLS_CREATURE'; tag?: CreatureTag; atLeast?: number }
+  /** The owner's hand holds a matching card. */
+  | { type: 'HOLDS_CARD'; tag?: CreatureTag; cardType?: CardType };
+
+/**
+ * `tag`, where an effect has one, narrows the effect to Creatures carrying
+ * that tag: whatever its `target` reaches that does not carry it — Heroes and
+ * Weapons included — is left alone.
+ */
+type EffectKind =
+  | { type: 'DEAL_DAMAGE'; amount: number; target: EffectTarget; tag?: CreatureTag }
+  | { type: 'HEAL'; amount: number; target: EffectTarget; tag?: CreatureTag }
   | { type: 'DRAW_CARD'; amount: number }
-  | { type: 'BUFF'; attack: number; health: number; target: EffectTarget }
-  | { type: 'APPLY_STATUS'; status: StatusKind; duration?: number; target: EffectTarget }
+  | { type: 'BUFF'; attack: number; health: number; target: EffectTarget; tag?: CreatureTag }
+  | {
+      type: 'APPLY_STATUS';
+      status: StatusKind;
+      duration?: number;
+      target: EffectTarget;
+      tag?: CreatureTag;
+    }
   | { type: 'SUMMON'; definitionId: string; position?: Position }
-  | { type: 'MOVE'; target: EffectTarget; destination: Position }
-  | { type: 'DESTROY'; target: EffectTarget }
+  /** Summons a collectible Creature from the match's content, chosen at random. */
+  | { type: 'SUMMON_RANDOM'; tag?: CreatureTag; position?: Position }
+  | { type: 'MOVE'; target: EffectTarget; destination: Position; tag?: CreatureTag }
+  | { type: 'DESTROY'; target: EffectTarget; tag?: CreatureTag }
   | { type: 'GAIN_TAIKA'; amount: number };
+
+export type Effect = EffectKind & { condition?: EffectCondition };
 
 export interface EffectDefinition {
   trigger: Trigger;
+  /** For a `FRIENDLY_CREATURE_*` trigger: fire only for a Creature carrying this tag. */
+  tag?: CreatureTag;
   effect: Effect;
 }
+
+/**
+ * A continuous effect: true for as long as its source stands on the
+ * battlefield, and gone the moment it leaves. Unlike a `BUFF`, nothing is
+ * left behind.
+ */
+export type Aura =
+  /** Matching friendly Creatures have +`attack`/+`health`. */
+  | {
+      type: 'STAT_AURA';
+      attack: number;
+      health: number;
+      target: 'OTHER_FRIENDLY_CREATURES' | 'ADJACENT_FRIENDLY_CREATURES';
+      tag?: CreatureTag;
+    }
+  /** Matching cards in the owner's hand cost `amount` more; negative is less. */
+  | { type: 'COST_AURA'; amount: number; tag?: CreatureTag; cardType?: CardType };
 
 interface CardDefinitionBase {
   id: string;
@@ -214,6 +288,11 @@ interface CardDefinitionBase {
    * styled as flavour by the client. Accepts the same markup.
    */
   flavour?: string;
+  /**
+   * Who made the card's art, credited where the card is shown in full. Plain
+   * text; the art itself is a client asset found by the card's id.
+   */
+  artist?: string;
 }
 
 export interface CreatureDefinition extends CardDefinitionBase {
@@ -223,18 +302,22 @@ export interface CreatureDefinition extends CardDefinitionBase {
   tags: CreatureTag[];
   keywords: Keyword[];
   effects: EffectDefinition[];
+  auras?: Aura[];
 }
 
 export interface ActionDefinition extends CardDefinitionBase {
   type: 'ACTION';
   effects: Effect[];
   targetMode: TargetMode;
+  /** The target must be a Creature carrying this tag. */
+  targetTag?: CreatureTag;
 }
 
 export interface ArtifactDefinition extends CardDefinitionBase {
   type: 'ARTIFACT';
   durability: number;
   effects: EffectDefinition[];
+  auras?: Aura[];
 }
 
 export interface WeaponDefinition extends CardDefinitionBase {
@@ -252,6 +335,8 @@ export interface WeaponDefinition extends CardDefinitionBase {
  */
 export interface LocationActivation {
   targetMode: TargetMode;
+  /** The target must be a Creature carrying this tag. */
+  targetTag?: CreatureTag;
   effects: Effect[];
 }
 
@@ -272,6 +357,7 @@ export interface LocationDefinition extends CardDefinitionBase {
   /** Present exactly when `durability` is. */
   activation?: LocationActivation;
   effects: EffectDefinition[];
+  auras?: Aura[];
 }
 
 export type CardDefinition =
@@ -288,6 +374,30 @@ export function cardEffects(card: CardDefinition): Effect[] {
   return card.type === 'LOCATION' && card.activation
     ? [...triggered, ...card.activation.effects]
     : triggered;
+}
+
+/** Whether a card carries `tag`. Only Creatures and Weapons carry tags; no tag matches all. */
+export function carriesTag(card: CardDefinition, tag: CreatureTag | undefined): boolean {
+  if (tag === undefined) return true;
+  return (card.type === 'CREATURE' || card.type === 'WEAPON') && card.tags.includes(tag);
+}
+
+/** Every tag a card's rules ask about, wherever it is asked. */
+export function referencedTags(card: CardDefinition): string[] {
+  const tags = cardEffects(card).flatMap((effect) => [
+    ...('tag' in effect && effect.tag !== undefined ? [effect.tag] : []),
+    ...(effect.condition?.tag !== undefined ? [effect.condition.tag] : []),
+  ]);
+  if (card.type !== 'ACTION') {
+    for (const entry of card.effects) if (entry.tag !== undefined) tags.push(entry.tag);
+  }
+  if (card.type === 'ACTION' && card.targetTag !== undefined) tags.push(card.targetTag);
+  if (card.type === 'LOCATION' && card.activation?.targetTag !== undefined)
+    tags.push(card.activation.targetTag);
+  if (card.type === 'CREATURE' || card.type === 'ARTIFACT' || card.type === 'LOCATION') {
+    for (const aura of card.auras ?? []) if (aura.tag !== undefined) tags.push(aura.tag);
+  }
+  return [...new Set(tags)];
 }
 
 export type StatusKind = 'ROOTED' | 'HIDDEN' | 'REVEALED' | 'WARD' | 'ATTACK_MODIFIER';
@@ -310,6 +420,12 @@ export interface CreatureInstance {
   summonedThisTurn: boolean;
   combatActionUsed: boolean;
   statuses: StatusInstance[];
+  /**
+   * How much of `currentAttack` and `maxHealth` auras are lending right now.
+   * Absent when none are. Kept so a bonus can be taken back exactly when its
+   * source leaves.
+   */
+  auraBonus?: { attack: number; health: number };
 }
 
 export interface ArtifactInstance {
@@ -401,6 +517,12 @@ export interface HeroInstance {
 export interface CardInstance {
   instanceId: CardInstanceId;
   definitionId: string;
+  /**
+   * What the card costs now, when an aura has changed that. Absent means its
+   * printed cost. A view for clients, refreshed as the match resolves; the
+   * engine itself always works the cost out afresh.
+   */
+  cost?: number;
 }
 
 export interface Battlefield {
@@ -467,6 +589,14 @@ export interface MatchSetup {
   players: readonly [PlayerSetup, PlayerSetup];
   /** Pinned definitions make matches and exported replays independent of later publications. */
   content?: CardContentSnapshot;
+  /**
+   * The cards random effects may produce — "summon a random Beast". Every id
+   * must be in `content`. The server passes only what players may see, so a
+   * random pick never reveals a card from an unreleased expansion; absent,
+   * every card in `content` may be drawn. Part of the setup, so a replay
+   * draws from the same pool.
+   */
+  randomPool?: string[];
 }
 
 export interface PlayerSetup {

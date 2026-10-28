@@ -147,7 +147,7 @@ func _deck_with_weapons() -> Array:
 	var deck: Array = []
 	for id in [
 		"iron_sword", "hunting_bow", "war_axe", "longbow", "rusty_dagger",
-		"wolf", "brown_bear", "hawk", "giant_rat", "hunting_spider",
+		"chicken", "brown_bear", "hawk", "giant_rat", "hunting_spider",
 		# The Mender is a Priest, so the deck holds Priest and neutral cards only.
 		"elf_archer", "dwarf_defender", "human_mercenary", "field_medic",
 		"maintenance_anima",

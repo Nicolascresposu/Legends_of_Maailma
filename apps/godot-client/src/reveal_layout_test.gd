@@ -21,6 +21,7 @@ const TALL := {
 	"keywords": ["GUARD", "ARRIVAL", "WARD", "LIFESTEAL"],
 	"description": "**Guard**, **Ward**, **Lifesteal**\n**Arrival:** Give adjacent friendly Creatures +1 Health, then give every other friendly Creature +1 Attack until the end of your turn, and restore 2 Health to your Hero for each Creature that was given Health this way.",
 	"flavour": "The wall is only as strong as the one who stands beside you, and the one beside them, and the one beside them in turn, all the way down the line.",
+	"artist": "Aino Virtanen",
 }
 
 var failures: Array[String] = []
@@ -45,10 +46,12 @@ func _init() -> void:
 	await _wait(CardReveal.DELAY + 0.1)
 	_check("the short card is revealed", reveal.is_revealing())
 	_check("the short card stays on screen", await _stays_on_screen(reveal, view))
+	_check("a card with no art credit shows none", not reveal._artist.visible)
 
 	# Swapping while one is up reveals immediately — no dwell to hide behind.
 	reveal.request("tall", {"definition_id": "tall_card"}, anchor)
 	_check("the tall card replaces it", reveal.is_revealing() and reveal._shown_key == "tall")
+	_check("the art credit is shown", reveal._artist.visible and reveal._artist.text == "Art: Aino Virtanen")
 	_check("the tall card stays on screen", await _stays_on_screen(reveal, view))
 	# On screen is not enough: an oversized panel clamped to the top would pass
 	# that check while trailing empty space off the bottom.

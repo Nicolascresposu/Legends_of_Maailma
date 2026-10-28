@@ -39,7 +39,7 @@ describe('classes', () => {
     expect(getCardDefinition('healing_potion').classId).toBe('PRIEST');
     expect(getCardDefinition('field_medic').classId).toBe('PRIEST');
     // Everything else is neutral.
-    expect(getCardDefinition('wolf').classId).toBeUndefined();
+    expect(getCardDefinition('chicken').classId).toBeUndefined();
   });
 
   it('accepts neutral and own-class cards in a deck of that class', () => {
@@ -132,7 +132,7 @@ describe('match creation by class', () => {
     const manager = new MatchManager();
     const neutral = [
       ...starterDeckFor('healer').filter(
-        (id) => getCardDefinition(id).classId === undefined && id !== 'wolf',
+        (id) => getCardDefinition(id).classId === undefined && id !== 'chicken',
       ),
     ];
     // 26 neutral cards less the two Wolves, topped up with neutral spares.
@@ -142,8 +142,8 @@ describe('match creation by class', () => {
       'warden_sentinel',
       'longbow',
       'longbow',
-      'wolf',
-      'wolf',
+      'chicken',
+      'chicken',
     ];
     expect(deck).toHaveLength(30);
     const engine = manager.create({
@@ -275,7 +275,7 @@ describe('Basic cards in the live economy', () => {
       disenchantable: false,
     });
     // An ordinary card from the same expansion still is both.
-    const wolf = cards.find((card) => card.cardId === 'wolf')!;
+    const wolf = cards.find((card) => card.cardId === 'chicken')!;
     expect(wolf).toMatchObject({ craftable: true, disenchantable: true });
     expect(cards.find((card) => card.cardId === 'firebolt')!.classId).toBe('WIZARD');
   });
@@ -307,11 +307,11 @@ describe('Basic cards in the live economy', () => {
       message: 'Brown Bear is a Basic card and cannot be traded',
     });
     // An ordinary card from the same expansion can still be offered.
-    const offered = await trades.updateOffer(a, trade.id, [{ cardId: 'wolf', quantity: 1 }]);
+    const offered = await trades.updateOffer(a, trade.id, [{ cardId: 'chicken', quantity: 1 }]);
     expect(offered.revision).toBeGreaterThan(trade.revision);
     const listed = await collections.browse(a);
     expect(listed.find((card) => card.cardId === BASIC_CARD)!.tradeable).toBe(false);
-    expect(listed.find((card) => card.cardId === 'wolf')!.tradeable).toBe(true);
+    expect(listed.find((card) => card.cardId === 'chicken')!.tradeable).toBe(true);
   });
 
   it("reports another class's cards in a deck's readiness", async () => {

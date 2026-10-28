@@ -85,6 +85,19 @@ const SCHEMA = {
 			],
 			"additionalProperties": false
 		},
+		"tag": {
+			"type": "string",
+			"pattern": "S"
+		},
+		"cardType": {
+			"enum": [
+				"CREATURE",
+				"ACTION",
+				"ARTIFACT",
+				"WEAPON",
+				"LOCATION"
+			]
+		},
 		"target": {
 			"enum": [
 				"PLAY_TARGET",
@@ -94,9 +107,58 @@ const SCHEMA = {
 				"RANDOM_ENEMY_CREATURE",
 				"ALL_ENEMY_CREATURES",
 				"ADJACENT_FRIENDLY_CREATURES",
+				"ALL_FRIENDLY_CREATURES",
+				"OTHER_FRIENDLY_CREATURES",
+				"RANDOM_OTHER_FRIENDLY_CREATURE",
+				"TRIGGERING_CREATURE",
 				"FRIENDLY_WEAPON",
 				"ENEMY_WEAPON"
 			]
+		},
+		"condition": {
+			"oneOf": [
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"const": "CONTROLS_CREATURE"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"atLeast": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					"required": [
+						"type"
+					],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"const": "HOLDS_CARD"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"cardType": {
+							"$ref": "#/definitions/cardType"
+						}
+					},
+					"required": [
+						"type"
+					],
+					"additionalProperties": false
+				}
+			],
+			"type": "object",
+			"discriminator": {
+				"propertyName": "type"
+			}
 		},
 		"effect": {
 			"oneOf": [
@@ -112,6 +174,12 @@ const SCHEMA = {
 						},
 						"target": {
 							"$ref": "#/definitions/target"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -133,6 +201,12 @@ const SCHEMA = {
 						},
 						"target": {
 							"$ref": "#/definitions/target"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -151,6 +225,9 @@ const SCHEMA = {
 						"amount": {
 							"type": "integer",
 							"minimum": 0
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -173,6 +250,12 @@ const SCHEMA = {
 						},
 						"target": {
 							"$ref": "#/definitions/target"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -204,6 +287,12 @@ const SCHEMA = {
 						},
 						"target": {
 							"$ref": "#/definitions/target"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -225,6 +314,9 @@ const SCHEMA = {
 						},
 						"position": {
 							"$ref": "#/definitions/position"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -237,13 +329,40 @@ const SCHEMA = {
 					"type": "object",
 					"properties": {
 						"type": {
+							"const": "SUMMON_RANDOM"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"position": {
+							"$ref": "#/definitions/position"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
+						}
+					},
+					"required": [
+						"type"
+					],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
 							"const": "MOVE"
 						},
 						"target": {
 							"$ref": "#/definitions/target"
 						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
 						"destination": {
 							"$ref": "#/definitions/position"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -261,6 +380,12 @@ const SCHEMA = {
 						},
 						"target": {
 							"$ref": "#/definitions/target"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -278,6 +403,9 @@ const SCHEMA = {
 						"amount": {
 							"type": "integer",
 							"minimum": 0
+						},
+						"condition": {
+							"$ref": "#/definitions/condition"
 						}
 					},
 					"required": [
@@ -300,8 +428,13 @@ const SCHEMA = {
 						"ARRIVAL",
 						"LAST_BREATH",
 						"TURN_STARTED",
-						"TURN_ENDED"
+						"TURN_ENDED",
+						"FRIENDLY_CREATURE_SUMMONED",
+						"FRIENDLY_CREATURE_DIED"
 					]
+				},
+				"tag": {
+					"$ref": "#/definitions/tag"
 				},
 				"effect": {
 					"$ref": "#/definitions/effect"
@@ -312,6 +445,68 @@ const SCHEMA = {
 				"effect"
 			],
 			"additionalProperties": false
+		},
+		"aura": {
+			"oneOf": [
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"const": "STAT_AURA"
+						},
+						"attack": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"health": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"target": {
+							"enum": [
+								"OTHER_FRIENDLY_CREATURES",
+								"ADJACENT_FRIENDLY_CREATURES"
+							]
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						}
+					},
+					"required": [
+						"type",
+						"attack",
+						"health",
+						"target"
+					],
+					"additionalProperties": false
+				},
+				{
+					"type": "object",
+					"properties": {
+						"type": {
+							"const": "COST_AURA"
+						},
+						"amount": {
+							"type": "integer"
+						},
+						"tag": {
+							"$ref": "#/definitions/tag"
+						},
+						"cardType": {
+							"$ref": "#/definitions/cardType"
+						}
+					},
+					"required": [
+						"type",
+						"amount"
+					],
+					"additionalProperties": false
+				}
+			],
+			"type": "object",
+			"discriminator": {
+				"propertyName": "type"
+			}
 		},
 		"card": {
 			"oneOf": [
@@ -357,10 +552,13 @@ const SCHEMA = {
 							"pattern": "\\S"
 						},
 						"description": {
+							"type": "string"
+						},
+						"flavour": {
 							"type": "string",
 							"pattern": "\\S"
 						},
-						"flavour": {
+						"artist": {
 							"type": "string",
 							"pattern": "\\S"
 						},
@@ -403,6 +601,12 @@ const SCHEMA = {
 							"type": "array",
 							"items": {
 								"$ref": "#/definitions/triggeredEffect"
+							}
+						},
+						"auras": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/aura"
 							}
 						}
 					},
@@ -466,10 +670,13 @@ const SCHEMA = {
 							"pattern": "\\S"
 						},
 						"description": {
+							"type": "string"
+						},
+						"flavour": {
 							"type": "string",
 							"pattern": "\\S"
 						},
-						"flavour": {
+						"artist": {
 							"type": "string",
 							"pattern": "\\S"
 						},
@@ -485,6 +692,9 @@ const SCHEMA = {
 								"FRIENDLY_CREATURE",
 								"ENEMY_CREATURE"
 							]
+						},
+						"targetTag": {
+							"$ref": "#/definitions/tag"
 						},
 						"effects": {
 							"type": "array",
@@ -550,10 +760,13 @@ const SCHEMA = {
 							"pattern": "\\S"
 						},
 						"description": {
+							"type": "string"
+						},
+						"flavour": {
 							"type": "string",
 							"pattern": "\\S"
 						},
-						"flavour": {
+						"artist": {
 							"type": "string",
 							"pattern": "\\S"
 						},
@@ -568,6 +781,12 @@ const SCHEMA = {
 							"type": "array",
 							"items": {
 								"$ref": "#/definitions/triggeredEffect"
+							}
+						},
+						"auras": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/aura"
 							}
 						}
 					},
@@ -628,10 +847,13 @@ const SCHEMA = {
 							"pattern": "\\S"
 						},
 						"description": {
+							"type": "string"
+						},
+						"flavour": {
 							"type": "string",
 							"pattern": "\\S"
 						},
-						"flavour": {
+						"artist": {
 							"type": "string",
 							"pattern": "\\S"
 						},
@@ -726,10 +948,13 @@ const SCHEMA = {
 							"pattern": "\\S"
 						},
 						"description": {
+							"type": "string"
+						},
+						"flavour": {
 							"type": "string",
 							"pattern": "\\S"
 						},
-						"flavour": {
+						"artist": {
 							"type": "string",
 							"pattern": "\\S"
 						},
@@ -757,6 +982,9 @@ const SCHEMA = {
 										"ENEMY_CREATURE"
 									]
 								},
+								"targetTag": {
+									"$ref": "#/definitions/tag"
+								},
 								"effects": {
 									"type": "array",
 									"items": {
@@ -775,6 +1003,12 @@ const SCHEMA = {
 							"type": "array",
 							"items": {
 								"$ref": "#/definitions/triggeredEffect"
+							}
+						},
+						"auras": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/aura"
 							}
 						}
 					},
@@ -888,8 +1122,256 @@ const SCHEMA = {
 			"items": {
 				"$ref": "#/definitions/pack"
 			}
+		},
+		"starterDeck": {
+			"type": "object",
+			"description": "A class's starter deck: what a new account is given, and what a side plays when it brings no deck.",
+			"properties": {
+				"id": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"name": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"classId": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"expansionId": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"cards": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"cardId": {
+								"type": "string",
+								"pattern": "\\S"
+							},
+							"copies": {
+								"type": "integer",
+								"minimum": 1
+							}
+						},
+						"required": [
+							"cardId",
+							"copies"
+						],
+						"additionalProperties": false
+					},
+					"minItems": 1
+				}
+			},
+			"required": [
+				"id",
+				"name",
+				"classId",
+				"expansionId",
+				"cards"
+			],
+			"additionalProperties": false
+		},
+		"starterDecks": {
+			"type": "array",
+			"items": {
+				"$ref": "#/definitions/starterDeck"
+			}
+		},
+		"scenarioSide": {
+			"type": "object",
+			"properties": {
+				"heroDefinitionId": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"heroHealth": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"startingTaika": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"maxTaika": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"controller": {
+					"enum": [
+						"HUMAN",
+						"AI",
+						"SCRIPTED"
+					]
+				},
+				"startingCards": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "\\S"
+					}
+				},
+				"startingCreatures": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"definitionId": {
+								"type": "string",
+								"pattern": "\\S"
+							},
+							"position": {
+								"$ref": "#/definitions/position"
+							}
+						},
+						"required": [
+							"definitionId",
+							"position"
+						],
+						"additionalProperties": false
+					}
+				},
+				"startingLocations": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"definitionId": {
+								"type": "string",
+								"pattern": "\\S"
+							},
+							"position": {
+								"$ref": "#/definitions/position"
+							}
+						},
+						"required": [
+							"definitionId",
+							"position"
+						],
+						"additionalProperties": false
+					}
+				},
+				"startingArtifacts": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"pattern": "\\S"
+					}
+				},
+				"startingWeapon": {
+					"type": "string",
+					"pattern": "\\S"
+				}
+			},
+			"required": [
+				"heroDefinitionId",
+				"heroHealth",
+				"startingTaika",
+				"maxTaika"
+			],
+			"additionalProperties": false
+		},
+		"scenario": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"name": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"expansionId": {
+					"type": "string",
+					"pattern": "\\S"
+				},
+				"battlefield": {
+					"type": "object",
+					"properties": {
+						"width": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					"required": [
+						"width"
+					],
+					"additionalProperties": false
+				},
+				"sideA": {
+					"$ref": "#/definitions/scenarioSide"
+				},
+				"sideB": {
+					"$ref": "#/definitions/scenarioSide"
+				},
+				"victoryConditions": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"type": {
+								"enum": [
+									"ENEMY_HERO_DEFEATED",
+									"CUSTOM"
+								]
+							},
+							"key": {
+								"type": "string",
+								"pattern": "\\S"
+							}
+						},
+						"required": [
+							"type"
+						],
+						"additionalProperties": false
+					}
+				},
+				"defeatConditions": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"type": {
+								"enum": [
+									"ENEMY_HERO_DEFEATED",
+									"CUSTOM"
+								]
+							},
+							"key": {
+								"type": "string",
+								"pattern": "\\S"
+							}
+						},
+						"required": [
+							"type"
+						],
+						"additionalProperties": false
+					}
+				}
+			},
+			"required": [
+				"id",
+				"name",
+				"expansionId",
+				"battlefield",
+				"sideA",
+				"sideB"
+			],
+			"additionalProperties": false
+		},
+		"scenarios": {
+			"type": "array",
+			"items": {
+				"$ref": "#/definitions/scenario"
+			}
 		}
 	}
 }
 
 const CLASSES = ["PRIEST","WIZARD"]
+
+const HEROES = ["healer","striker"]

@@ -7,37 +7,43 @@ extends SceneTree
 ## Run it windowed with `-- --screenshot-dir=<dir>` to save what it drew.
 
 const WOLF := {
-	"id": "wolf", "name": "Wolf", "type": "CREATURE", "cost": 2,
+	"id": "chicken", "name": "Wolf", "type": "CREATURE", "cost": 2, "rarity": "COMMON",
 	"attack": 2, "health": 3, "tags": ["BEAST"], "keywords": ["SWIFT"],
 	"description": "**Swift**",
 }
 const NO_ART := {
-	"id": "nameless_recruit", "name": "Nameless Recruit", "type": "CREATURE", "cost": 1,
+	"id": "nameless_recruit", "name": "Nameless Recruit", "type": "CREATURE", "cost": 1, "rarity": "BASIC",
 	"attack": 1, "health": 1, "tags": [], "keywords": [],
 	"description": "No special abilities.",
 }
 const WORDY := {
-	"id": "wordy_warden", "name": "A Card With Rather A Lot To Say", "type": "CREATURE", "cost": 4,
+	"id": "wordy_warden", "name": "A Card With Rather A Lot To Say", "type": "CREATURE", "cost": 4, "rarity": "LEGENDARY",
 	"attack": 3, "health": 4, "tags": ["HUMAN"],
 	"keywords": ["GUARD", "ARRIVAL", "WARD", "LIFESTEAL"],
 	"description": "**Guard**, **Ward**, **Lifesteal**\n**Arrival:** Give adjacent friendly Creatures +1 Health, then give every other friendly Creature +1 Attack until the end of your turn, and restore 2 Health to your Hero for each Creature that was given Health this way.",
 }
+## A description of the length that used to leave the box's sides empty.
+const MERCY := {
+	"id": "mercy", "name": "Mercy-4", "type": "CREATURE", "cost": 4, "rarity": "EPIC",
+	"attack": 3, "health": 4, "tags": ["ANIMA", "CONSTRUCT"], "keywords": [],
+	"description": "**Last Breath:** Restore 2 Health to your Hero and deal 1 damage to a random opponent.",
+}
 const SPELL := {
-	"id": "firebolt", "name": "Firebolt", "type": "ACTION", "cost": 1,
+	"id": "firebolt", "name": "Firebolt", "type": "ACTION", "cost": 1, "rarity": "RARE",
 	"tags": [], "keywords": [], "description": "Deal 2 damage.",
 }
 const WEAPON := {
-	"id": "longbow", "name": "Longbow", "type": "WEAPON", "cost": 3,
-	"attack": 2, "durability": 3, "range": "RANGED", "tags": [],
+	"id": "longbow", "name": "Longbow", "type": "WEAPON", "cost": 3, "rarity": "EPIC",
+	"attack": 2, "durability": 3, "range": "RANGED", "tags": ["BOW"],
 	"description": "**Ranged**",
 }
 const ARTIFACT := {
-	"id": "totem", "name": "Totem", "type": "ARTIFACT", "cost": 2,
+	"id": "totem", "name": "Totem", "type": "ARTIFACT", "cost": 2, "rarity": "COMMON",
 	"durability": 3, "tags": [], "description": "At the end of your turn, heal 1.",
 }
 ## A Location with both measures, and one with each alone.
 const LOCATION := {
-	"id": "old_keep", "name": "The Old Keep", "type": "LOCATION", "cost": 3,
+	"id": "old_keep", "name": "The Old Keep", "type": "LOCATION", "cost": 3, "rarity": "RARE",
 	"durability": 2, "duration": 3,
 	"tags": [], "description": "Give adjacent friendly Creatures +1 Health.",
 }
@@ -65,10 +71,12 @@ func _init() -> void:
 	print("== card frame test ==")
 	var library := CardLibrary.new()
 	library.ingest([
-		WOLF, NO_ART, WORDY, SPELL, WEAPON, ARTIFACT, LOCATION, TIMED_LOCATION, SHIELDED_LOCATION, UNKNOWN,
+		WOLF, NO_ART, WORDY, MERCY, SPELL, WEAPON, ARTIFACT, LOCATION, TIMED_LOCATION, SHIELDED_LOCATION, UNKNOWN,
+		{"id": "lio_like", "name": "Lio", "type": "CREATURE", "cost": 3, "attack": 2, "health": 3,
+			"tags": ["DWARF", "MECHANIC", "REBEL"], "keywords": [], "description": "None."},
 	])
 
-	_check("creatures are framed", CardFrame.supports(library, "wolf"))
+	_check("creatures are framed", CardFrame.supports(library, "chicken"))
 	_check("spells are framed", CardFrame.supports(library, "firebolt"))
 	_check("weapons are framed", CardFrame.supports(library, "longbow"))
 	_check("artifacts are framed", CardFrame.supports(library, "totem"))
@@ -82,7 +90,7 @@ func _init() -> void:
 
 	# A creature in play: live stats, hurt and buffed.
 	var hurt := CardFrame.make(library, {
-		"definition_id": "wolf", "attack": 3, "health": 1, "max_health": 3, "marks": "sick",
+		"definition_id": "chicken", "attack": 3, "health": 1, "max_health": 3, "marks": "sick",
 	}, BOARD_WIDTH)
 	row.add_child(hurt)
 	# A hand card with no live stats, which the player cannot pay for.
@@ -90,7 +98,7 @@ func _init() -> void:
 	row.add_child(printed)
 	var crowded := CardFrame.make(library, {"definition_id": "wordy_warden"}, BOARD_WIDTH)
 	row.add_child(crowded)
-	var revealed := CardFrame.make(library, {"definition_id": "wolf"}, REVEAL_WIDTH, true)
+	var revealed := CardFrame.make(library, {"definition_id": "chicken"}, REVEAL_WIDTH, true)
 	row.add_child(revealed)
 	var revealed_wordy := CardFrame.make(library, {"definition_id": "wordy_warden"}, REVEAL_WIDTH, true)
 	row.add_child(revealed_wordy)
@@ -160,11 +168,48 @@ func _init() -> void:
 	_check("a detailed card prints its description",
 		revealed._text.get_parsed_text().contains("Swift") and revealed.rules_fit)
 	_check("a description too long for the box says so", not revealed_wordy.rules_fit)
+	var mercy := CardFrame.make(library, {"definition_id": "mercy"}, REVEAL_WIDTH, true)
+	row.add_child(mercy)
+	await process_frame
+	_check("a description of a few lines fits the box", mercy.rules_fit)
+	_check("the rules run wider than the old box between the badges",
+		_widest_line(mercy) > mercy._frame.size.x * 0.5)
+	_check("the label draws the lines as they were broken",
+		mercy._text.get_line_count() == mercy._text.get_parsed_text().split("\n").size())
+	for card: CardFrame in [mercy, revealed_wordy, crowded]:
+		_check("%s's lines keep clear of the badges" % card._name.text, _lines_clear_badges(card))
+	_check("the rules start no higher than the box", mercy._text_margin.content_margin_top >= 0.0)
+	var wordy_size := revealed_wordy._text.get_theme_font_size("normal_font_size")
+	var wordy_lines := revealed_wordy._text.get_parsed_text().split("\n")
+	_check("a description too long for the box shrinks until every word of it is on the card",
+		" ".join(revealed_wordy._text.get_parsed_text().split("\n")).replace("  ", " ")
+				== library.description_plain("wordy_warden").replace("\n", " ")
+			and wordy_size < CardFrame.MIN_RULES_SIZE
+			and revealed_wordy._text_margin.content_margin_top
+				+ wordy_lines.size() * revealed_wordy._text.get_theme_font("normal_font").get_height(wordy_size)
+				<= revealed_wordy._text.size.y + 0.5
+			and revealed_wordy._text.get_line_count() == wordy_lines.size())
 	_check("the frame takes no pointer input", _ignores_mouse(hurt))
 	# The creature image has a clear margin below the card and none above it;
 	# it is the card, not the image, that is centred.
 	_check("a creature's body fills the card's height, centred", _fills(hurt, false))
 	_check("the art oval is reported where it is drawn", hurt.art_rect() == hurt._art.get_rect())
+	var box := CardFrame._region(CardFrame.TEXT_BOX, revealed._frame.get_rect())
+	# The rules end where the tags' band begins; the tags sit centred on that band.
+	var tag_line := revealed._tags.get_rect().get_center().y
+	_check("a card's tags print along the bottom of its text box",
+		revealed._tags.visible and revealed._tags.text == "Beast"
+			and tag_line > revealed._text.get_rect().end.y and tag_line < box.end.y
+			and is_equal_approx(
+				tag_line, (revealed._text.get_rect().end.y + box.end.y) * 0.5))
+	_check("a small card prints its tags too", hurt._tags.visible and hurt._tags.text == "Beast")
+	_check("a Weapon's tags are not printed", not revealed_weapon._tags.visible and library.tags("longbow") == ["BOW"])
+	_check("a card without tags prints none, and its rules keep the whole box",
+		not printed._tags.visible
+			and printed._text.get_rect().is_equal_approx(
+				CardFrame._region(CardFrame.TEXT_BOX, printed._frame.get_rect())))
+	_check("several tags print on one line, as words",
+		library.tag_line("lio_like") == "Dwarf · Mechanic · Rebel")
 
 	_check("a spell keeps the card's shape",
 		is_equal_approx(roundf(BOARD_WIDTH / CardFrame.ASPECT), spell.size.y))
@@ -229,6 +274,30 @@ func _init() -> void:
 	_check("a detailed location prints its description",
 		revealed_location._text.get_parsed_text().contains("+1 Health"))
 
+	var gems := {"COMMON": hurt, "RARE": spell, "EPIC": worn, "LEGENDARY": crowded}
+	for rarity: String in gems:
+		var gem: TextureRect = gems[rarity]._rarity
+		_check("a %s card shows its own gem" % rarity.capitalize(),
+			gem.visible and gem.texture != null
+				and gem.texture == CardFrame._texture(CardFrame.RARITY_GEM_PATHS[rarity]))
+	_check("each rarity has a gem of its own",
+		hurt._rarity.texture != spell._rarity.texture and spell._rarity.texture != worn._rarity.texture
+			and worn._rarity.texture != crowded._rarity.texture)
+	_check("the gem is drawn over the name and the text",
+		hurt._rarity.get_index() > hurt._name.get_index() and hurt._rarity.get_index() > hurt._text.get_index()
+			and hurt._rarity.get_index() > hurt._tags.get_index())
+	_check("a Basic card prints no gem", not printed._rarity.visible)
+	_check("a card of unknown rarity prints no gem", not shielded._rarity.visible)
+	# Centred across the card, on the seam between the name and the text box.
+	for card: CardFrame in [hurt, revealed, spell, worn, spent, location]:
+		var at := card._rarity.position + CardFrame.RARITY_CENTRE * card._rarity.size
+		var layout: Dictionary = CardFrame.LAYOUTS[card._kind]
+		var frame := card._frame.get_rect()
+		_check("the %s gem sits in the middle, between name and text" % card._kind.to_lower(),
+			absf(at.x - card.size.x * 0.5) < 1.0
+				and at.y > CardFrame._region(layout["name"], frame).get_center().y
+				and at.y < CardFrame._region(layout["text"], frame).position.y)
+
 	var shots := _arg("--screenshot-dir=")
 	if shots != "" and DisplayServer.get_name() != "headless":
 		await RenderingServer.frame_post_draw
@@ -250,6 +319,37 @@ func _fills(card: CardFrame, across: bool) -> bool:
 	if across:
 		return centred and absf(body.size.x - card.size.x) < 0.5 and body.size.y <= card.size.y + 0.5
 	return centred and absf(body.size.y - card.size.y) < 0.5 and body.size.x <= card.size.x + 0.5
+
+## The widest line of `card`'s rules, measured in the bold face so emphasis
+## never makes a line look narrower than it is.
+func _widest_line(card: CardFrame) -> float:
+	var font := card._text.get_theme_font("bold_font")
+	var size := card._text.get_theme_font_size("normal_font_size")
+	var widest := 0.0
+	for line in card._text.get_parsed_text().split("
+"):
+		widest = maxf(widest, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x)
+	return widest
+
+## Whether every line of `card`'s rules is no wider than the box allows at the
+## height it is drawn: the narrower width beside the badges.
+func _lines_clear_badges(card: CardFrame) -> bool:
+	var layout: Dictionary = CardFrame.LAYOUTS[card._kind]
+	var box := card._text.get_rect()
+	var size := card._text.get_theme_font_size("normal_font_size")
+	var line_height := card._text.get_theme_font("normal_font").get_height(size)
+	var top := box.position.y + card._text_margin.content_margin_top
+	var lines := card._text.get_parsed_text().split("\n")
+	var font := card._text.get_theme_font("normal_font")
+	for index in lines.size():
+		var line_top := top + index * line_height
+		var allowed := box.size.x
+		for step: Rect2 in layout["narrow"]:
+			if line_top + line_height * 0.8 > CardFrame._region(step, card._frame.get_rect()).position.y:
+				allowed = CardFrame._region(step, card._frame.get_rect()).size.x
+		if font.get_string_size(lines[index], HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > allowed:
+			return false
+	return true
 
 func _ignores_mouse(node: Node) -> bool:
 	if node is Control and (node as Control).mouse_filter != Control.MOUSE_FILTER_IGNORE:

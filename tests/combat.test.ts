@@ -6,14 +6,14 @@ describe('melee and ranged targeting', () => {
   it('lets a front-row melee Creature attack any enemy front column', () => {
     for (const column of [0, 1, 2]) {
       const engine = makeEngine({
-        a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 1 } }],
+        a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 1 } }],
         b: [{ definitionId: 'brown_bear', position: { row: 'FRONT', column } }],
       });
       expect(
         engine.dispatch({
           type: 'ATTACK',
           actorId: 'a',
-          attackerId: creatureId(engine, 'a', 'wolf'),
+          attackerId: creatureId(engine, 'a', 'chicken'),
           targetId: creatureId(engine, 'b', 'brown_bear'),
         }).ok,
       ).toBe(true);
@@ -22,14 +22,14 @@ describe('melee and ranged targeting', () => {
 
   it('rejects a normal back-row attacker', () => {
     const engine = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'BACK', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'BACK', column: 0 } }],
       b: [{ definitionId: 'brown_bear', position: { row: 'FRONT', column: 0 } }],
     });
     expect(
       engine.dispatch({
         type: 'ATTACK',
         actorId: 'a',
-        attackerId: creatureId(engine, 'a', 'wolf'),
+        attackerId: creatureId(engine, 'a', 'chicken'),
         targetId: creatureId(engine, 'b', 'brown_bear'),
       }).error?.code,
     ).toBe('BACK_ROW_MELEE');
@@ -37,7 +37,7 @@ describe('melee and ranged targeting', () => {
 
   it('protects a back-row target only when its same-column front tile is occupied', () => {
     const shielded = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
       b: [
         { definitionId: 'hawk', position: { row: 'BACK', column: 2 } },
         { definitionId: 'brown_bear', position: { row: 'FRONT', column: 2 } },
@@ -47,20 +47,20 @@ describe('melee and ranged targeting', () => {
       shielded.dispatch({
         type: 'ATTACK',
         actorId: 'a',
-        attackerId: creatureId(shielded, 'a', 'wolf'),
+        attackerId: creatureId(shielded, 'a', 'chicken'),
         targetId: creatureId(shielded, 'b', 'hawk'),
       }).error?.code,
     ).toBe('BACK_ROW_PROTECTED');
 
     const exposed = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
       b: [{ definitionId: 'hawk', position: { row: 'BACK', column: 2 } }],
     });
     expect(
       exposed.dispatch({
         type: 'ATTACK',
         actorId: 'a',
-        attackerId: creatureId(exposed, 'a', 'wolf'),
+        attackerId: creatureId(exposed, 'a', 'chicken'),
         targetId: creatureId(exposed, 'b', 'hawk'),
       }).ok,
     ).toBe(true);
@@ -88,14 +88,14 @@ describe('melee and ranged targeting', () => {
 
   it('allows attacks on the enemy Hero while ordinary enemy Creatures remain', () => {
     const engine = makeEngine({
-      a: [{ definitionId: 'wolf', position: { row: 'FRONT', column: 0 } }],
+      a: [{ definitionId: 'chicken', position: { row: 'FRONT', column: 0 } }],
       b: [{ definitionId: 'brown_bear', position: { row: 'FRONT', column: 0 } }],
     });
     expect(
       engine.dispatch({
         type: 'ATTACK',
         actorId: 'a',
-        attackerId: creatureId(engine, 'a', 'wolf'),
+        attackerId: creatureId(engine, 'a', 'chicken'),
         targetId: heroEntityId('b'),
       }).ok,
     ).toBe(true);
